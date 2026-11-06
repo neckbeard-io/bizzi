@@ -8,6 +8,7 @@ import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
 import { loadAdapters } from './adapters.ts';
 import { createKnowledgeHook } from './knowledge.ts';
+import { startHubLink } from './link.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
 
 export const SERVE_HELP = `Usage: bizzi serve [options]
@@ -20,6 +21,8 @@ export const SERVE_HELP = `Usage: bizzi serve [options]
   --fake               add scripted fake adapters (for manual testing)
   --no-knowledge       don't inject rules, memory or the bizzi-memory MCP server
   --log-level <level>  debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
+  --connect <url>      link to a hub (default: $BIZZI_HUB_URL, else the URL saved by "bizzi pair");
+                       with no saved credential, $BIZZI_PAIR_CODE pairs on first start
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
 SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting.`;
@@ -51,6 +54,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
       fake: { type: 'boolean', default: false },
       'no-knowledge': { type: 'boolean', default: false },
       'log-level': { type: 'string' },
+      connect: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
     strict: true,
@@ -111,6 +115,8 @@ export async function serve(argv: string[], version: string): Promise<void> {
   process.on('exit', removeServeJson);
   process.stdout.write(JSON.stringify(ready) + '\n');
   logger.log('info', 'node ready', { url: server.url, machineId: node.machine.id, dataDir, adapters: adapters.length });
+  const hubUrl = values.connect || process.env.BIZZI_HUB_URL || undefined;
+  const hubLink = startHubLink(node, { dataDir, url: hubUrl, pairCode: process.env.BIZZI_PAIR_CODE || undefined, logger });
 
   let shuttingDown = false;
   const shutdown = async (signal: NodeJS.Signals) => {
@@ -124,6 +130,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
     try {
       const drained = await node.drain(drainSeconds * 1000);
       if (!drained) logger.log('warn', 'drain timed out; stopping running turns', { activeTurns: node.sessions.activeTurns() });
+      await hubLink?.close();
       await server.close();
       await node.close();
       logger.log('info', 'stopped');

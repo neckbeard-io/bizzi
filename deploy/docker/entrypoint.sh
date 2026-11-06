@@ -4,8 +4,8 @@
 #    agents write to bind-mounted /workspaces belong to your host user.
 #  - /data and /home/bizzi are chowned to that user (recursively only when the owner changed).
 #  - starts a virtual X display (Xvfb on $DISPLAY) for headed browsers/GUI tools, unless BIZZI_XVFB=0.
-#  - then execs the command (default: `node apps/cli/src/main.ts serve ...`) as `bizzi` via gosu.
-#    BIZZI_TOKEN and the rest of the environment pass through unchanged.
+#  - then execs the command (node: `node apps/cli/src/main.ts serve ...`, hub: `... hub serve ...`) as
+#    `bizzi` via gosu. BIZZI_TOKEN, BIZZI_PAIR_CODE and the rest of the environment pass through unchanged.
 set -eu
 
 PUID="${PUID:-1000}"
@@ -38,8 +38,8 @@ else
   run_as() { exec "$@"; }
 fi
 
-if [ -z "${BIZZI_TOKEN:-}" ]; then
-  log "warning: BIZZI_TOKEN is not set; the node listens on 0.0.0.0 inside the container"
+if [ "${BIZZI_ROLE:-node}" != "hub" ] && [ -z "${BIZZI_TOKEN:-}" ]; then
+  log "BIZZI_TOKEN is not set; the node's own /ws endpoint uses a random token (clients go through the hub)"
 fi
 
 if [ "${BIZZI_XVFB:-1}" != "0" ] && command -v Xvfb >/dev/null 2>&1; then

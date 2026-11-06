@@ -1,9 +1,8 @@
 # bizzi on Linux (topology.md §2.2). Copy .env.example to .env, then:
 #   docker compose up -d --build                    # hub + node
 #   docker compose --profile containers up -d       # + dind sidecar for container workspaces
-# On agent-only machines drop the `hub` service and point BIZZI_HUB_URL at wss://<your hub>/ws/node.
-#
-# NOTE: the hub role is not implemented yet; `hub` runs a placeholder (see README.md).
+# First run (pairing the browser, then the node): see README.md.
+# On agent-only machines drop the `hub` service and set BIZZI_HUB_URL=wss://<your hub>/ws/node.
 
 name: bizzi
 
@@ -18,12 +17,18 @@ services:
       args:
         BIZZI_NODE_IMAGE: bizzi-node
     restart: unless-stopped
+    command: ["node", "apps/cli/src/main.ts", "hub", "serve", "--host", "0.0.0.0", "--port", "7777", "--data-dir", "/data"]
     environment:
       BIZZI_PUBLIC_URL: ${BIZZI_PUBLIC_URL:-https://bizzi.example.com}
+      BIZZI_NTFY_URL: ${BIZZI_NTFY_URL:-}       # optional push: https://ntfy.sh/<your-secret-topic>
+      BIZZI_NTFY_TOKEN: ${BIZZI_NTFY_TOKEN:-}
+      PUID: ${PUID:-1000}
+      PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}
     volumes:
-      - hub-data:/data                      # sqlite, event-log replica, blobs
+      - hub-data:/data                      # hub.db (devices, tokens, event-log replica), setup-code
     networks: [proxy, internal]             # SWAG/Caddy reaches it on `proxy`; no published ports
+    # ports: ["7777:7777"]                  # only for a first try without a reverse proxy
 
   node:
     image: bizzi/node:${BIZZI_TAG:-latest}  # or your own `FROM bizzi/node` + toolchains
@@ -33,10 +38,23 @@ services:
     restart: unless-stopped
     init: true                              # reap agent and PTY child processes
     stop_grace_period: 2m                   # drain: finish running turns before restart
+    command:
+      - node
+      - apps/cli/src/main.ts
+      - serve
+      - --host
+      - 0.0.0.0
+      - --port
+      - "7777"
+      - --data-dir
+      - /data
+      - --name
+      - ${BIZZI_MACHINE_NAME:-server-a}
+      - --connect
+      - ${BIZZI_HUB_URL:-ws://hub:7777/ws/node}   # agent-only machines: wss://bizzi.example.com/ws/node
     environment:
-      BIZZI_TOKEN: ${BIZZI_TOKEN:?set BIZZI_TOKEN in .env}
-      BIZZI_HUB_URL: ${BIZZI_HUB_URL:-ws://hub:7777/ws/node}
-      BIZZI_MACHINE_NAME: ${BIZZI_MACHINE_NAME:-server-a}
+      BIZZI_TOKEN: ${BIZZI_TOKEN:-}             # optional: direct access to the node's own /ws (random if empty)
+      BIZZI_PAIR_CODE: ${BIZZI_PAIR_CODE:-}     # one-time node code; used only while /data has no hub credential
       PUID: ${PUID:-1000}                   # run as your host user, so bind-mounted files stay yours
       PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}
@@ -45,7 +63,7 @@ services:
       # DOCKER_TLS_VERIFY: "1"
       # DOCKER_CERT_PATH: /certs/client
     volumes:
-      - node-data:/data                     # node sqlite, outbox, encrypted secrets
+      - node-data:/data                     # node sqlite (event log = outbox), hub-credential.json
       - node-home:/home/bizzi               # ADE installs + logins (~/.claude, ~/.codex, ...)
       - ${BIZZI_WORKSPACES:-/srv/bizzi/workspaces}:/workspaces   # visible and editable on the host
       # - dind-certs:/certs:ro              # with `--profile containers`
