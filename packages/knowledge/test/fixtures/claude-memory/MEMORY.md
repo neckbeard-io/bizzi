@@ -1,0 +1,5 @@
+- [Staging database](staging-db.md) — staging Postgres host and port
+- [Prefers small PRs](user-prefs.md) — keep diffs reviewable
+- [Seed script location](seed-script.md) — local path to the seed script
+- [Homebrew postgres](machine-postgres.md) — which psql binary to use
+- The e2e suite needs `REDIS_URL` set or it hangs
