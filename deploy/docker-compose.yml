@@ -1,0 +1,79 @@
+# bizzi on Linux (topology.md §2.2). Copy .env.example to .env, then:
+#   docker compose up -d --build                    # hub + node
+#   docker compose --profile containers up -d       # + dind sidecar for container workspaces
+# On agent-only machines drop the `hub` service and point BIZZI_HUB_URL at wss://<your hub>/ws/node.
+#
+# NOTE: the hub role is not implemented yet; `hub` runs a placeholder (see README.md).
+
+name: bizzi
+
+services:
+  hub:
+    image: bizzi/hub:${BIZZI_TAG:-latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.hub
+      additional_contexts:
+        bizzi-node: service:node            # build on the node image built below
+      args:
+        BIZZI_NODE_IMAGE: bizzi-node
+    restart: unless-stopped
+    environment:
+      BIZZI_PUBLIC_URL: ${BIZZI_PUBLIC_URL:-https://bizzi.example.com}
+      TZ: ${TZ:-UTC}
+    volumes:
+      - hub-data:/data                      # sqlite, event-log replica, blobs
+    networks: [proxy, internal]             # SWAG/Caddy reaches it on `proxy`; no published ports
+
+  node:
+    image: bizzi/node:${BIZZI_TAG:-latest}  # or your own `FROM bizzi/node` + toolchains
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.node
+    restart: unless-stopped
+    init: true                              # reap agent and PTY child processes
+    stop_grace_period: 2m                   # drain: finish running turns before restart
+    environment:
+      BIZZI_TOKEN: ${BIZZI_TOKEN:?set BIZZI_TOKEN in .env}
+      BIZZI_HUB_URL: ${BIZZI_HUB_URL:-ws://hub:7777/ws/node}
+      BIZZI_MACHINE_NAME: ${BIZZI_MACHINE_NAME:-server-a}
+      PUID: ${PUID:-1000}                   # run as your host user, so bind-mounted files stay yours
+      PGID: ${PGID:-1000}
+      TZ: ${TZ:-UTC}
+      # With `--profile containers`, uncomment to use the dind sidecar's Docker daemon:
+      # DOCKER_HOST: tcp://dind:2376
+      # DOCKER_TLS_VERIFY: "1"
+      # DOCKER_CERT_PATH: /certs/client
+    volumes:
+      - node-data:/data                     # node sqlite, outbox, encrypted secrets
+      - node-home:/home/bizzi               # ADE installs + logins (~/.claude, ~/.codex, ...)
+      - ${BIZZI_WORKSPACES:-/srv/bizzi/workspaces}:/workspaces   # visible and editable on the host
+      # - dind-certs:/certs:ro              # with `--profile containers`
+    shm_size: 1gb                           # headless browsers
+    networks: [internal]
+
+  # Container workspaces (topology.md §7): the node gets its own Docker daemon, never the host socket.
+  dind:
+    image: docker:dind
+    profiles: [containers]
+    restart: unless-stopped
+    privileged: true                        # dind needs it; scoped to this sidecar, not the node
+    environment:
+      DOCKER_TLS_CERTDIR: /certs
+    volumes:
+      - dind-certs:/certs
+      - dind-data:/var/lib/docker
+    networks: [internal]
+
+volumes:
+  hub-data: {}
+  node-data: {}
+  node-home: {}
+  dind-certs: {}
+  dind-data: {}
+
+networks:
+  proxy:
+    external: true                          # the reverse proxy's network (e.g. SWAG's)
+    name: ${BIZZI_PROXY_NETWORK:-proxy}
+  internal: {}

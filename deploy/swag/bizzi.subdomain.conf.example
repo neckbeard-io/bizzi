@@ -1,0 +1,71 @@
+## bizzi behind SWAG (linuxserver.io). Copy to /config/nginx/proxy-confs/bizzi.subdomain.conf
+## and restart SWAG. The hub container must be on SWAG's network (the compose `proxy` network)
+## and be reachable as `hub` (or change $upstream_app to the container name, e.g. bizzi-hub-1).
+##
+## WebSocket upgrade + long read timeouts (tech-choices D1): the proxy directives are written out
+## below instead of including /config/nginx/proxy.conf, because that file already sets
+## proxy_read_timeout (240s) and nginx refuses duplicate directives.
+## $connection_upgrade is the map that SWAG's stock nginx config defines.
+
+server {
+    listen 443 ssl;
+    listen [::]:443 ssl;
+
+    server_name bizzi.*;
+
+    include /config/nginx/ssl.conf;
+
+    client_max_body_size 0;
+
+    # Optional forward-auth for interactive (browser) routes once an IdP is chosen:
+    #include /config/nginx/authelia-server.conf;
+    #include /config/nginx/authentik-server.conf;
+
+    # Machine and device endpoints: NO forward-auth (D8). Nodes and paired devices
+    # authenticate to the hub themselves; an interactive login page would break them.
+    location ~ ^/(api/device/|ws/device$|ws/node$) {
+        include /config/nginx/resolver.conf;
+        set $upstream_app hub;
+        set $upstream_port 7777;
+        set $upstream_proto http;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+        proxy_buffering off;
+
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
+
+    location / {
+        # Optional forward-auth, matching the server-level include above:
+        #include /config/nginx/authelia-location.conf;
+        #include /config/nginx/authentik-location.conf;
+
+        include /config/nginx/resolver.conf;
+        set $upstream_app hub;
+        set $upstream_port 7777;
+        set $upstream_proto http;
+
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection $connection_upgrade;
+        proxy_read_timeout 1h;              # client WebSocket (/ws) streams sessions for a long time
+        proxy_send_timeout 1h;
+        proxy_buffering off;
+
+        proxy_pass $upstream_proto://$upstream_app:$upstream_port;
+    }
+}

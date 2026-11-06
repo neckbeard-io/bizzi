@@ -1,0 +1,27 @@
+# Caddy in front of the bizzi hub (tech-choices D1, D8). Caddy must share the `proxy` network
+# with the hub container so `hub:7777` resolves. WebSocket upgrades work out of the box, and
+# proxied WebSocket connections have no read timeout by default.
+
+bizzi.example.com {
+	encode zstd gzip
+
+	# Machine and device endpoints skip interactive forward-auth: nodes and paired devices
+	# authenticate to the hub themselves (per-device keys, short-lived tokens).
+	@machine path /api/device/* /ws/device /ws/node
+	handle @machine {
+		reverse_proxy hub:7777 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		# Optional, once an IdP is chosen (Authelia, Authentik, Pocket ID, ...):
+		# forward_auth authelia:9091 {
+		# 	uri /api/authz/forward-auth
+		# 	copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+		# }
+		reverse_proxy hub:7777 {
+			flush_interval -1
+		}
+	}
+}
