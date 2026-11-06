@@ -1,0 +1,287 @@
+// A scripted stand-in for `codex app-server`, spawned with `node fake-app-server.ts app-server`.
+// The first word of the turn's input text selects the script:
+//   stream   — full streaming turn (reasoning, message, plan, command, file change, usage)
+//   early    — like stream, but notifications precede the turn/start response
+//   approve  — command needing approval; outcome depends on the client's decision
+//   hang     — streams a delta, then waits for turn/interrupt or turn/steer
+//   crash    — the process dies mid-turn
+// Every client message is echoed back as a `fake/received` notification so tests can inspect params.
+
+import { createInterface } from 'node:readline';
+
+const THREAD = 'thr_fake_1';
+type Msg = { id?: string | number; method?: string; params?: any; result?: any; error?: any };
+
+if (process.argv.includes('--version')) {
+  process.stdout.write('codex-cli 0.0.0-fake\n');
+  process.exit(0);
+}
+if (!process.argv.includes('app-server')) {
+  process.stderr.write('usage: fake-app-server app-server\n');
+  process.exit(2);
+}
+
+let nextServerReqId = 1000;
+let turnSeq = 0;
+let activeTurn: string | undefined;
+const waiting = new Map<string | number, (m: Msg) => void>();
+
+function send(m: Msg): void {
+  process.stdout.write(JSON.stringify(m) + '\n');
+}
+function notify(method: string, params: unknown): void {
+  send({ method, params });
+}
+function serverRequest(method: string, params: unknown): Promise<Msg> {
+  const id = nextServerReqId++;
+  return new Promise((resolve) => {
+    waiting.set(id, resolve);
+    send({ id, method, params });
+  });
+}
+const tick = () => new Promise((r) => setTimeout(r, 5));
+
+function turnObj(id: string, status: string, error: unknown = null) {
+  return { id, rootTurnId: id, items: [], itemsView: 'full', status, error, startedAt: 0, completedAt: null, durationMs: null };
+}
+
+function threadObj(id: string) {
+  return {
+    id,
+    sessionId: id,
+    forkedFromId: null,
+    parentThreadId: null,
+    preview: '',
+    ephemeral: false,
+    modelProvider: 'openai',
+    model: 'gpt-fake',
+    reasoningEffort: null,
+    createdAt: 0,
+    updatedAt: 0,
+    status: { type: 'idle' },
+    path: null,
+    cwd: '/tmp',
+    cliVersion: '0.0.0-fake',
+    source: 'vscode',
+    name: null,
+    turns: [],
+  };
+}
+
+function threadResponse(id: string, params: any) {
+  const sandboxMode = params?.sandbox ?? 'read-only';
+  const sandbox =
+    sandboxMode === 'workspace-write'
+      ? { type: 'workspaceWrite', writableRoots: [], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
+      : sandboxMode === 'danger-full-access'
+        ? { type: 'dangerFullAccess' }
+        : { type: 'readOnly', networkAccess: false };
+  return {
+    thread: threadObj(id),
+    model: params?.model ?? 'gpt-fake',
+    modelProvider: 'openai',
+    serviceTier: null,
+    disabledPluginIds: [],
+    cwd: params?.cwd ?? '/tmp',
+    instructionSources: [],
+    approvalPolicy: params?.approvalPolicy ?? 'on-request',
+    approvalsReviewer: 'user',
+    sandbox,
+    reasoningEffort: params?.config?.model_reasoning_effort ?? null,
+  };
+}
+
+const usage = (n: number) => ({
+  total: { totalTokens: n * 3, inputTokens: n * 2, cachedInputTokens: n, cacheWriteInputTokens: 0, outputTokens: n, reasoningOutputTokens: 0 },
+  last: { totalTokens: n, inputTokens: n, cachedInputTokens: 0, cacheWriteInputTokens: 0, outputTokens: 0, reasoningOutputTokens: 0 },
+  modelContextWindow: 200000,
+});
+
+async function streamBody(turnId: string): Promise<void> {
+  const base = { threadId: THREAD, turnId };
+  notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+  notify('item/started', { ...base, startedAtMs: 0, item: { type: 'reasoning', id: 'rs_1', summary: [], content: [] } });
+  notify('item/reasoning/summaryTextDelta', { ...base, itemId: 'rs_1', delta: 'Thinking', summaryIndex: 0 });
+  notify('item/completed', { ...base, completedAtMs: 0, item: { type: 'reasoning', id: 'rs_1', summary: ['Thinking'], content: [] } });
+  notify('item/started', {
+    ...base,
+    startedAtMs: 0,
+    item: { type: 'agentMessage', id: 'msg_1', text: '', phase: null, memoryCitation: null, delivery: null, questions: null },
+  });
+  notify('item/agentMessage/delta', { ...base, itemId: 'msg_1', delta: 'Hel' });
+  notify('item/agentMessage/delta', { ...base, itemId: 'msg_1', delta: 'lo' });
+  notify('item/completed', {
+    ...base,
+    completedAtMs: 0,
+    item: { type: 'agentMessage', id: 'msg_1', text: 'Hello', phase: null, memoryCitation: null, delivery: null, questions: null },
+  });
+  notify('turn/plan/updated', {
+    ...base,
+    explanation: null,
+    plan: [
+      { step: 'look', status: 'completed' },
+      { step: 'fix', status: 'inProgress' },
+      { step: 'test', status: 'pending' },
+    ],
+  });
+  const cmd = {
+    type: 'commandExecution',
+    id: 'call_cmd',
+    pluginId: null,
+    scriptPath: null,
+    command: 'ls -la',
+    cwd: '/tmp',
+    processId: null,
+    source: 'agent',
+    status: 'inProgress',
+    commandActions: [],
+    aggregatedOutput: null,
+    exitCode: null,
+    durationMs: null,
+  };
+  notify('item/started', { ...base, startedAtMs: 0, item: cmd });
+  notify('item/commandExecution/outputDelta', { ...base, itemId: 'call_cmd', delta: 'file-a\n' });
+  notify('item/completed', { ...base, completedAtMs: 0, item: { ...cmd, status: 'completed', aggregatedOutput: 'file-a\n', exitCode: 0 } });
+  const fc = {
+    type: 'fileChange',
+    id: 'call_patch',
+    changes: [
+      { path: '/tmp/a.txt', kind: { type: 'update', move_path: null }, diff: '@@ -1 +1 @@\n-a\n+b\n' },
+      { path: '/tmp/new.txt', kind: { type: 'add' }, diff: '+new\n' },
+    ],
+    status: 'inProgress',
+  };
+  notify('item/started', { ...base, startedAtMs: 0, item: fc });
+  notify('item/completed', { ...base, completedAtMs: 0, item: { ...fc, status: 'completed' } });
+  notify('thread/tokenUsage/updated', { ...base, tokenUsage: usage(100) });
+  notify('some/unknown', { ...base, foo: 1 });
+  notify('turn/completed', { threadId: THREAD, turn: turnObj(turnId, 'completed') });
+}
+
+async function handle(m: Msg): Promise<void> {
+  if (m.id !== undefined && m.method === undefined) {
+    const w = waiting.get(m.id);
+    waiting.delete(m.id);
+    w?.(m);
+    return;
+  }
+  notify('fake/received', { method: m.method, params: m.params ?? null });
+  if (m.id === undefined) return; // client notification (initialized)
+  const id = m.id;
+  switch (m.method) {
+    case 'initialize':
+      return send({ id, result: { userAgent: 'fake', codexHome: '/tmp/fake', platformFamily: 'unix', platformOs: 'macos' } });
+    case 'account/read':
+      if (process.env.FAKE_AUTH === 'chatgpt') {
+        return send({
+          id,
+          result: {
+            account: { type: 'chatgpt', email: 'dev@example.com', planType: 'pro', workspaceName: null },
+            requiresOpenaiAuth: true,
+          },
+        });
+      }
+      return send({ id, result: { account: null, requiresOpenaiAuth: true } });
+    case 'thread/start':
+      return send({ id, result: threadResponse(THREAD, m.params) });
+    case 'thread/resume':
+      if (m.params?.threadId !== THREAD) {
+        return send({ id, error: { code: -32600, message: `no rollout found for thread id ${m.params?.threadId}` } });
+      }
+      return send({ id, result: threadResponse(THREAD, m.params) });
+    case 'turn/start': {
+      const turnId = `turn_${++turnSeq}`;
+      activeTurn = turnId;
+      const text: string = m.params?.input?.[0]?.text ?? '';
+      const script = text.split(/\s+/)[0];
+      const base = { threadId: THREAD, turnId };
+      switch (script) {
+        case 'early':
+          await streamBody(turnId);
+          await tick();
+          return send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+        case 'approve': {
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          const cmd = {
+            type: 'commandExecution',
+            id: 'call_rm',
+            pluginId: null,
+            scriptPath: null,
+            command: 'rm -rf build',
+            cwd: '/tmp',
+            processId: null,
+            source: 'agent',
+            status: 'inProgress',
+            commandActions: [],
+            aggregatedOutput: null,
+            exitCode: null,
+            durationMs: null,
+          };
+          notify('item/started', { ...base, startedAtMs: 0, item: cmd });
+          const reply = await serverRequest('item/commandExecution/requestApproval', {
+            kind: 'command',
+            ...base,
+            itemId: 'call_rm',
+            startedAtMs: 0,
+            environmentId: null,
+            reason: 'needs write access',
+            command: 'rm -rf build',
+            cwd: '/tmp',
+          });
+          const decision = reply.result?.decision;
+          notify('serverRequest/resolved', { threadId: THREAD, requestId: nextServerReqId - 1 });
+          const accepted = decision === 'accept' || decision === 'acceptForSession';
+          notify('item/completed', {
+            ...base,
+            completedAtMs: 0,
+            item: { ...cmd, status: accepted ? 'completed' : 'declined', exitCode: accepted ? 0 : null, aggregatedOutput: accepted ? '' : null },
+          });
+          notify('item/agentMessage/delta', { ...base, itemId: 'msg_d', delta: `decision:${JSON.stringify(decision)}` });
+          notify('turn/completed', { threadId: THREAD, turn: turnObj(turnId, 'completed') });
+          return;
+        }
+        case 'hang':
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          notify('item/agentMessage/delta', { ...base, itemId: 'msg_h', delta: 'working' });
+          return;
+        case 'crash':
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          await tick();
+          process.stderr.write('\u001b[31mERROR\u001b[0m boom: simulated crash\n');
+          setTimeout(() => process.exit(3), 10);
+          return;
+        default:
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          await tick();
+          await streamBody(turnId);
+          return;
+      }
+    }
+    case 'turn/steer': {
+      if (m.params?.expectedTurnId !== activeTurn) {
+        return send({ id, error: { code: -32600, message: 'expectedTurnId does not match active turn' } });
+      }
+      send({ id, result: { turnId: activeTurn } });
+      const base = { threadId: THREAD, turnId: activeTurn };
+      notify('item/agentMessage/delta', { ...base, itemId: 'msg_h', delta: ` steered:${m.params.input?.[0]?.text}` });
+      notify('turn/completed', { threadId: THREAD, turn: turnObj(activeTurn as string, 'completed') });
+      return;
+    }
+    case 'turn/interrupt':
+      send({ id, result: {} });
+      notify('turn/completed', { threadId: THREAD, turn: turnObj(m.params.turnId, 'interrupted') });
+      return;
+    default:
+      return send({ id, error: { code: -32601, message: `method not found: ${m.method}` } });
+  }
+}
+
+const rl = createInterface({ input: process.stdin });
+rl.on('line', (line) => {
+  if (!line.trim()) return;
+  void handle(JSON.parse(line) as Msg);
+});
+rl.on('close', () => process.exit(0));
