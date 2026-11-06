@@ -9,6 +9,16 @@ import type { ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
 export interface SessionState {
   /** The turn in flight, if any (between turn.started and turn.completed). */
   currentTurnId?: string;
+  /** Terminal mode: argv to run instead of the agent's TUI (session.create `command`). */
+  command?: string[];
+  /** Forked session not started yet: the source's agentSessionRef to fork from on first start. */
+  forkOf?: string;
+  /** Approvals / questions awaiting an answer; cancelled after a node restart. */
+  pendingApprovals?: string[];
+  pendingQuestions?: string[];
+  /** Terminal size. */
+  cols?: number;
+  rows?: number;
 }
 
 export interface SessionRow {
@@ -49,6 +59,7 @@ export class Store {
   readonly #replay: StatementSync;
   readonly #maxSeq: StatementSync;
   readonly #upsertSession: StatementSync;
+  readonly #termTail: StatementSync;
 
   constructor(dataDir: string) {
     mkdirSync(dataDir, { recursive: true });
@@ -64,6 +75,9 @@ export class Store {
     this.#upsertSession = this.#db.prepare(
       `INSERT INTO sessions (id, workspace_id, info, state) VALUES (?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, info = excluded.info, state = excluded.state`,
+    );
+    this.#termTail = this.#db.prepare(
+      "SELECT data FROM events WHERE ch = ? AND type = 'term.output' AND seq <= ? ORDER BY seq DESC",
     );
   }
 
@@ -111,6 +125,30 @@ export class Store {
     return rows.map((r) => ({ ch: r.ch, seq: r.seq, ts: r.ts, type: r.type, data: JSON.parse(r.data) }) as ChannelEvent);
   }
 
+  /**
+   * The last `maxBytes` bytes of `term.output` on a channel up to `uptoSeq` (inclusive), oldest first.
+   * Reads newest-first and stops once enough output is collected.
+   */
+  terminalTail(ch: string, uptoSeq: number, maxBytes: number): Buffer {
+    const chunks: Buffer[] = [];
+    let total = 0;
+    for (const row of this.#termTail.iterate(ch, uptoSeq) as Iterable<{ data: string }>) {
+      let b64: unknown;
+      try {
+        b64 = (JSON.parse(row.data) as { dataBase64?: unknown }).dataBase64;
+      } catch {
+        continue;
+      }
+      if (typeof b64 !== 'string') continue;
+      const buf = Buffer.from(b64, 'base64');
+      chunks.push(buf);
+      total += buf.length;
+      if (total >= maxBytes) break;
+    }
+    const all = Buffer.concat(chunks.reverse());
+    return all.length > maxBytes ? all.subarray(all.length - maxBytes) : all;
+  }
+
   // --- workspaces -------------------------------------------------------------------------------
 
   listWorkspaces(): WorkspaceInfo[] {
@@ -143,5 +181,18 @@ export class Store {
 
   putSession(row: SessionRow): void {
     this.#upsertSession.run(row.info.id, row.info.workspaceId, JSON.stringify(row.info), JSON.stringify(row.state));
+  }
+
+  /** Remove a session row and every event on its channel, atomically. */
+  deleteSession(id: string, ch: string): void {
+    this.#db.exec('BEGIN');
+    try {
+      this.#db.prepare('DELETE FROM events WHERE ch = ?').run(ch);
+      this.#db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      this.#db.exec('ROLLBACK');
+      throw err;
+    }
   }
 }

@@ -1,4 +1,5 @@
-// Session manager: adapter lifecycle, turn bookkeeping, status derivation, approvals, restart recovery.
+// Session manager: adapter lifecycle, turn bookkeeping, status derivation, approvals, questions,
+// fork/delete, terminal snapshots and restart recovery.
 
 import {
   AGENT_KINDS,
@@ -10,14 +11,18 @@ import {
   type AdapterSession,
   type AgentAdapter,
   type AgentCapabilities,
+  type AgentKind,
   type ApprovalDecision,
   type ApprovalDecisionKind,
   type ApprovalRequest,
   type InputBlock,
   type Logger,
   type MethodParams,
+  type QuestionAnswers,
   type SessionEventBody,
+  type SessionEventMap,
   type SessionInfo,
+  type SessionMode,
   type SessionStatus,
   type StartSessionOptions,
   type WorkspaceInfo,
@@ -35,6 +40,9 @@ export type PrepareStart = (
   | Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>
   | Promise<Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>>;
 
+/** Extra environment for an agent's sessions (e.g. stored secrets). */
+export type AgentEnvProvider = (agent: AgentKind) => Record<string, string> | Promise<Record<string, string>>;
+
 export interface SessionsDeps {
   store: Store;
   bus: EventBus;
@@ -45,15 +53,28 @@ export interface SessionsDeps {
   prepareStart?: PrepareStart;
   /** How long to wait for an adapter to confirm an interrupt before the core completes the turn itself. */
   interruptGraceMs?: number;
+  /** Merged over prepareStart's env when an adapter session starts. */
+  agentEnv?: AgentEnvProvider;
 }
+
+/** Cap for `term.snapshot` output. */
+export const TERMINAL_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
 
 const TERMINAL_STATUSES: readonly SessionStatus[] = ['ended', 'failed'];
 const DECISIONS: readonly ApprovalDecisionKind[] = ['allow', 'allow_always', 'deny'];
 const STOP_TIMEOUT_MS = 10_000;
 
+/** How an adapter session is started: fresh, resumed, or forked from another agent session. */
+interface ResumeOpts {
+  resumeRef?: string;
+  fork?: boolean;
+}
+
+type QuestionAsked = SessionEventMap['question.asked'];
+
 interface Runtime {
   info: SessionInfo;
-  state: SessionState & { cols?: number; rows?: number };
+  state: SessionState;
   adapter?: AgentAdapter;
   handle?: AdapterSession;
   starting?: Promise<AdapterSession>;
@@ -63,8 +84,36 @@ interface Runtime {
   reservedTurn?: string;
   stopping: boolean;
   pendingApprovals: Map<string, ApprovalRequest>;
+  /** Approvals being answered (approval.respond in flight). */
   responding: Set<string>;
+  pendingQuestions: Map<string, QuestionAsked>;
+  /** Questions being answered (question.respond in flight). */
+  answering: Set<string>;
+  /** Approval / question ids the core cancelled this turn; a late adapter resolution is dropped. */
+  cancelled: Set<string>;
+  /** True while #cancelPending runs: per-event status fallback is skipped (the caller settles). */
+  settling: boolean;
   interruptTimer?: NodeJS.Timeout;
+  /** Set once session.delete starts: nothing more is appended or persisted for this session. */
+  deleted: boolean;
+  deleting?: Promise<void>;
+}
+
+function newRuntime(info: SessionInfo, state: SessionState, adapter: AgentAdapter | undefined): Runtime {
+  return {
+    info,
+    state,
+    adapter,
+    generation: 0,
+    stopping: false,
+    pendingApprovals: new Map(),
+    responding: new Set(),
+    pendingQuestions: new Map(),
+    answering: new Set(),
+    cancelled: new Set(),
+    settling: false,
+    deleted: false,
+  };
 }
 
 export class Sessions {
@@ -81,31 +130,26 @@ export class Sessions {
 
   // --- restart recovery ---------------------------------------------------------------------------
 
-  /** Load persisted sessions. Active ones become idle (resumable) or ended. */
+  /** Load persisted sessions. Active ones become idle (resumable) or ended; pending approvals/questions are cancelled. */
   load(): void {
     for (const row of this.#d.store.listSessions()) {
-      const rt: Runtime = {
-        info: row.info,
-        state: row.state,
-        adapter: this.#d.registry.select(row.info.agent, row.info.mode),
-        generation: 0,
-        stopping: false,
-        pendingApprovals: new Map(),
-        responding: new Set(),
-      };
+      const rt = newRuntime(row.info, row.state, this.#d.registry.select(row.info.agent, row.info.mode));
+      // Approvals / questions that were pending when the node went down can no longer be answered.
+      for (const approvalId of row.state.pendingApprovals ?? []) {
+        rt.pendingApprovals.set(approvalId, { approvalId, kind: 'other', title: '', editable: false, options: [] });
+      }
+      for (const questionId of row.state.pendingQuestions ?? []) rt.pendingQuestions.set(questionId, { questionId, text: '' });
       rt.info.lastSeq = this.#d.bus.lastSeq(sessionChannel(rt.info.id));
       this.#byId.set(rt.info.id, rt);
-      if (TERMINAL_STATUSES.includes(rt.info.status)) continue;
-
-      const turnId = rt.state.currentTurnId;
-      if (turnId) {
-        this.#append(rt, {
-          type: 'turn.completed',
-          data: { turnId, stopReason: 'interrupted', error: 'node restarted' },
-        });
+      if (TERMINAL_STATUSES.includes(rt.info.status)) {
+        this.#cancelPending(rt, false);
+        continue;
       }
+
+      this.#closeOpenTurn(rt, 'interrupted', 'node restarted');
       const caps = this.#caps(rt);
-      const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && rt.info.agentSessionRef);
+      const ref = rt.info.agentSessionRef ?? (caps.fork ? rt.state.forkOf : undefined);
+      const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && ref);
       const status: SessionStatus = resumable ? 'idle' : 'ended';
       if (rt.info.status !== status) {
         this.#append(rt, {
@@ -153,48 +197,91 @@ export class Sessions {
     if (!mode || !adapter) {
       throw new BizziError('agent_unavailable', `no adapter for ${p.agent}${p.mode ? ` in ${p.mode} mode` : ''}`);
     }
-    const now = new Date().toISOString();
-    const info: SessionInfo = {
-      id: newId('s'),
-      machineId: this.#d.machineId,
-      workspaceId: ws.id,
-      agent: p.agent,
-      mode,
-      status: 'starting',
-      createdAt: now,
-      updatedAt: now,
-      lastSeq: 0,
-    };
+    if (p.command !== undefined) {
+      if (mode !== 'terminal') throw new BizziError('bad_request', 'command is only supported in terminal mode');
+      validateCommand(p.command);
+    }
+    const info = this.#newInfo(ws.id, p.agent, mode);
     if (p.title) info.title = p.title;
     if (p.model) info.model = p.model;
     if (p.permissionMode) info.permissionMode = p.permissionMode;
     if (p.effort) info.effort = p.effort;
     if (p.resumeRef) info.agentSessionRef = p.resumeRef;
-    const rt: Runtime = {
-      info,
-      state: {},
-      adapter,
-      generation: 0,
-      stopping: false,
-      pendingApprovals: new Map(),
-      responding: new Set(),
-    };
+    const rt = newRuntime(info, {}, adapter);
     if (p.cols) rt.state.cols = p.cols;
     if (p.rows) rt.state.rows = p.rows;
-    this.#byId.set(info.id, rt);
-    this.#persist(rt);
-    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...info } } });
-
-    // Start in the background; the session is 'starting' until the adapter is up.
-    this.#ensureStarted(rt, p.resumeRef).then(
-      () => {
-        if (rt.info.status === 'starting') this.#append(rt, { type: 'session.status', data: { status: 'idle' } });
-      },
-      () => {
-        // #ensureStarted already recorded the failure on the session channel.
-      },
-    );
+    if (p.command) rt.state.command = [...p.command];
+    this.#register(rt);
+    this.#startInBackground(rt, p.resumeRef ? { resumeRef: p.resumeRef } : {});
     return { ...info };
+  }
+
+  /**
+   * New session in the same workspace with the same agent, mode and options (`forkedFrom` set). Uses the
+   * agent's native fork (resumeRef + fork) when supported; otherwise it starts fresh and says so.
+   */
+  async fork(sourceId: string, title?: string): Promise<SessionInfo> {
+    this.#assertAccepting();
+    const src = this.#get(sourceId);
+    if (src.deleted) throw new BizziError('not_found', `session ${sourceId} not found`);
+    const ws = this.#d.workspaces.get(src.info.workspaceId);
+    const adapter = this.#d.registry.select(src.info.agent, src.info.mode);
+    if (!adapter) throw new BizziError('agent_unavailable', `no adapter for ${src.info.agent} in ${src.info.mode} mode`);
+    const caps = safeCaps(adapter, src.info.mode);
+    // A fork of a fork that hasn't started yet forks from the same source conversation.
+    const sourceRef = src.info.agentSessionRef ?? src.state.forkOf;
+    const native = caps.fork && Boolean(sourceRef);
+
+    const info = this.#newInfo(ws.id, src.info.agent, src.info.mode);
+    info.forkedFrom = src.info.id;
+    const t = title ?? src.info.title;
+    if (t) info.title = t;
+    for (const k of ['model', 'permissionMode', 'effort'] as const) {
+      const v = src.info[k];
+      if (v) info[k] = v;
+    }
+    const rt = newRuntime(info, {}, adapter);
+    if (src.state.cols) rt.state.cols = src.state.cols;
+    if (src.state.rows) rt.state.rows = src.state.rows;
+    if (src.state.command) rt.state.command = [...src.state.command];
+    if (native) rt.state.forkOf = sourceRef;
+    this.#register(rt);
+    if (!native) {
+      const why = caps.fork ? 'the source session has no agent conversation yet' : 'this agent cannot fork sessions';
+      this.#append(rt, {
+        type: 'agent.raw',
+        data: {
+          agent: info.agent,
+          payload: {
+            type: 'bizzi.fork',
+            native: false,
+            forkedFrom: src.info.id,
+            message: `Forked from ${src.info.id} without its conversation (${why}); this session starts fresh.`,
+          },
+        },
+      });
+    }
+    this.#startInBackground(rt, this.#resumeFor(rt));
+    return { ...info };
+  }
+
+  /** Stop the session if needed, then remove it and its events (emits `session.removed`). */
+  delete(id: string): Promise<void> {
+    const rt = this.#get(id);
+    rt.deleting ??= (async () => {
+      // From here on nothing is appended or persisted for this session (stop events included).
+      rt.deleted = true;
+      await this.#stopHandle(rt);
+      const ch = sessionChannel(id);
+      this.#d.store.deleteSession(id, ch);
+      this.#byId.delete(id);
+      this.#d.bus.forget(ch);
+      this.#d.bus.append(GLOBAL_CHANNEL, {
+        type: 'session.removed',
+        data: { sessionId: id, workspaceId: rt.info.workspaceId },
+      });
+    })();
+    return rt.deleting;
   }
 
   async send(id: string, input: InputBlock[]): Promise<{ turnId: string }> {
@@ -209,7 +296,7 @@ export class Sessions {
     rt.reservedTurn = turnId;
     let handle: AdapterSession;
     try {
-      handle = await this.#ensureStarted(rt, this.#caps(rt).resume ? rt.info.agentSessionRef : undefined);
+      handle = await this.#ensureStarted(rt, this.#resumeFor(rt));
       this.#assertOpen(rt);
     } finally {
       rt.reservedTurn = undefined;
@@ -219,12 +306,8 @@ export class Sessions {
       await handle.send(turnId, input);
     } catch (err) {
       this.#log.log('warn', 'adapter send failed', { sessionId: id, turnId, err });
-      if (rt.state.currentTurnId === turnId) {
-        this.#append(rt, {
-          type: 'turn.completed',
-          data: { turnId, stopReason: 'error', error: errorMessage(err) },
-        });
-      }
+      // No-op when the adapter already completed this turn (exactly one turn.completed per turnId).
+      this.#append(rt, { type: 'turn.completed', data: { turnId, stopReason: 'error', error: errorMessage(err) } });
       throw toBizziError(err, 'internal');
     }
     return { turnId };
@@ -235,10 +318,12 @@ export class Sessions {
     validateInput(input);
     this.#assertOpen(rt);
     if (!this.#caps(rt).steer || !rt.handle?.steer) throw new BizziError('unsupported', 'this agent does not support steering');
-    if (!rt.state.currentTurnId) throw new BizziError('conflict', 'no turn in progress; use session.send');
+    const turnId = rt.state.currentTurnId;
+    if (!turnId) throw new BizziError('conflict', 'no turn in progress; use session.send');
     await rt.handle.steer(input).catch((err: unknown) => {
       throw toBizziError(err, 'internal');
     });
+    this.#append(rt, { type: 'turn.steered', data: { turnId, input } });
   }
 
   async interrupt(id: string): Promise<void> {
@@ -270,7 +355,7 @@ export class Sessions {
 
   async stop(id: string): Promise<void> {
     const rt = this.#get(id);
-    if (rt.info.status === 'ended' || rt.stopping) return;
+    if (rt.info.status === 'ended' || rt.stopping || rt.deleted) return;
     rt.stopping = true;
     try {
       await this.#stopHandle(rt);
@@ -337,6 +422,56 @@ export class Sessions {
       rt.responding.delete(p.approvalId);
       throw toBizziError(err, 'internal');
     }
+  }
+
+  /** Answer (or, with `cancel`, decline) a pending `question.asked`. */
+  async respondQuestion(p: MethodParams<'question.respond'>): Promise<void> {
+    const rt = this.#get(p.sessionId);
+    if (typeof p.questionId !== 'string') throw new BizziError('bad_request', 'questionId must be a string');
+    const q = rt.pendingQuestions.get(p.questionId);
+    if (!q) throw new BizziError('not_found', `no pending question ${p.questionId}`);
+    if (!rt.handle) throw new BizziError('conflict', 'the agent is not running');
+    if (!rt.handle.respondQuestion) throw new BizziError('unsupported', 'this agent cannot answer questions');
+    let answers: QuestionAnswers | undefined;
+    if (p.cancel !== true) {
+      if (p.answers === undefined) throw new BizziError('bad_request', 'answers or cancel is required');
+      answers = validateAnswers(p.answers, q);
+    }
+    if (rt.answering.has(p.questionId)) throw new BizziError('conflict', 'question is already being answered');
+    rt.answering.add(p.questionId);
+    try {
+      await rt.handle.respondQuestion(p.questionId, answers);
+    } catch (err) {
+      rt.answering.delete(p.questionId);
+      throw toBizziError(err, 'internal');
+    }
+  }
+
+  /** Recent terminal output and the seq it is current as of (adapter scrollback, else the event log). */
+  terminalSnapshot(id: string): { dataBase64: string; seq: number } {
+    const rt = this.#get(id);
+    if (rt.info.mode !== 'terminal') throw new BizziError('unsupported', 'not a terminal-mode session');
+    const ch = sessionChannel(id);
+    // Synchronous throughout, so no event can land between reading the output and reading the seq.
+    if (rt.handle?.snapshotTerminal) {
+      try {
+        const bytes = Buffer.from(rt.handle.snapshotTerminal());
+        const tail =
+          bytes.length > TERMINAL_SNAPSHOT_MAX_BYTES ? bytes.subarray(bytes.length - TERMINAL_SNAPSHOT_MAX_BYTES) : bytes;
+        return { dataBase64: tail.toString('base64'), seq: this.#d.bus.lastSeq(ch) };
+      } catch (err) {
+        this.#log.log('warn', 'adapter terminal snapshot failed; using the event log', { sessionId: id, err });
+      }
+    }
+    const seq = this.#d.bus.lastSeq(ch);
+    return { dataBase64: this.#d.store.terminalTail(ch, seq, TERMINAL_SNAPSHOT_MAX_BYTES).toString('base64'), seq };
+  }
+
+  /** Append an event from outside the adapter (extensions, e.g. login.prompt). Same rules as adapter events. */
+  emit(id: string, body: SessionEventBody): void {
+    const rt = this.#get(id);
+    if (rt.deleted) throw new BizziError('not_found', `session ${id} not found`);
+    this.#onAdapterEvent(rt, rt.generation, body);
   }
 
   termInput(id: string, data: Uint8Array): void {
@@ -406,12 +541,7 @@ export class Sessions {
   }
 
   #caps(rt: Runtime): AgentCapabilities {
-    if (!rt.adapter) return NO_CAPABILITIES;
-    try {
-      return rt.adapter.capabilities(rt.info.mode);
-    } catch {
-      return NO_CAPABILITIES;
-    }
+    return rt.adapter ? safeCaps(rt.adapter, rt.info.mode) : NO_CAPABILITIES;
   }
 
   #assertAccepting(): void {
@@ -419,6 +549,7 @@ export class Sessions {
   }
 
   #assertOpen(rt: Runtime): void {
+    if (rt.deleted) throw new BizziError('conflict', 'session is being deleted');
     if (rt.info.status === 'ended' || rt.stopping) throw new BizziError('conflict', 'session has ended');
   }
 
@@ -429,7 +560,46 @@ export class Sessions {
     return rt.handle;
   }
 
-  #ensureStarted(rt: Runtime, resumeRef: string | undefined): Promise<AdapterSession> {
+  #newInfo(workspaceId: string, agent: AgentKind, mode: SessionMode): SessionInfo {
+    const now = new Date().toISOString();
+    return {
+      id: newId('s'),
+      machineId: this.#d.machineId,
+      workspaceId,
+      agent,
+      mode,
+      status: 'starting',
+      createdAt: now,
+      updatedAt: now,
+      lastSeq: 0,
+    };
+  }
+
+  #register(rt: Runtime): void {
+    this.#byId.set(rt.info.id, rt);
+    this.#persist(rt);
+    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...rt.info } } });
+  }
+
+  /** Start in the background; the session is 'starting' until the adapter is up. */
+  #startInBackground(rt: Runtime, resume: ResumeOpts): void {
+    this.#ensureStarted(rt, resume).then(
+      () => {
+        if (rt.info.status === 'starting') this.#append(rt, { type: 'session.status', data: { status: 'idle' } });
+      },
+      () => {
+        // #ensureStarted already recorded the failure on the session channel.
+      },
+    );
+  }
+
+  /** How the next (lazy) start continues the conversation: fork (not started yet), resume, or fresh. */
+  #resumeFor(rt: Runtime): ResumeOpts {
+    if (rt.state.forkOf && !rt.info.agentSessionRef) return { resumeRef: rt.state.forkOf, fork: true };
+    return this.#caps(rt).resume && rt.info.agentSessionRef ? { resumeRef: rt.info.agentSessionRef } : {};
+  }
+
+  #ensureStarted(rt: Runtime, resume: ResumeOpts): Promise<AdapterSession> {
     if (rt.handle) return Promise.resolve(rt.handle);
     if (rt.starting) return rt.starting;
     const adapter = rt.adapter;
@@ -443,11 +613,16 @@ export class Sessions {
     const start = async (): Promise<AdapterSession> => {
       const ws = this.#d.workspaces.get(rt.info.workspaceId);
       const extra = this.#d.prepareStart ? await this.#d.prepareStart({ ...rt.info }, ws) : {};
+      const agentEnv = this.#d.agentEnv ? await this.#d.agentEnv(rt.info.agent) : {};
       const opts: StartSessionOptions = { ...extra, sessionId, mode: rt.info.mode, cwd: ws.path };
+      const env = { ...extra.env, ...agentEnv };
+      if (Object.keys(env).length > 0) opts.env = env;
       if (rt.info.model) opts.model = rt.info.model;
       if (rt.info.permissionMode) opts.permissionMode = rt.info.permissionMode;
       if (rt.info.effort) opts.effort = rt.info.effort;
-      if (resumeRef) opts.resumeRef = resumeRef;
+      if (resume.resumeRef) opts.resumeRef = resume.resumeRef;
+      if (resume.resumeRef && resume.fork) opts.fork = true;
+      if (rt.state.command) opts.command = [...rt.state.command];
       if (rt.state.cols) opts.cols = rt.state.cols;
       if (rt.state.rows) opts.rows = rt.state.rows;
       return adapter.start(opts, (body) => this.#onAdapterEvent(rt, gen, body), { logger });
@@ -456,7 +631,7 @@ export class Sessions {
     const p = start().then(
       (handle) => {
         if (rt.starting === p) rt.starting = undefined;
-        if (gen !== rt.generation || this.#closed) {
+        if (gen !== rt.generation || this.#closed || rt.deleted) {
           void handle.stop().catch(() => {});
           throw new BizziError('conflict', 'session was stopped while starting');
         }
@@ -494,13 +669,48 @@ export class Sessions {
     clearTimeout(rt.interruptTimer);
   }
 
+  /** Complete the open turn (if any) and cancel pending approvals / questions. */
   #closeOpenTurn(rt: Runtime, stopReason: 'interrupted' | 'error', error: string): void {
     const turnId = rt.state.currentTurnId;
     if (turnId) this.#append(rt, { type: 'turn.completed', data: { turnId, stopReason, error } });
+    else this.#cancelPending(rt, true);
+  }
+
+  /**
+   * Resolve every pending approval / question as cancelled. With `settle`, a waiting status falls back
+   * to running/idle; without it the caller sets the final status (turn.completed, session.status).
+   */
+  #cancelPending(rt: Runtime, settle: boolean): void {
+    if (rt.pendingApprovals.size === 0 && rt.pendingQuestions.size === 0) return;
+    rt.settling = true;
+    try {
+      for (const approvalId of [...rt.pendingApprovals.keys()]) {
+        rt.cancelled.add(approvalId);
+        this.#append(rt, { type: 'approval.resolved', data: { approvalId, decision: 'cancelled' } });
+      }
+      for (const questionId of [...rt.pendingQuestions.keys()]) {
+        rt.cancelled.add(questionId);
+        this.#append(rt, { type: 'question.resolved', data: { questionId, cancelled: true } });
+      }
+    } finally {
+      rt.settling = false;
+    }
+    const status = rt.info.status;
+    if (settle && (status === 'waiting_approval' || status === 'waiting_input')) {
+      rt.info.status = this.#settledStatus(rt);
+      this.#changed(rt, new Date().toISOString());
+    }
+  }
+
+  /** The status a session in a waiting state falls back to. */
+  #settledStatus(rt: Runtime): SessionStatus {
+    if (rt.pendingApprovals.size > 0) return 'waiting_approval';
+    if (rt.pendingQuestions.size > 0) return 'waiting_input';
+    return rt.state.currentTurnId ? 'running' : 'idle';
   }
 
   #onAdapterEvent(rt: Runtime, gen: number, body: SessionEventBody): void {
-    if (gen !== rt.generation || !this.#d.store.isOpen || this.#closed) {
+    if (gen !== rt.generation || !this.#d.store.isOpen || this.#closed || rt.deleted) {
       this.#log.log('debug', 'dropping event from a stale adapter session', { sessionId: rt.info.id, type: body?.type });
       return;
     }
@@ -510,7 +720,8 @@ export class Sessions {
     }
     switch (body.type) {
       case 'turn.started':
-        this.#log.log('warn', 'adapters must not emit turn.started; dropped', { sessionId: rt.info.id });
+      case 'turn.steered':
+        this.#log.log('warn', `adapters must not emit ${body.type}; dropped`, { sessionId: rt.info.id });
         return;
       case 'turn.completed':
         if (body.data.turnId !== rt.state.currentTurnId) {
@@ -518,6 +729,18 @@ export class Sessions {
             sessionId: rt.info.id,
             turnId: body.data.turnId,
           });
+          return;
+        }
+        break;
+      case 'approval.resolved':
+        if (rt.cancelled.has(body.data.approvalId) && !rt.pendingApprovals.has(body.data.approvalId)) {
+          this.#log.log('debug', 'approval already cancelled; dropped', { sessionId: rt.info.id, approvalId: body.data.approvalId });
+          return;
+        }
+        break;
+      case 'question.resolved':
+        if (rt.cancelled.has(body.data.questionId) && !rt.pendingQuestions.has(body.data.questionId)) {
+          this.#log.log('debug', 'question already cancelled; dropped', { sessionId: rt.info.id, questionId: body.data.questionId });
           return;
         }
         break;
@@ -537,13 +760,21 @@ export class Sessions {
     this.#append(rt, body);
   }
 
-  /** Append to the session channel and update derived state (status, info, pending approvals). */
+  /** Append to the session channel and update derived state (status, info, pending approvals/questions). */
   #append(rt: Runtime, body: SessionEventBody): void {
+    if (rt.deleted) return;
+    if (body.type === 'turn.completed') {
+      // Exactly one turn.completed per turnId: duplicates and unknown turns are dropped.
+      if (body.data.turnId !== rt.state.currentTurnId) return;
+      // A turn's approvals and questions end with it; resolve them before the turn closes.
+      this.#cancelPending(rt, false);
+    }
     const ev = this.#d.bus.append(sessionChannel(rt.info.id), body);
     rt.info.lastSeq = ev.seq;
     const info = rt.info;
     const terminal = TERMINAL_STATUSES.includes(info.status);
     let changed = false;
+    let pendingChanged = false;
     const setStatus = (s: SessionStatus) => {
       if (info.status !== s) {
         info.status = s;
@@ -554,29 +785,41 @@ export class Sessions {
     switch (body.type) {
       case 'turn.started':
         rt.state.currentTurnId = body.data.turnId;
+        rt.cancelled.clear();
         setStatus('running');
         changed = true;
         break;
       case 'turn.completed':
-        if (rt.state.currentTurnId === body.data.turnId) {
-          rt.state.currentTurnId = undefined;
-          rt.pendingApprovals.clear();
-          rt.responding.clear();
-          clearTimeout(rt.interruptTimer);
-          rt.interruptTimer = undefined;
-          if (!terminal) setStatus('idle');
-          changed = true;
-        }
+        rt.state.currentTurnId = undefined;
+        rt.pendingApprovals.clear();
+        rt.responding.clear();
+        rt.pendingQuestions.clear();
+        rt.answering.clear();
+        clearTimeout(rt.interruptTimer);
+        rt.interruptTimer = undefined;
+        if (!terminal) setStatus('idle');
+        changed = true;
         break;
       case 'approval.requested':
         rt.pendingApprovals.set(body.data.approvalId, body.data);
+        pendingChanged = true;
         if (!terminal) setStatus('waiting_approval');
         break;
       case 'approval.resolved':
-        rt.pendingApprovals.delete(body.data.approvalId);
+        pendingChanged = rt.pendingApprovals.delete(body.data.approvalId);
         rt.responding.delete(body.data.approvalId);
-        if (!terminal && info.status === 'waiting_approval' && rt.pendingApprovals.size === 0) {
-          setStatus(rt.state.currentTurnId ? 'running' : 'idle');
+        if (!terminal && !rt.settling && info.status === 'waiting_approval') setStatus(this.#settledStatus(rt));
+        break;
+      case 'question.asked':
+        rt.pendingQuestions.set(body.data.questionId, body.data);
+        pendingChanged = true;
+        if (!terminal && info.status !== 'waiting_approval') setStatus('waiting_input');
+        break;
+      case 'question.resolved':
+        pendingChanged = rt.pendingQuestions.delete(body.data.questionId);
+        rt.answering.delete(body.data.questionId);
+        if (!terminal && !rt.settling && pendingChanged && info.status === 'waiting_input') {
+          setStatus(this.#settledStatus(rt));
         }
         break;
       case 'session.status':
@@ -590,20 +833,32 @@ export class Sessions {
             changed = true;
           }
         }
+        // A forked session continues from its own agent session once it has one.
+        if (info.agentSessionRef && rt.state.forkOf) {
+          rt.state.forkOf = undefined;
+          changed = true;
+        }
         break;
     }
     if (changed) this.#changed(rt, ev.ts);
+    else if (pendingChanged) this.#persist(rt);
   }
 
   #changed(rt: Runtime, ts: string): void {
+    if (rt.deleted) return;
     rt.info.updatedAt = ts;
     this.#persist(rt);
     this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
   }
 
   #persist(rt: Runtime): void {
-    const state: Runtime['state'] = {};
+    if (rt.deleted) return;
+    const state: SessionState = {};
     if (rt.state.currentTurnId) state.currentTurnId = rt.state.currentTurnId;
+    if (rt.state.command) state.command = rt.state.command;
+    if (rt.state.forkOf) state.forkOf = rt.state.forkOf;
+    if (rt.pendingApprovals.size > 0) state.pendingApprovals = [...rt.pendingApprovals.keys()];
+    if (rt.pendingQuestions.size > 0) state.pendingQuestions = [...rt.pendingQuestions.keys()];
     if (rt.state.cols) state.cols = rt.state.cols;
     if (rt.state.rows) state.rows = rt.state.rows;
     this.#d.store.putSession({ info: rt.info, state });
@@ -622,6 +877,36 @@ export function validateInput(input: unknown): asserts input is InputBlock[] {
       (block.type === 'image' && typeof block.mediaType === 'string' && typeof block.dataBase64 === 'string') ||
       (block.type === 'file' && typeof block.path === 'string');
     if (!ok) throw new BizziError('bad_request', `invalid input block of type ${String(block.type)}`);
+  }
+}
+
+export function validateCommand(command: unknown): asserts command is string[] {
+  if (!Array.isArray(command) || command.length === 0 || !command.every((a) => typeof a === 'string')) {
+    throw new BizziError('bad_request', 'command must be a non-empty array of strings');
+  }
+  if (command[0] === '') throw new BizziError('bad_request', 'command[0] must be a program name');
+}
+
+function validateAnswers(answers: unknown, q: QuestionAsked): QuestionAnswers {
+  if (!answers || typeof answers !== 'object' || Array.isArray(answers)) {
+    throw new BizziError('bad_request', 'answers must be an object keyed by question id');
+  }
+  const known = q.questions ? new Set(q.questions.map((x) => x.id)) : undefined;
+  const out: QuestionAnswers = {};
+  for (const [id, v] of Object.entries(answers as Record<string, unknown>)) {
+    if (known && !known.has(id)) throw new BizziError('bad_request', `unknown question id ${id}`);
+    if (typeof v === 'string') out[id] = v;
+    else if (Array.isArray(v) && v.every((x) => typeof x === 'string')) out[id] = [...(v as string[])];
+    else throw new BizziError('bad_request', `answer for ${id} must be a string or an array of strings`);
+  }
+  return out;
+}
+
+function safeCaps(adapter: AgentAdapter, mode: SessionMode): AgentCapabilities {
+  try {
+    return adapter.capabilities(mode);
+  } catch {
+    return NO_CAPABILITIES;
   }
 }
 

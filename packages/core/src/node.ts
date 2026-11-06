@@ -7,22 +7,49 @@ import {
   newId,
   parseChannel,
   type AgentAdapter,
+  type AgentKind,
   type ChannelEvent,
+  type GlobalEventBody,
   type Logger,
   type MachineInfo,
   type MethodName,
   type MethodParams,
   type MethodResult,
+  type SessionEventBody,
 } from '@bizzi/protocol';
 import { AdapterRegistry } from './agents.ts';
 import { EventBus, type EventListener } from './bus.ts';
 import { nullLogger } from './logger.ts';
 import { buildMachineInfo } from './machine.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
-import { Sessions, type PrepareStart } from './sessions.ts';
+import { Sessions, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
 import { Store } from './store.ts';
 import { DEFAULT_MAX_BYTES, fsList, fsRead, gitDiff, gitStatus } from './tools.ts';
 import { Workspaces } from './workspaces.ts';
+
+/** Methods served by the dispatcher (subscriptions are per-connection and handled separately). */
+export type DispatchMethod = Exclude<MethodName, 'subscribe' | 'unsubscribe'>;
+
+/**
+ * A bundle of method handlers plus lifecycle hooks plugged into the node (provisioning, knowledge,
+ * secrets, login…). Extensions may only claim methods the core does not implement itself.
+ */
+export interface NodeExtension {
+  /** Handlers for methods this extension owns (e.g. agent.*, knowledge.*). */
+  methods: Partial<Record<DispatchMethod, (params: any, ctx: ExtensionContext) => unknown | Promise<unknown>>>;
+  start?(ctx: ExtensionContext): void | Promise<void>;
+  stop?(): void | Promise<void>;
+}
+
+export interface ExtensionContext {
+  node: BizziNode;
+  logger: Logger;
+  emitGlobal(body: GlobalEventBody): void;
+  /** Append an event to a session channel (e.g. login.prompt). */
+  emitSession(sessionId: string, body: SessionEventBody): void;
+  /** Extra env merged into StartSessionOptions.env for sessions of an agent (secrets). */
+  setAgentEnvProvider(fn: (agent: AgentKind) => Record<string, string> | Promise<Record<string, string>>): void;
+}
 
 export interface NodeOptions {
   /** Directory for node.db (created if missing). */
@@ -37,16 +64,12 @@ export interface NodeOptions {
   prepareStart?: PrepareStart;
   /** Grace period for adapters to confirm an interrupt (default 15 s). */
   interruptGraceMs?: number;
+  /** Service extensions (provisioning, knowledge, secrets…); started in order, stopped in reverse. */
+  extensions?: NodeExtension[];
 }
 
-/** Methods served by the dispatcher (subscriptions are per-connection and handled separately). */
-export type DispatchMethod = Exclude<MethodName, 'subscribe' | 'unsubscribe'>;
-
+/** Protocol methods the core doesn't implement; they answer `unsupported` unless an extension claims them. */
 const UNIMPLEMENTED = [
-  'session.fork',
-  'session.delete',
-  'question.respond',
-  'term.snapshot',
   'agent.plan',
   'agent.install',
   'agent.login',
@@ -66,6 +89,31 @@ const UNIMPLEMENTED = [
   'devices.list',
   'device.revoke',
 ] as const satisfies readonly DispatchMethod[];
+
+/** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */
+const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
+  'agents.list',
+  'workspaces.list',
+  'workspace.create',
+  'sessions.list',
+  'agent.plan',
+  'agent.install',
+  'agent.login',
+  'agent.setSecret',
+  'agent.deleteSecret',
+  'agent.secrets',
+  'knowledge.list',
+  'knowledge.add',
+  'knowledge.update',
+  'knowledge.forget',
+  'knowledge.inbox',
+  'knowledge.accept',
+  'knowledge.reject',
+  'knowledge.settings.get',
+  'knowledge.settings.set',
+] satisfies DispatchMethod[]);
+
+const DISPOSE_TIMEOUT_MS = 10_000;
 
 export interface Subscription {
   lastSeq: number;
@@ -91,7 +139,7 @@ export interface BizziNode {
   /** Stop accepting new turns; wait up to timeoutMs for in-flight turns. Resolves true if all finished. */
   drain(timeoutMs: number): Promise<boolean>;
   readonly draining: boolean;
-  /** Stop adapters and close the database. Idempotent. */
+  /** Stop extensions and adapters, dispose adapters and close the database. Idempotent. */
   close(): Promise<void>;
 }
 
@@ -100,6 +148,7 @@ type Handler = (p: Params) => Promise<unknown> | unknown;
 export async function createNode(opts: NodeOptions): Promise<BizziNode> {
   const logger = opts.logger ?? nullLogger;
   const store = new Store(opts.dataDir);
+  let node: Node | undefined;
   try {
     const bus = new EventBus(store, logger.child({ component: 'bus' }));
 
@@ -115,6 +164,13 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       bus.append(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine } });
     }
 
+    const envProviders = new Map<NodeExtension, AgentEnvProvider>();
+    const agentEnv: AgentEnvProvider = async (agent) => {
+      const env: Record<string, string> = {};
+      for (const fn of envProviders.values()) Object.assign(env, await fn(agent));
+      return env;
+    };
+
     const registry = new AdapterRegistry(opts.adapters, logger.child({ component: 'agents' }));
     const workspaces = new Workspaces(store, bus, machineId);
     const sessions = new Sessions({
@@ -126,10 +182,30 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       logger,
       prepareStart: opts.prepareStart,
       interruptGraceMs: opts.interruptGraceMs,
+      agentEnv,
     });
     sessions.load();
-    return new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions);
+    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions);
+    const n = node;
+    const contexts = (opts.extensions ?? []).map((ext): [NodeExtension, ExtensionContext] => [
+      ext,
+      {
+        node: n,
+        logger: logger.child({ component: 'extension' }),
+        emitGlobal: (body) => {
+          bus.append(GLOBAL_CHANNEL, body);
+        },
+        emitSession: (sessionId, body) => sessions.emit(sessionId, body),
+        setAgentEnvProvider: (fn) => {
+          envProviders.set(ext, fn);
+        },
+      },
+    ]);
+    node.registerExtensions(contexts);
+    await node.startExtensions(contexts);
+    return node;
   } catch (err) {
+    if (node) await node.close().catch(() => {});
     store.close();
     throw err;
   }
@@ -145,6 +221,8 @@ class Node implements BizziNode {
   readonly sessions: Sessions;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
+  readonly #builtins: ReadonlySet<string>;
+  readonly #started: NodeExtension[] = [];
   #closing?: Promise<void>;
 
   constructor(
@@ -165,7 +243,9 @@ class Node implements BizziNode {
     this.registry = registry;
     this.workspaces = workspaces;
     this.sessions = sessions;
-    this.#handlers = this.#buildHandlers();
+    const implemented = this.#implemented();
+    this.#builtins = new Set(Object.keys(implemented));
+    this.#handlers = { ...this.#unimplemented(), ...implemented };
   }
 
   get draining(): boolean {
@@ -183,7 +263,9 @@ class Node implements BizziNode {
     }
     const handler = Object.hasOwn(this.#handlers, method) ? this.#handlers[method as DispatchMethod] : undefined;
     if (!handler) throw new BizziError('unsupported', `unknown method ${method}`);
-    return handler(asParams(params));
+    const p = asParams(params);
+    if (MACHINE_TARGET_METHODS.has(method)) this.#checkMachineTarget(p);
+    return handler(p);
   }
 
   assertChannel(ch: string): void {
@@ -207,7 +289,24 @@ class Node implements BizziNode {
   close(): Promise<void> {
     this.#closing ??= (async () => {
       try {
+        for (const ext of this.#started.splice(0).reverse()) {
+          try {
+            await ext.stop?.();
+          } catch (err) {
+            this.logger.log('warn', 'extension stop failed', { err });
+          }
+        }
         await this.sessions.close();
+        await Promise.all(
+          this.registry.adapters.map(async (a) => {
+            if (!a.dispose) return;
+            try {
+              await withTimeout(a.dispose(), DISPOSE_TIMEOUT_MS);
+            } catch (err) {
+              this.logger.log('warn', 'adapter dispose failed', { agent: a.agent, err });
+            }
+          }),
+        );
       } finally {
         this.#store.close();
       }
@@ -215,14 +314,45 @@ class Node implements BizziNode {
     return this.#closing;
   }
 
-  #buildHandlers(): Record<DispatchMethod, Handler> {
-    return { ...this.#unimplemented(), ...this.#implemented() };
+  /** Install extension handlers. Throws if one claims a built-in, unknown or already-claimed method. */
+  registerExtensions(contexts: readonly [NodeExtension, ExtensionContext][]): void {
+    const claimed = new Set<string>();
+    const add: Partial<Record<DispatchMethod, Handler>> = {};
+    for (const [ext, ctx] of contexts) {
+      for (const [method, fn] of Object.entries(ext.methods ?? {})) {
+        if (fn === undefined) continue;
+        if (typeof fn !== 'function') throw new BizziError('bad_request', `extension handler for ${method} is not a function`);
+        if (!Object.hasOwn(this.#handlers, method)) {
+          throw new BizziError('bad_request', `extension claims ${method}, which is not a protocol method`);
+        }
+        if (this.#builtins.has(method)) throw new BizziError('conflict', `extension cannot override built-in method ${method}`);
+        if (claimed.has(method)) throw new BizziError('conflict', `method ${method} is claimed by more than one extension`);
+        claimed.add(method);
+        add[method as DispatchMethod] = (p) => fn(p, ctx);
+      }
+    }
+    Object.assign(this.#handlers, add);
   }
 
-  /** Protocol v1.1 methods not implemented yet; they answer `unsupported`. */
+  /** Start extensions in order; on failure the caller closes the node (stopping those already started). */
+  async startExtensions(contexts: readonly [NodeExtension, ExtensionContext][]): Promise<void> {
+    for (const [ext, ctx] of contexts) {
+      await ext.start?.(ctx);
+      this.#started.push(ext);
+    }
+  }
+
+  #checkMachineTarget(p: Params): void {
+    const id = p.machineId;
+    if (id === undefined || id === null) return;
+    if (typeof id !== 'string') throw new BizziError('bad_request', 'machineId must be a string');
+    if (id !== this.machine.id) throw new BizziError('not_found', `machine ${id} is not this node (${this.machine.id})`);
+  }
+
+  /** Protocol methods without a core implementation; they answer `unsupported`. */
   #unimplemented(): Record<DispatchMethod, Handler> {
     const notYet: Handler = () => {
-      throw new BizziError('unsupported', 'not implemented yet');
+      throw new BizziError('unsupported', 'not implemented on this node');
     };
     return Object.fromEntries(UNIMPLEMENTED.map((m) => [m, notYet])) as Record<DispatchMethod, Handler>;
   }
@@ -231,7 +361,7 @@ class Node implements BizziNode {
     const s = this.sessions;
     const ws = this.workspaces;
     return {
-      hello: () => ({ protocol: PROTOCOL_VERSION, serverVersion: this.version, machine: this.machine }),
+      hello: () => ({ protocol: PROTOCOL_VERSION, serverVersion: this.version, machine: this.machine, role: 'node' }),
       'machines.list': () => ({ machines: [this.machine] }),
       'agents.list': async (p) => ({ agents: await this.registry.list(optBool(p, 'refresh') ?? false) }),
 
@@ -275,7 +405,16 @@ class Node implements BizziNode {
         const rows = optInt(p, 'rows', 1, 10_000);
         if (cols) params.cols = cols;
         if (rows) params.rows = rows;
+        if (p.command !== undefined && p.command !== null) {
+          validateCommand(p.command);
+          params.command = p.command;
+        }
         return { session: await s.create(params) };
+      },
+      'session.fork': async (p) => ({ session: await s.fork(reqString(p, 'sessionId'), optString(p, 'title') || undefined) }),
+      'session.delete': async (p) => {
+        await s.delete(reqString(p, 'sessionId'));
+        return {};
       },
       'session.send': (p) => s.send(reqString(p, 'sessionId'), p.input as never),
       'session.steer': async (p) => {
@@ -312,6 +451,17 @@ class Node implements BizziNode {
         await s.respondApproval(params);
         return {};
       },
+      'question.respond': async (p) => {
+        const params: MethodParams<'question.respond'> = {
+          sessionId: reqString(p, 'sessionId'),
+          questionId: reqString(p, 'questionId'),
+        };
+        const cancel = optBool(p, 'cancel');
+        if (cancel !== undefined) params.cancel = cancel;
+        if (p.answers !== undefined && p.answers !== null) params.answers = p.answers as never;
+        await s.respondQuestion(params);
+        return {};
+      },
 
       'term.input': (p) => {
         s.termInput(reqString(p, 'sessionId'), reqBase64(p, 'dataBase64'));
@@ -321,6 +471,7 @@ class Node implements BizziNode {
         s.termResize(reqString(p, 'sessionId'), reqInt(p, 'cols', 1, 10_000), reqInt(p, 'rows', 1, 10_000));
         return {};
       },
+      'term.snapshot': (p) => s.terminalSnapshot(reqString(p, 'sessionId')),
 
       'fs.list': (p) => fsList(ws.get(reqString(p, 'workspaceId')), optString(p, 'path')),
       'fs.read': (p) =>
@@ -336,4 +487,20 @@ class Node implements BizziNode {
       },
     };
   }
+}
+
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e: unknown) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }

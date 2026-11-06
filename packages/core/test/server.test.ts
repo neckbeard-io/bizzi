@@ -122,8 +122,9 @@ test('hello, requests and error mapping', async (t) => {
   t.after(() => c.close());
   const hello = await c.hello();
   assert.ok('result' in hello);
-  const result = hello.result as { protocol: string; machine: { id: string } };
+  const result = hello.result as { protocol: string; machine: { id: string }; role?: string };
   assert.equal(result.protocol, PROTOCOL_VERSION);
+  assert.equal(result.role, 'node');
   assert.equal(result.machine.id, node.machine.id);
 
   const { workspace } = await c.call<{ workspace: { id: string } }>('workspace.create', { path: dir.path + '/w', create: true });

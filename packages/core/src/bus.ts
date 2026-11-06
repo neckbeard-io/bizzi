@@ -50,6 +50,11 @@ export class EventBus {
     return ev;
   }
 
+  /** Drop cached state for a channel whose events were deleted (live listeners are kept). */
+  forget(ch: string): void {
+    this.#seqs.delete(ch);
+  }
+
   /** Persisted events with seq > since, oldest first (at most `limit`). */
   replay(ch: string, since = 0, limit = Number.MAX_SAFE_INTEGER): ChannelEvent[] {
     return this.#store.replay(ch, since, limit);

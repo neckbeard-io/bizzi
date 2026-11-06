@@ -3,11 +3,16 @@
 // Default script, driven by the first text block of the input:
 //   /tool <command>     a shell tool call that runs without approval
 //   /approve <command>  a shell tool call that asks for approval first
+//   /ask <question>     asks a question (question.asked) and echoes the answer
 //   /slow <ms>          stream text for roughly <ms> milliseconds
 //   /fail <message>     the turn ends with stopReason 'error'
 //   /crash              the session fails (session.status failed)
 //   /exit               the session ends (session.status ended)
 //   anything else       echoed back as "echo: <text>"
+//
+// Also: steering is acknowledged with an assistant message "steered: <text>"; starting with
+// `fork: true` gives the session a new ref (forkedFromRef = the source ref); terminal sessions keep
+// a scrollback for snapshotTerminal() and print `command` when one is given.
 
 import {
   NO_CAPABILITIES,
@@ -22,6 +27,8 @@ import {
   type ApprovalRequest,
   type EmitFn,
   type InputBlock,
+  type QuestionAnswers,
+  type QuestionItem,
   type SessionEventBody,
   type SessionMode,
   type SessionStatus,
@@ -45,7 +52,9 @@ export type FakeStep =
     }
   | { type: 'sleep'; ms: number }
   | { type: 'fail'; error: string }
-  | { type: 'status'; status: SessionStatus; reason?: string };
+  | { type: 'status'; status: SessionStatus; reason?: string; prompt?: 'approval' | 'input' | 'login' }
+  /** Ask a question and wait for question.respond; the answer (or "declined") is echoed as text. */
+  | { type: 'question'; text: string; options?: string[]; questions?: QuestionItem[] };
 
 export interface FakeTurnContext {
   turnId: string;
@@ -70,7 +79,16 @@ export interface FakeAdapterOptions {
   chunkDelayMs?: number;
   /** Don't emit turn.completed on interrupt (to exercise the core's safety net). */
   ignoreInterrupt?: boolean;
+  /** Set false to leave out respondQuestion (an adapter without question support). */
+  questions?: boolean;
+  /** Set false to leave out snapshotTerminal (the core then rebuilds scrollback from events). */
+  terminalSnapshot?: boolean;
+  /** Make send() reject with this message; with `afterComplete` it first emits turn.completed itself. */
+  rejectSend?: { message?: string; afterComplete?: boolean };
 }
+
+/** Scrollback kept by fake terminal sessions for snapshotTerminal(). */
+const FAKE_SCROLLBACK_BYTES = 256 * 1024;
 
 const STRUCTURED_CAPS: AgentCapabilities = {
   ...NO_CAPABILITIES,
@@ -78,8 +96,10 @@ const STRUCTURED_CAPS: AgentCapabilities = {
   streaming: 'token',
   steer: true,
   interrupt: true,
+  fork: true,
   resume: true,
   resumeAfterNodeRestart: true,
+  questions: true,
   approvals: 'per-tool',
   editableApprovals: true,
   permissionModes: ['default', 'acceptEdits', 'plan', 'bypassPermissions'],
@@ -141,30 +161,66 @@ export class FakeSession implements AdapterSession {
   readonly opts: StartSessionOptions;
   readonly steered: InputBlock[][] = [];
   readonly terminalInput: Uint8Array[] = [];
+  /** Answers received through respondQuestion (undefined = declined), in order. */
+  readonly answered: { questionId: string; answers: QuestionAnswers | undefined }[] = [];
+  /** With `fork: true`: the agent session this one was forked from. */
+  readonly forkedFromRef?: string;
   stopped = false;
   size?: { cols: number; rows: number };
+  /** Present unless the adapter was created with `questions: false`. */
+  respondQuestion?: (questionId: string, answers: QuestionAnswers | undefined) => Promise<void>;
+  /** Terminal mode, unless the adapter was created with `terminalSnapshot: false`. */
+  snapshotTerminal?: () => Uint8Array;
   readonly #adapter: FakeAdapter;
   readonly #emit: EmitFn;
   readonly #ref: string;
   #model: string;
   #turn?: { id: string; abort: AbortController; done: boolean };
   readonly #approvals = new Map<string, (d: ApprovalDecision) => void>();
+  readonly #questions = new Map<string, (a: QuestionAnswers | undefined) => void>();
+  #scrollback: Buffer = Buffer.alloc(0);
 
   constructor(adapter: FakeAdapter, opts: StartSessionOptions, emit: EmitFn, _ctx: AdapterContext) {
     this.#adapter = adapter;
     this.opts = opts;
-    this.#emit = emit;
-    this.#ref = opts.resumeRef ?? `fake_${newId('s').slice(2)}`;
+    this.#emit = (ev) => {
+      if (ev.type === 'term.output') this.#remember(Buffer.from(ev.data.dataBase64, 'base64'));
+      emit(ev);
+    };
+    if (opts.fork && opts.resumeRef) {
+      this.forkedFromRef = opts.resumeRef;
+      this.#ref = `fake_fork_${newId('s').slice(2)}`;
+    } else {
+      this.#ref = opts.resumeRef ?? `fake_${newId('s').slice(2)}`;
+    }
     this.#model = opts.model ?? 'fake-model';
     if (opts.cols && opts.rows) this.size = { cols: opts.cols, rows: opts.rows };
+    if (adapter.options.questions !== false) {
+      this.respondQuestion = async (questionId, answers) => {
+        const resolve = this.#questions.get(questionId);
+        if (!resolve) throw new Error(`unknown question ${questionId}`);
+        this.#questions.delete(questionId);
+        this.answered.push({ questionId, answers });
+        resolve(answers);
+      };
+    }
+    if (opts.mode === 'terminal' && adapter.options.terminalSnapshot !== false) {
+      this.snapshotTerminal = () => new Uint8Array(this.#scrollback);
+    }
   }
 
   init(): void {
     if (this.opts.mode === 'terminal') {
-      this.#emit({ type: 'term.output', data: { dataBase64: b64(`fake terminal (${this.opts.cwd})\r\n$ `) } });
+      const banner = this.opts.command ? `$ ${this.opts.command.join(' ')}\r\n` : `fake terminal (${this.opts.cwd})\r\n$ `;
+      this.#emit({ type: 'term.output', data: { dataBase64: b64(banner) } });
       return;
     }
     this.#emit({ type: 'session.info', data: { agentSessionRef: this.#ref, model: this.#model } });
+  }
+
+  /** Question ids waiting for an answer. */
+  get pendingQuestions(): string[] {
+    return [...this.#questions.keys()];
   }
 
   get currentTurnId(): string | undefined {
@@ -185,6 +241,13 @@ export class FakeSession implements AdapterSession {
     if (this.currentTurnId) throw new Error('turn already running');
     const turn = { id: turnId, abort: new AbortController(), done: false };
     this.#turn = turn;
+    const reject = this.#adapter.options.rejectSend;
+    if (reject) {
+      const message = reject.message ?? 'send rejected';
+      if (reject.afterComplete) this.#complete(turn, 'error', message);
+      else turn.done = true;
+      throw new Error(message);
+    }
     const script = this.#adapter.options.script ?? defaultScript;
     const steps = this.opts.mode === 'terminal' ? terminalScript(input) : script(input, { turnId, session: this });
     // Run asynchronously: send() resolves once the input is accepted.
@@ -192,8 +255,16 @@ export class FakeSession implements AdapterSession {
   }
 
   async steer(input: InputBlock[]): Promise<void> {
+    if (!this.currentTurnId) throw new Error('no turn in progress');
     this.steered.push(input);
-    this.#emit({ type: 'message.completed', data: { messageId: newId('msg'), role: 'user', text: textOf(input) } });
+    // Acknowledge after steer() resolves, i.e. after the core's turn.steered, like a real agent would.
+    setImmediate(() => {
+      if (this.stopped || !this.currentTurnId) return;
+      this.#emit({
+        type: 'message.completed',
+        data: { messageId: newId('msg'), role: 'assistant', text: `steered: ${textOf(input)}` },
+      });
+    });
   }
 
   async interrupt(): Promise<void> {
@@ -276,8 +347,18 @@ export class FakeSession implements AdapterSession {
           case 'fail':
             this.#complete(turn, 'error', step.error);
             return;
+          case 'question':
+            await this.#question(step, signal);
+            break;
           case 'status':
-            this.#emit({ type: 'session.status', data: step.reason ? { status: step.status, reason: step.reason } : { status: step.status } });
+            this.#emit({
+              type: 'session.status',
+              data: {
+                status: step.status,
+                ...(step.reason ? { reason: step.reason } : {}),
+                ...(step.prompt ? { prompt: step.prompt } : {}),
+              },
+            });
             if (step.status === 'ended' || step.status === 'failed') {
               turn.done = true;
               return;
@@ -332,6 +413,37 @@ export class FakeSession implements AdapterSession {
     this.#emit({ type: 'tool.updated', data: { toolId, output } });
     this.#emit({ type: 'tool.completed', data: { toolId, status: 'ok', output } });
   }
+
+  async #question(step: Extract<FakeStep, { type: 'question' }>, signal: AbortSignal): Promise<void> {
+    const questionId = newId('q');
+    const options = step.options ?? ['yes', 'no'];
+    const questions: QuestionItem[] = step.questions ?? [
+      { id: 'q1', text: step.text, header: 'Question', options: options.map((label) => ({ label })), allowText: true },
+    ];
+    const answers = await new Promise<QuestionAnswers | undefined>((resolve, reject) => {
+      this.#questions.set(questionId, resolve);
+      signal.addEventListener('abort', () => {
+        this.#questions.delete(questionId);
+        reject(new Error('aborted'));
+      });
+      this.#emit({ type: 'question.asked', data: { questionId, text: step.text, options, questions } });
+    });
+    this.#emit({
+      type: 'question.resolved',
+      data: answers ? { questionId, answers } : { questionId, cancelled: true },
+    });
+    const text = answers
+      ? `answer: ${Object.values(answers)
+          .map((v) => (Array.isArray(v) ? v.join(', ') : v))
+          .join('; ')}`
+      : 'question declined';
+    this.#emit({ type: 'message.completed', data: { messageId: newId('msg'), role: 'assistant', text } });
+  }
+
+  #remember(chunk: Buffer): void {
+    const next = Buffer.concat([this.#scrollback, chunk]);
+    this.#scrollback = next.length > FAKE_SCROLLBACK_BYTES ? next.subarray(next.length - FAKE_SCROLLBACK_BYTES) : next;
+  }
 }
 
 export const defaultScript: FakeScript = (input) => {
@@ -343,6 +455,8 @@ export const defaultScript: FakeScript = (input) => {
       return [{ type: 'tool', title: arg || 'true' }, { type: 'text', text: 'done' }];
     case '/approve':
       return [{ type: 'text', text: 'I need to run a command.' }, { type: 'tool', title: arg || 'true', approval: true }, { type: 'text', text: 'done' }];
+    case '/ask':
+      return [{ type: 'question', text: arg || 'Continue?' }, { type: 'text', text: 'done' }];
     case '/slow': {
       const ms = Number(arg) || 1000;
       const steps: FakeStep[] = [];
