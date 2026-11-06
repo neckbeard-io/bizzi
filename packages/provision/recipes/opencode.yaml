@@ -1,0 +1,165 @@
+# OpenCode 2. Verified 2026-11-05 against opencode.ai/v2/docs, opencode.ai/docs/cli, the v2
+# installer (opencode.ai/v2/install), and the local `opencode --help` of v2.0.25.
+# OpenCode 1 (npm `opencode-ai`, opencode.ai/install) uses the same `opencode` command and can't be
+# installed side by side; this recipe installs OpenCode 2 only.
+schema: 1
+name: opencode
+kind: agent
+displayName: OpenCode
+homepage: https://opencode.ai
+docs:
+  - https://opencode.ai/v2/docs
+  - https://opencode.ai/docs/cli/
+  - https://opencode.ai/v2/install
+verified: false
+notes:
+  - Install/update/uninstall and login commands are verified. Auth status has no side-effect-free command (v2's `auth list` talks to a background server), so probes rely on heuristics.
+  - OpenCode can use any provider (including local models configured in opencode.json), so "no credentials found" is reported as unknown, not missing.
+
+platforms:
+  darwin-arm64: {}
+  darwin-x64: {}
+  linux-x64: {}
+  linux-arm64: {}
+  linux-x64-musl: {}
+  linux-arm64-musl: {}
+
+detect:
+  binaries: [opencode]
+  searchPaths: ["~/.opencode/bin", "~/.local/bin"]
+  version:
+    args: [--version]
+    # "opencode v2.0.25"
+    regex: 'v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)'
+
+latest:
+  - type: url
+    url: https://opencode.ai/update/api/latest/cli/npm
+    format: json
+    jsonPath: version
+    verified: true
+    notes: [What the v2 installer reads.]
+  - type: npm
+    package: "@opencode/cli"
+    verified: true
+
+methods:
+  - id: script
+    kind: script
+    label: Install script (opencode.ai/v2/install)
+    requires: [{ command: curl }, { command: bash }, { command: tar }]
+    targetDir: "~/.opencode/bin"
+    pinnable: true
+    pathHints: [/.opencode/bin/]
+    verified: true
+    sources:
+      - https://opencode.ai/v2/docs
+      - https://opencode.ai/v2/install
+    notes:
+      - Installs to ~/.opencode/bin (fixed). --no-modify-path stops it from editing shell profiles; bizzi finds the binary via its search paths.
+    install:
+      - description: Run the OpenCode 2 installer (latest)
+        when: unpinned
+        run: curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
+      - description: Run the OpenCode 2 installer (pinned version)
+        when: pinned
+        run: curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path --version {{version}}
+    update:
+      - description: Upgrade to the latest version
+        when: unpinned
+        argv: [opencode, upgrade, --method, curl]
+      - description: Upgrade to the pinned version
+        when: pinned
+        argv: [opencode, upgrade, --method, curl, "{{version}}"]
+    uninstall:
+      - description: Uninstall OpenCode (v2 keeps session data, config and state)
+        argv: [opencode, uninstall, --force]
+
+  - id: brew
+    kind: brew
+    label: Homebrew (anomalyco/tap/opencode-v2)
+    platforms: [darwin]
+    requires: [{ command: brew }]
+    targetDir: "{{brewBin}}"
+    pinnable: false
+    pathHints: [/Cellar/opencode]
+    verified: true
+    sources: [https://opencode.ai/v2/docs]
+    notes: [homebrew-core's `opencode` formula also ships v2 (2.x as of 2026-11).]
+    install:
+      - description: Install OpenCode 2 from the anomalyco tap
+        argv: [brew, install, anomalyco/tap/opencode-v2]
+        env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
+    update:
+      - description: Upgrade OpenCode via Homebrew
+        argv: [opencode, upgrade, --method, brew]
+    uninstall:
+      - description: Uninstall the Homebrew formula
+        argv: [brew, uninstall, anomalyco/tap/opencode-v2]
+
+  - id: npm
+    kind: npm
+    label: npm global package (@opencode/cli)
+    requires: [{ command: npm, tool: node }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    pathHints: [/node_modules/@opencode/cli/]
+    verified: true
+    sources: [https://opencode.ai/v2/docs]
+    notes:
+      - A postinstall script selects the native binary, so npm must not run with ignore-scripts.
+      - bizzi installs npm globals into ~/.local (NPM_CONFIG_PREFIX) so no sudo is needed.
+    install:
+      - description: Install @opencode/cli into ~/.local
+        argv: [npm, install, -g, "@opencode/cli@{{version|latest}}"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+    uninstall:
+      - description: Uninstall @opencode/cli
+        argv: [npm, uninstall, -g, "@opencode/cli"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+
+login:
+  interactive:
+    argv: [opencode, auth, login]
+    description: Pick a provider and connect it (OAuth, device code or API key, depending on the provider).
+    verified: true
+    notes:
+      - In the TUI the same flow is /connect.
+      - Provider OAuth flows print a URL; some ask to paste an authorization code back, others (e.g. GitHub Copilot) show a device code.
+  headless:
+    - kind: command
+      description: Non-interactive provider login - append `<provider> --method <id> --answer key=value` (repeat --answer per field).
+      argv: [opencode, auth, login]
+      verified: false
+      notes:
+        - The flags exist in v2.0.25's `opencode auth login --help`; method ids and answer keys are provider-specific and undocumented, so bizzi should build the command per provider.
+    - kind: api-key-env
+      description: Provider API keys in the environment (read at launch).
+      env: ANTHROPIC_API_KEY
+      verified: true
+      notes: [Docs - "OpenCode also reads keys from your environment or a project .env file". OPENAI_API_KEY, GEMINI_API_KEY etc. work the same way.]
+  logout:
+    argv: [opencode, auth, logout]
+    description: Log out of a saved provider account.
+    verified: true
+
+auth:
+  command:
+    argv: [opencode, auth, list, --standalone, --format, json]
+    sideEffectFree: false
+    format: json
+    nonEmptyMeansOk: true
+    verified: false
+    notes: [Starts a private server for the call, so probes skip it unless allowSideEffectAuth is set. JSON shape unverified.]
+  rules:
+    - file: "~/.local/share/opencode/auth.json"
+      account: auth.json
+    - env: [ANTHROPIC_API_KEY]
+      account: ANTHROPIC_API_KEY
+    - env: [OPENAI_API_KEY]
+      account: OPENAI_API_KEY
+    - env: [GEMINI_API_KEY]
+      account: GEMINI_API_KEY
+    - env: [OPENROUTER_API_KEY]
+      account: OPENROUTER_API_KEY
+  absent: unknown

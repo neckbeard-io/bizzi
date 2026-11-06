@@ -1,0 +1,66 @@
+# Node.js in bizzi's managed tool dir, for adapters / npm installs that need it when the machine
+# has none. Verified 2026-11-05 against nodejs.org/dist (index.json, release tarballs, SHASUMS256.txt).
+schema: 1
+name: node
+kind: tool
+displayName: Node.js
+homepage: https://nodejs.org
+docs:
+  - https://nodejs.org/en/download
+  - https://nodejs.org/dist/index.json
+verified: true
+notes:
+  - Layout - ~/.bizzi/tools/node/<version>/ with ~/.bizzi/tools/node/bin symlinked to the active version's bin, which the augmented PATH picks up.
+defaultVersion: "26.13.0"
+
+platforms:
+  darwin-arm64: { vars: { nodePlatform: darwin-arm64 } }
+  darwin-x64: { vars: { nodePlatform: darwin-x64 } }
+  linux-x64: { vars: { nodePlatform: linux-x64 } }
+  linux-arm64: { vars: { nodePlatform: linux-arm64 } }
+  linux-x64-musl: { vars: { nodePlatform: linux-x64-musl } }
+
+detect:
+  binaries: [node]
+  searchPaths: ["{{toolsDir}}/node/bin"]
+  version:
+    args: [--version]
+    regex: 'v(\d+\.\d+\.\d+)'
+
+latest:
+  - type: node-dist
+    lts: true
+    verified: true
+    notes: [Newest release whose lts field is set (index.json also lists alphas first).]
+
+methods:
+  - id: managed
+    kind: binary
+    label: Official tarball into ~/.bizzi/tools/node
+    requires: [{ command: curl }, { command: tar }]
+    targetDir: "{{toolsDir}}/node/{{version}}"
+    binDir: "{{toolsDir}}/node/bin"
+    pinnable: true
+    pathHints: [/.bizzi/tools/node/]
+    verified: true
+    sources:
+      - https://nodejs.org/dist/index.json
+      - https://nodejs.org/dist/v26.13.0/SHASUMS256.txt
+    install:
+      - description: Download, verify (SHA-256) and unpack Node.js, then point node/bin at it
+        run: |
+          set -eu
+          asset=node-v{{version}}-{{nodePlatform}}.tar.gz
+          base=https://nodejs.org/dist/v{{version}}
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          curl -fsSL -o "$tmp/$asset" "$base/$asset"
+          curl -fsSL -o "$tmp/SHASUMS256.txt" "$base/SHASUMS256.txt"
+          grep " $asset\$" "$tmp/SHASUMS256.txt" > "$tmp/sum"
+          if command -v sha256sum >/dev/null 2>&1; then (cd "$tmp" && sha256sum -c sum); else (cd "$tmp" && shasum -a 256 -c sum); fi
+          mkdir -p {{toolDir}}
+          tar -xzf "$tmp/$asset" -C {{toolDir}} --strip-components=1
+          ln -sfn {{toolDir}}/bin {{toolsDir}}/node/bin
+    uninstall:
+      - description: Remove every managed Node.js version
+        run: rm -rf {{toolsDir}}/node
