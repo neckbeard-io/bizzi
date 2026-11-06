@@ -1,0 +1,20 @@
+{
+  "name": "@bizzi/adapter-codex",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test test/*.test.ts",
+    "generate-types": "node scripts/generate-types.ts"
+  },
+  "dependencies": {
+    "@bizzi/protocol": "0.0.1"
+  },
+  "devDependencies": {
+    "@openai/codex": "^0.167.0"
+  }
+}
