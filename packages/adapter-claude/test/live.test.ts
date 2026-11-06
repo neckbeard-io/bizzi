@@ -70,7 +70,9 @@ test('live: resume and fork a session', { skip: !LIVE, timeout: 240_000 }, async
     const f = await run({ resumeRef: a.ref, fork: true }, 'What was the code word? Reply with that single word.');
     assert.notEqual(f.ref, a.ref);
     assert.match(f.c.of('message.completed').map((m) => m.text).join(' '), /pelican/i);
+    const cost = (r: { c: ReturnType<typeof collector> }) => ({ turn: r.c.of('turn.completed')[0]?.usage, total: r.c.of('usage.updated').at(-1) });
     console.log('resume/fork:', JSON.stringify({ original: a.ref, resumed: b.ref, forked: f.ref }));
+    console.log('usage:', JSON.stringify({ a: cost(a), b: cost(b), f: cost(f) }));
   } finally {
     rmSync(cwd, { recursive: true, force: true });
   }
@@ -149,6 +151,44 @@ test('live: steer mid-turn, then interrupt a second turn', { skip: !LIVE, timeou
   } finally {
     clearInterval(approveAll);
     if (c.of('turn.completed').length < 2) dump(c.events);
+    await session.stop();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+test('live: AskUserQuestion round-trip', { skip: !LIVE, timeout: 180_000 }, async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'bizzi-live-'));
+  const c = collector();
+  const session = await new ClaudeAdapter().start(
+    { sessionId: 's_live4', mode: 'structured', cwd, model: MODEL, permissionMode: 'default' },
+    c.emit,
+    { logger: silentLogger },
+  );
+  try {
+    await session.send('t_1', [
+      {
+        type: 'text',
+        text: 'Use your AskUserQuestion tool to ask me one multiple-choice question: which color I prefer, options Red and Blue. After I answer, reply with only the color I chose.',
+      },
+    ]);
+    await waitFor(() => c.of('question.asked').length >= 1 || c.of('turn.completed').length === 1, 120_000);
+    const q = c.of('question.asked')[0];
+    assert.ok(q, `no question asked; events: ${c.events.map((e) => e.type).join(',')}`);
+    assert.equal(c.of('approval.requested').length, 0);
+    const item = q.questions?.[0];
+    assert.ok(item?.options?.length, 'question has options');
+    const blue = item.options.find((o) => /blue/i.test(o.label))?.label ?? item.options.at(-1)!.label;
+    await session.respondQuestion!(q.questionId, { [item.id]: blue });
+    await waitFor(() => c.of('turn.completed').length === 1, 120_000);
+    dump(c.events);
+    const done = c.of('turn.completed')[0]!;
+    assert.equal(done.stopReason, 'end_turn', done.error ?? '');
+    assert.deepEqual(c.of('question.resolved'), [{ questionId: q.questionId, answers: { [item.id]: blue } }]);
+    const final = c.of('message.completed').at(-1)?.text ?? '';
+    assert.match(final, new RegExp(blue, 'i'));
+    console.log('question:', JSON.stringify({ question: q, final }));
+  } finally {
+    if (!c.of('turn.completed').length) dump(c.events);
     await session.stop();
     rmSync(cwd, { recursive: true, force: true });
   }

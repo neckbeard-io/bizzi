@@ -5,11 +5,18 @@
 //   approve  — command needing approval; outcome depends on the client's decision
 //   hang     — streams a delta, then waits for turn/interrupt or turn/steer
 //   crash    — the process dies mid-turn
+//   ask      — item/tool/requestUserInput; the reply is echoed as a message delta
+//   askauto  — item/tool/requestUserInput withdrawn by the server (serverRequest/resolved)
+//   elicit   — mcpServer/elicitation/request (form); the reply is echoed as a message delta
+// Token usage grows with each turn (usage(100 * turn number)).
 // Every client message is echoed back as a `fake/received` notification so tests can inspect params.
 
 import { createInterface } from 'node:readline';
 
 const THREAD = 'thr_fake_1';
+const FORK = 'thr_fork_1';
+let thread = THREAD;
+const interrupted = new Set<string>();
 type Msg = { id?: string | number; method?: string; params?: any; result?: any; error?: any };
 
 if (process.argv.includes('--version')) {
@@ -98,8 +105,8 @@ const usage = (n: number) => ({
 });
 
 async function streamBody(turnId: string): Promise<void> {
-  const base = { threadId: THREAD, turnId };
-  notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+  const base = { threadId: thread, turnId };
+  notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
   notify('item/started', { ...base, startedAtMs: 0, item: { type: 'reasoning', id: 'rs_1', summary: [], content: [] } });
   notify('item/reasoning/summaryTextDelta', { ...base, itemId: 'rs_1', delta: 'Thinking', summaryIndex: 0 });
   notify('item/completed', { ...base, completedAtMs: 0, item: { type: 'reasoning', id: 'rs_1', summary: ['Thinking'], content: [] } });
@@ -153,9 +160,9 @@ async function streamBody(turnId: string): Promise<void> {
   };
   notify('item/started', { ...base, startedAtMs: 0, item: fc });
   notify('item/completed', { ...base, completedAtMs: 0, item: { ...fc, status: 'completed' } });
-  notify('thread/tokenUsage/updated', { ...base, tokenUsage: usage(100) });
+  notify('thread/tokenUsage/updated', { ...base, tokenUsage: usage(100 * turnSeq) });
   notify('some/unknown', { ...base, foo: 1 });
-  notify('turn/completed', { threadId: THREAD, turn: turnObj(turnId, 'completed') });
+  notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
 }
 
 async function handle(m: Msg): Promise<void> {
@@ -189,12 +196,18 @@ async function handle(m: Msg): Promise<void> {
         return send({ id, error: { code: -32600, message: `no rollout found for thread id ${m.params?.threadId}` } });
       }
       return send({ id, result: threadResponse(THREAD, m.params) });
+    case 'thread/fork':
+      if (m.params?.threadId !== THREAD) {
+        return send({ id, error: { code: -32600, message: `no rollout found for thread id ${m.params?.threadId}` } });
+      }
+      thread = FORK;
+      return send({ id, result: { ...threadResponse(FORK, m.params), thread: { ...threadObj(FORK), forkedFromId: THREAD } } });
     case 'turn/start': {
       const turnId = `turn_${++turnSeq}`;
       activeTurn = turnId;
       const text: string = m.params?.input?.[0]?.text ?? '';
       const script = text.split(/\s+/)[0];
-      const base = { threadId: THREAD, turnId };
+      const base = { threadId: thread, turnId };
       switch (script) {
         case 'early':
           await streamBody(turnId);
@@ -202,7 +215,7 @@ async function handle(m: Msg): Promise<void> {
           return send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
         case 'approve': {
           send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
-          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
           const cmd = {
             type: 'commandExecution',
             id: 'call_rm',
@@ -230,7 +243,7 @@ async function handle(m: Msg): Promise<void> {
             cwd: '/tmp',
           });
           const decision = reply.result?.decision;
-          notify('serverRequest/resolved', { threadId: THREAD, requestId: nextServerReqId - 1 });
+          notify('serverRequest/resolved', { threadId: thread, requestId: nextServerReqId - 1 });
           const accepted = decision === 'accept' || decision === 'acceptForSession';
           notify('item/completed', {
             ...base,
@@ -238,17 +251,111 @@ async function handle(m: Msg): Promise<void> {
             item: { ...cmd, status: accepted ? 'completed' : 'declined', exitCode: accepted ? 0 : null, aggregatedOutput: accepted ? '' : null },
           });
           notify('item/agentMessage/delta', { ...base, itemId: 'msg_d', delta: `decision:${JSON.stringify(decision)}` });
-          notify('turn/completed', { threadId: THREAD, turn: turnObj(turnId, 'completed') });
+          notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
+          return;
+        }
+        case 'ask':
+        case 'askauto': {
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
+          const params = {
+            ...base,
+            itemId: 'call_ask',
+            isBlocking: script === 'ask',
+            autoResolutionMs: null,
+            questions: [
+              {
+                id: 'q_db',
+                header: 'Database',
+                question: 'Which database?',
+                isOther: false,
+                isSecret: false,
+                options: [
+                  { label: 'Postgres', description: 'server' },
+                  { label: 'SQLite', description: '' },
+                ],
+              },
+              { id: 'q_name', header: 'Name', question: 'Project name?', isOther: true, isSecret: false, options: null },
+            ],
+          };
+          if (script === 'askauto') {
+            const reqId = nextServerReqId;
+            void serverRequest('item/tool/requestUserInput', params);
+            await tick();
+            notify('serverRequest/resolved', { threadId: thread, requestId: reqId });
+            await tick();
+            notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
+            return;
+          }
+          const reply = await serverRequest('item/tool/requestUserInput', params);
+          await tick();
+          if (interrupted.has(turnId)) return;
+          notify('item/agentMessage/delta', { ...base, itemId: 'msg_q', delta: `reply:${JSON.stringify(reply.result)}` });
+          notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
+          return;
+        }
+        case 'elicit': {
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
+          const reply = await serverRequest('mcpServer/elicitation/request', {
+            threadId: thread,
+            turnId,
+            serverName: 'deploy',
+            mode: 'form',
+            _meta: null,
+            message: 'Deployment settings',
+            requestedSchema: {
+              type: 'object',
+              properties: {
+                env: { type: 'string', title: 'Environment', oneOf: [{ const: 'prod', title: 'Production' }, { const: 'stg', title: 'Staging' }] },
+                replicas: { type: 'integer', title: 'Replicas', description: 'How many replicas?' },
+                confirm: { type: 'boolean', title: 'Confirm' },
+                regions: { type: 'array', title: 'Regions', items: { type: 'string', enum: ['us', 'eu'] } },
+                note: { type: 'string', title: 'Note' },
+              },
+              required: ['env', 'replicas'],
+            },
+          });
+          await tick();
+          if (interrupted.has(turnId)) return;
+          notify('item/agentMessage/delta', { ...base, itemId: 'msg_e', delta: `reply:${JSON.stringify(reply.result)}` });
+          notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
           return;
         }
         case 'hang':
           send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
-          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
           notify('item/agentMessage/delta', { ...base, itemId: 'msg_h', delta: 'working' });
+          return;
+        case 'lateask':
+          // The turn ends first; an MCP elicitation arrives between turns.
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
+          await tick();
+          await serverRequest('mcpServer/elicitation/request', {
+            threadId: thread,
+            turnId: null,
+            serverName: 'late',
+            mode: 'form',
+            _meta: null,
+            message: 'Proceed?',
+            requestedSchema: { type: 'object', properties: {} },
+          });
+          return;
+        case 'askcrash':
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          void serverRequest('item/tool/requestUserInput', {
+            ...base,
+            itemId: 'call_ask',
+            isBlocking: true,
+            autoResolutionMs: null,
+            questions: [{ id: 'q', header: 'Q', question: 'Continue?', isOther: true, isSecret: false, options: null }],
+          });
+          setTimeout(() => process.exit(3), 50);
           return;
         case 'crash':
           send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
-          notify('turn/started', { threadId: THREAD, turn: turnObj(turnId, 'inProgress') });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
           await tick();
           process.stderr.write('\u001b[31mERROR\u001b[0m boom: simulated crash\n');
           setTimeout(() => process.exit(3), 10);
@@ -265,14 +372,15 @@ async function handle(m: Msg): Promise<void> {
         return send({ id, error: { code: -32600, message: 'expectedTurnId does not match active turn' } });
       }
       send({ id, result: { turnId: activeTurn } });
-      const base = { threadId: THREAD, turnId: activeTurn };
+      const base = { threadId: thread, turnId: activeTurn };
       notify('item/agentMessage/delta', { ...base, itemId: 'msg_h', delta: ` steered:${m.params.input?.[0]?.text}` });
-      notify('turn/completed', { threadId: THREAD, turn: turnObj(activeTurn as string, 'completed') });
+      notify('turn/completed', { threadId: thread, turn: turnObj(activeTurn as string, 'completed') });
       return;
     }
     case 'turn/interrupt':
+      interrupted.add(m.params.turnId);
       send({ id, result: {} });
-      notify('turn/completed', { threadId: THREAD, turn: turnObj(m.params.turnId, 'interrupted') });
+      notify('turn/completed', { threadId: thread, turn: turnObj(m.params.turnId, 'interrupted') });
       return;
     default:
       return send({ id, error: { code: -32601, message: `method not found: ${m.method}` } });

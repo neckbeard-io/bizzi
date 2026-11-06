@@ -41,11 +41,8 @@ export interface ClaudeAdapterOptions {
   sdkOptions?: Partial<Options>;
 }
 
-/** Fork support until StartSessionOptions grows a field for it (see README). */
-export interface ClaudeStartSessionOptions extends StartSessionOptions {
-  /** With `resumeRef`: continue in a new Claude session id instead of appending to the original. */
-  fork?: boolean;
-}
+/** @deprecated `fork` is part of StartSessionOptions since protocol v1.1. */
+export type ClaudeStartSessionOptions = StartSessionOptions;
 
 const CLIENT_APP = 'bizzi/0.0.1';
 
@@ -73,6 +70,7 @@ const STRUCTURED_CAPABILITIES: AgentCapabilities = {
   instructionInjection: 'system-append',
   usage: 'tokens+cost',
   terminal: false,
+  questions: true,
 };
 
 export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<string, McpServerConfig> {
@@ -89,6 +87,7 @@ export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<st
 export class ClaudeAdapter implements AgentAdapter {
   readonly agent = 'claude' as const;
   readonly #opts: ClaudeAdapterOptions;
+  readonly #sessions = new Set<ClaudeSession>();
 
   constructor(opts: ClaudeAdapterOptions = {}) {
     this.#opts = opts;
@@ -113,7 +112,7 @@ export class ClaudeAdapter implements AgentAdapter {
       throw new BizziError('unsupported', 'the Claude SDK adapter only runs structured sessions');
     }
     const log = ctx.logger.child({ adapter: 'claude', sessionId: opts.sessionId });
-    const fork = (opts as ClaudeStartSessionOptions).fork === true && !!opts.resumeRef;
+    const fork = opts.fork === true && !!opts.resumeRef;
     const allowBypass = this.#opts.allowBypassPermissions ?? true;
 
     let permissionMode: Options['permissionMode'];
@@ -149,6 +148,7 @@ export class ClaudeAdapter implements AgentAdapter {
         maxToolOutputChars: this.#opts.maxToolOutputChars ?? 8000,
         interruptGraceMs: this.#opts.interruptGraceMs ?? 10_000,
         allowBypassPermissions: allowBypass,
+        resumed: !!opts.resumeRef,
       },
       ref,
     );
@@ -162,6 +162,8 @@ export class ClaudeAdapter implements AgentAdapter {
         : { type: 'preset', preset: 'claude_code' },
       includePartialMessages: this.#opts.includePartialMessages ?? true,
       canUseTool: session.canUseTool,
+      onElicitation: session.onElicitation,
+      forwardSubagentText: true,
       stderr: (d) => session.onStderr(d),
       ...(allowBypass ? { allowDangerouslySkipPermissions: true } : {}),
       ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
@@ -187,7 +189,16 @@ export class ClaudeAdapter implements AgentAdapter {
       ...(permissionMode ? { permissionMode } : {}),
       ...(effort ? { effort } : {}),
     });
+    this.#sessions.add(session);
+    void session.done.finally(() => this.#sessions.delete(session));
     return session;
+  }
+
+  /** Stops every session this adapter started (there is no shared process). Idempotent. */
+  async dispose(): Promise<void> {
+    const sessions = [...this.#sessions];
+    this.#sessions.clear();
+    await Promise.allSettled(sessions.map((s) => s.stop()));
   }
 }
 

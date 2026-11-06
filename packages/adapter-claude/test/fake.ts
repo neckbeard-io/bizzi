@@ -41,6 +41,11 @@ export class FakeQuery implements ClaudeQuery {
     return this.options.canUseTool!(toolName, input, { signal, toolUseID: String(extra.toolUseID ?? 'toolu_x'), requestId: 'req_1', ...extra });
   }
 
+  /** An MCP elicitation, like the CLI's elicitation control request. */
+  elicit(req: Record<string, unknown>, signal: AbortSignal = new AbortController().signal) {
+    return this.options.onElicitation!(req as unknown as Parameters<NonNullable<Options['onElicitation']>>[0], { signal, requestId: 'req_e' });
+  }
+
   async *[Symbol.asyncIterator](): AsyncIterator<SDKMessage> {
     for await (const item of this.#out) {
       if ('err' in item) throw item.err;

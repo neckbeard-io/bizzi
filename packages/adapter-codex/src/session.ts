@@ -14,6 +14,7 @@ import {
   type Logger,
   type McpServerSpec,
   type PlanItem,
+  type QuestionAnswers,
   type StartSessionOptions,
   type StopReason,
   type ToolKind,
@@ -28,13 +29,14 @@ import type {
   FileChangeRequestApprovalParams,
   FileUpdateChange,
   InitializeParams,
-  McpServerElicitationRequestResponse,
+  McpServerElicitationRequestParams,
   NotificationMethod,
   NotificationParams,
   PermissionsRequestApprovalParams,
   PermissionsRequestApprovalResponse,
   ReviewDecision,
   SandboxPolicy,
+  ThreadForkParams,
   ThreadItem,
   ThreadResumeParams,
   ThreadStartParams,
@@ -43,8 +45,18 @@ import type {
   TurnStartParams,
   TurnStartResponse,
   TurnSteerParams,
+  ToolRequestUserInputParams,
   UserInput,
 } from './codex-types.ts';
+import {
+  assertAnswers,
+  elicitationQuestions,
+  elicitationResponse,
+  userInputQuestions,
+  userInputResponse,
+  type ElicitationPlan,
+  type QuestionForm,
+} from './questions.ts';
 import { AppServerProcess, describeExit, type SpawnSpec } from './process.ts';
 import { isPermissionMode, PERMISSION_MODE_NAMES, PERMISSION_MODES, permissionModeFor, sandboxPolicyFor } from './permissions.ts';
 import { RpcClosedError, RpcError, type IncomingNotification, type IncomingRequest, type RpcId } from './rpc.ts';
@@ -65,6 +77,10 @@ interface ActiveTurn {
   interruptRequested: boolean;
   interruptTimer?: ReturnType<typeof setTimeout>;
   usageAtStart?: TokenUsageBreakdown;
+  /** False on the first turn after resume/fork, when the thread total before the turn is unknown. */
+  baselineKnown: boolean;
+  /** Sum of per-request (`last`) usage seen during the turn; used when the baseline is unknown. */
+  lastSum?: TokenUsageBreakdown;
   sawUsage: boolean;
   openTools: Set<string>;
 }
@@ -81,6 +97,10 @@ interface PendingApproval {
   method: ApprovalMethod;
   params: unknown;
 }
+
+type PendingQuestion =
+  | { rpcId: RpcId; kind: 'userInput' }
+  | { rpcId: RpcId; kind: 'elicitation'; plan: ElicitationPlan };
 
 interface Overrides {
   model?: string;
@@ -162,6 +182,22 @@ export function toUsage(b: TokenUsageBreakdown, contextWindow?: number | null): 
   if (b.cacheWriteInputTokens) u.cacheWriteTokens = b.cacheWriteInputTokens;
   if (contextWindow) u.contextWindow = contextWindow;
   return u;
+}
+
+function addBreakdown(a: TokenUsageBreakdown | undefined, b: TokenUsageBreakdown): TokenUsageBreakdown {
+  if (!a) return { ...b };
+  return {
+    totalTokens: a.totalTokens + b.totalTokens,
+    inputTokens: a.inputTokens + b.inputTokens,
+    cachedInputTokens: a.cachedInputTokens + b.cachedInputTokens,
+    cacheWriteInputTokens: a.cacheWriteInputTokens + b.cacheWriteInputTokens,
+    outputTokens: a.outputTokens + b.outputTokens,
+    reasoningOutputTokens: a.reasoningOutputTokens + b.reasoningOutputTokens,
+  };
+}
+
+function sameBreakdown(a: TokenUsageBreakdown | undefined, b: TokenUsageBreakdown): boolean {
+  return !!a && a.totalTokens === b.totalTokens && a.inputTokens === b.inputTokens && a.outputTokens === b.outputTokens;
 }
 
 function diffUsage(now: TokenUsageBreakdown, before: TokenUsageBreakdown | undefined): TokenUsageBreakdown {
@@ -329,6 +365,9 @@ export class CodexSession implements AdapterSession {
   #items = new Map<string, ThreadItem>();
   #reasoningSummaryItems = new Set<string>();
   #approvals = new Map<string, PendingApproval>();
+  #questions = new Map<string, PendingQuestion>();
+  /** Resumed or forked: the thread total may include turns from before this session. */
+  #inherited = false;
   #threadUsage: TokenUsageBreakdown | undefined;
   #contextWindow: number | undefined;
   /** Notifications received during the handshake (e.g. MCP startup status), replayed once the thread id is known. */
@@ -357,7 +396,8 @@ export class CodexSession implements AdapterSession {
         throw new BizziError('agent_unavailable', describeExit(exit, s.#proc.stderrTail()));
       }
       if (e instanceof RpcError && opts.resumeRef) {
-        throw new BizziError('not_found', `cannot resume codex thread ${opts.resumeRef}: ${e.message}`, { rpcCode: e.code });
+        const what = opts.fork ? 'fork' : 'resume';
+        throw new BizziError('not_found', `cannot ${what} codex thread ${opts.resumeRef}: ${e.message}`, { rpcCode: e.code });
       }
       throw toBizziError(e, 'codex app-server start failed');
     }
@@ -393,7 +433,12 @@ export class CodexSession implements AdapterSession {
     };
 
     let resp: ThreadStartResponse;
-    if (opts.resumeRef) {
+    this.#inherited = !!opts.resumeRef;
+    if (opts.resumeRef && opts.fork) {
+      // ThreadForkResponse has the same shape as ThreadStartResponse for the fields used below.
+      const params: ThreadForkParams = { threadId: opts.resumeRef, ...common, excludeTurns: true };
+      resp = await rpc.request<ThreadStartResponse>('thread/fork', params, t);
+    } else if (opts.resumeRef) {
       const params: ThreadResumeParams = { threadId: opts.resumeRef, ...common, excludeTurns: true };
       resp = await rpc.request<ThreadStartResponse>('thread/resume', params, t);
     } else {
@@ -420,6 +465,11 @@ export class CodexSession implements AdapterSession {
     return this.#threadId;
   }
 
+  /** Resolves once the app-server process has exited (stopped or died). */
+  get exited(): Promise<void> {
+    return this.#proc.exited.then(() => undefined);
+  }
+
   async send(turnId: string, input: InputBlock[]): Promise<void> {
     this.#assertAlive();
     if (this.#turn) throw new BizziError('conflict', 'a codex turn is already in progress');
@@ -429,6 +479,7 @@ export class CodexSession implements AdapterSession {
       idWaiters: [],
       interruptRequested: false,
       usageAtStart: this.#threadUsage,
+      baselineKnown: this.#threadUsage !== undefined || !this.#inherited,
       sawUsage: false,
       openTools: new Set(),
     };
@@ -474,6 +525,9 @@ export class CodexSession implements AdapterSession {
     const turn = this.#turn;
     if (!turn || turn.interruptRequested || this.#stopped || this.#failed) return;
     turn.interruptRequested = true;
+    // Don't leave prompts open while the turn winds down.
+    this.#cancelApprovals('turn interrupted');
+    this.#cancelQuestions();
     turn.interruptTimer = setTimeout(() => {
       if (this.#turn === turn) {
         this.#logger.log('warn', 'codex did not confirm the interrupt; completing the turn locally', {
@@ -492,6 +546,16 @@ export class CodexSession implements AdapterSession {
     this.#approvals.delete(approvalId);
     this.#proc.rpc.respond(pending.rpcId, approvalResponse(pending, decision));
     this.#emit({ type: 'approval.resolved', data: { approvalId, decision: decision.decision } });
+  }
+
+  async respondQuestion(questionId: string, answers: QuestionAnswers | undefined): Promise<void> {
+    const pending = this.#questions.get(questionId);
+    if (!pending) throw new BizziError('not_found', `no pending codex question ${questionId}`);
+    assertAnswers(answers);
+    const reply = pending.kind === 'userInput' ? userInputResponse(answers) : elicitationResponse(pending.plan, answers);
+    this.#questions.delete(questionId);
+    this.#proc.rpc.respond(pending.rpcId, reply);
+    this.#resolveQuestion(questionId, answers);
   }
 
   async set(opts: { model?: string; permissionMode?: string; effort?: string }): Promise<void> {
@@ -527,6 +591,7 @@ export class CodexSession implements AdapterSession {
     this.#stopped = true;
     if (this.#turn) this.#finishTurn('interrupted');
     this.#cancelApprovals('session stopped');
+    this.#cancelQuestions();
     await this.#proc.kill();
     if (!this.#failed) this.#emit({ type: 'session.status', data: { status: 'ended' } });
   }
@@ -579,6 +644,7 @@ export class CodexSession implements AdapterSession {
     }
     for (const w of turn.idWaiters.splice(0)) w.reject(new BizziError('conflict', 'the codex turn ended'));
     this.#cancelApprovals('turn ended');
+    this.#cancelQuestions();
     this.#items.clear();
     this.#reasoningSummaryItems.clear();
     this.#emit({
@@ -592,17 +658,46 @@ export class CodexSession implements AdapterSession {
     });
   }
 
+  /** Per-turn usage: the change in the thread total, or the sum of per-request usage when the start total is unknown. */
   #turnUsage(turn: ActiveTurn): Usage | undefined {
     if (!turn.sawUsage || !this.#threadUsage) return undefined;
+    if (!turn.baselineKnown) return turn.lastSum ? toUsage(turn.lastSum, this.#contextWindow) : undefined;
     return toUsage(diffUsage(this.#threadUsage, turn.usageAtStart), this.#contextWindow);
   }
 
+  /** Answer every pending approval `cancel` (a no-op once the process is gone) and report it cancelled. */
   #cancelApprovals(reason: string): void {
     for (const [approvalId, p] of this.#approvals) {
       this.#approvals.delete(approvalId);
       this.#proc.rpc.respond(p.rpcId, approvalResponse(p, { decision: 'deny', message: reason }, true));
-      this.#emit({ type: 'approval.resolved', data: { approvalId, decision: 'deny', by: 'system' } });
+      this.#emit({ type: 'approval.resolved', data: { approvalId, decision: 'cancelled', by: 'bizzi' } });
     }
+  }
+
+  /** Decline / cancel every pending question (a no-op once the process is gone) and report it cancelled. */
+  #cancelQuestions(): void {
+    for (const [questionId, q] of this.#questions) {
+      this.#questions.delete(questionId);
+      this.#proc.rpc.respond(q.rpcId, q.kind === 'userInput' ? userInputResponse(undefined) : elicitationResponse(q.plan, undefined, true));
+      this.#emit({ type: 'question.resolved', data: { questionId, cancelled: true } });
+    }
+  }
+
+  #askQuestion(form: QuestionForm, pending: PendingQuestion): void {
+    const questionId = newId('q');
+    this.#questions.set(questionId, pending);
+    this.#emit({
+      type: 'question.asked',
+      data: { questionId, text: form.text, ...(form.options ? { options: form.options } : {}), questions: form.questions },
+    });
+    this.#emit({ type: 'session.status', data: { status: 'waiting_input', prompt: 'input' } });
+  }
+
+  #resolveQuestion(questionId: string, answers: QuestionAnswers | undefined): void {
+    this.#emit({ type: 'question.resolved', data: answers === undefined ? { questionId, cancelled: true } : { questionId, answers } });
+    if (this.#questions.size > 0 || this.#stopped || this.#failed) return;
+    const status = this.#approvals.size > 0 ? 'waiting_approval' : this.#turn ? 'running' : 'idle';
+    this.#emit({ type: 'session.status', data: { status } });
   }
 
   #onExit(): void {
@@ -612,7 +707,9 @@ export class CodexSession implements AdapterSession {
     this.#failed = msg;
     this.#emit({ type: 'error', data: { message: msg, code: 'process_exited', fatal: true } });
     if (this.#turn) this.#finishTurn('error', msg);
-    this.#approvals.clear();
+    // Usually already cancelled by #finishTurn; this covers requests that arrived between turns.
+    this.#cancelApprovals('codex app-server exited');
+    this.#cancelQuestions();
     this.#emit({ type: 'session.status', data: { status: 'failed', reason: msg } });
   }
 
@@ -704,9 +801,13 @@ export class CodexSession implements AdapterSession {
       }
       case 'thread/tokenUsage/updated': {
         const p = n.params as NotificationParams<'thread/tokenUsage/updated'>;
+        const changed = !sameBreakdown(this.#threadUsage, p.tokenUsage.total);
         this.#threadUsage = p.tokenUsage.total;
         if (p.tokenUsage.modelContextWindow) this.#contextWindow = p.tokenUsage.modelContextWindow;
-        if (this.#turn) this.#turn.sawUsage = true;
+        if (this.#turn) {
+          this.#turn.sawUsage = true;
+          if (changed) this.#turn.lastSum = addBreakdown(this.#turn.lastSum, p.tokenUsage.last);
+        }
         this.#emit({ type: 'usage.updated', data: toUsage(p.tokenUsage.total, this.#contextWindow) });
         return;
       }
@@ -730,10 +831,17 @@ export class CodexSession implements AdapterSession {
       }
       case 'serverRequest/resolved': {
         const p = n.params as NotificationParams<'serverRequest/resolved'>;
+        // Codex withdrew a request before bizzi answered (e.g. a non-blocking question that auto-resolved).
         for (const [approvalId, a] of this.#approvals) {
           if (a.rpcId === p.requestId) {
             this.#approvals.delete(approvalId);
-            this.#emit({ type: 'approval.resolved', data: { approvalId, decision: 'deny', by: 'agent' } });
+            this.#emit({ type: 'approval.resolved', data: { approvalId, decision: 'cancelled', by: 'agent' } });
+          }
+        }
+        for (const [questionId, q] of this.#questions) {
+          if (q.rpcId === p.requestId) {
+            this.#questions.delete(questionId);
+            this.#resolveQuestion(questionId, undefined);
           }
         }
         return;
@@ -872,11 +980,15 @@ export class CodexSession implements AdapterSession {
         };
         break;
       }
+      case 'item/tool/requestUserInput': {
+        const p = r.params as ToolRequestUserInputParams;
+        this.#askQuestion(userInputQuestions(p), { rpcId: r.id, kind: 'userInput' });
+        return;
+      }
       case 'mcpServer/elicitation/request': {
-        // bizzi has no elicitation UI yet; decline so the MCP server can continue.
-        const resp: McpServerElicitationRequestResponse = { action: 'decline', content: null, _meta: null };
-        rpc.respond(r.id, resp);
-        this.#emit({ type: 'agent.raw', data: { agent: 'codex', payload: { method: r.method, params: r.params, declined: true } } });
+        const p = r.params as McpServerElicitationRequestParams;
+        const { form, plan } = elicitationQuestions(p);
+        this.#askQuestion(form, { rpcId: r.id, kind: 'elicitation', plan });
         return;
       }
       default:

@@ -5,17 +5,21 @@ import { BizziError, newId } from '@bizzi/protocol';
 import type {
   AdapterSession,
   ApprovalDecision,
-  ApprovalDecisionKind,
+  ApprovalResolution,
   EmitFn,
   InputBlock,
   Logger,
   PlanItem,
+  QuestionAnswers,
+  QuestionItem,
   SessionEventBody,
   StopReason,
   Usage,
 } from '@bizzi/protocol';
 import type {
   CanUseTool,
+  ElicitationResult,
+  OnElicitation,
   PermissionResult,
   PermissionUpdate,
   SDKMessage,
@@ -25,10 +29,14 @@ import type {
 import {
   addUsage,
   approvalKind,
+  askUserQuestionAnswers,
+  askUserQuestionItems,
+  elicitationForm,
   isEffort,
   isPermissionMode,
   normStatus,
   resultTokens,
+  serverToolResult,
   sessionUsage,
   stopReasonOf,
   todoItems,
@@ -61,6 +69,13 @@ interface PendingApproval {
   resolve: (r: PermissionResult) => void;
 }
 
+type QuestionOutcome = 'answered' | 'declined' | 'cancelled';
+
+interface PendingQuestion {
+  /** Settle the native request (AskUserQuestion permission or MCP elicitation). */
+  settle: (answers: QuestionAnswers | undefined, outcome: QuestionOutcome) => void;
+}
+
 interface BlockOrdinals {
   text: number;
   thinking: number;
@@ -73,6 +88,11 @@ interface BlockOrdinals {
 export interface SessionConfig {
   maxToolOutputChars: number;
   interruptGraceMs: number;
+  /**
+   * Resumed or forked: the CLI restores the conversation's cumulative cost, so the cost of the
+   * first turn can't be told apart from the history's and is left out of that turn's usage.
+   */
+  resumed?: boolean;
   allowBypassPermissions: boolean;
 }
 
@@ -92,14 +112,18 @@ export class ClaudeSession implements AdapterSession {
   #waiting: { turnId: string; msg: SDKUserMessage }[] = [];
   #orphaned = new Set<string>();
   #approvals = new Map<string, PendingApproval>();
+  #questions = new Map<string, PendingQuestion>();
   #blocks = new Map<string, BlockOrdinals>();
-  #streamMsgId: string | undefined;
+  /** Current streamed API message id per parent tool ('' = main loop). */
+  #streamMsgIds = new Map<string, string>();
   #tools = new Map<string, { name: string; input: unknown }>();
   #denied = new Set<string>();
+  #cancelled = new Set<string>();
   #plan: (PlanItem & { id?: string })[] = [];
   #subagents = new Set<string>();
   #info: { model?: string; permissionMode?: string; effort?: string } = {};
   #lastCost = 0;
+  #costBaselineKnown = true;
   #stampsUuids = false;
   #sentUuids = new Set<string>();
   #stderr: string[] = [];
@@ -110,6 +134,7 @@ export class ClaudeSession implements AdapterSession {
     this.#log = log;
     this.#cfg = cfg;
     this.#ref = ref;
+    this.#costBaselineKnown = !cfg.resumed;
   }
 
   /** The prompt iterable handed to the SDK. */
@@ -167,7 +192,7 @@ export class ClaudeSession implements AdapterSession {
   }
 
   async interrupt(): Promise<void> {
-    this.#denyAllApprovals('Interrupted by the user.', true);
+    this.#cancelPending('Interrupted by the user.');
     const turn = this.#active;
     if (!turn || this.#state !== 'running') return;
     turn.interrupted = true;
@@ -222,7 +247,7 @@ export class ClaudeSession implements AdapterSession {
       return;
     }
     this.#state = 'stopping';
-    this.#denyAllApprovals('Session stopped.', true);
+    this.#cancelPending('Session stopped.');
     this.#failAllTurns('interrupted');
     this.#input.end();
     try {
@@ -285,18 +310,18 @@ export class ClaudeSession implements AdapterSession {
     if (this.#state !== 'running') {
       return Promise.resolve({ behavior: 'deny', message: 'Session is not running.', interrupt: true });
     }
-    const approvalId = newId('ap');
     const toolId = o.toolUseID;
     this.#ensureToolStarted(toolId, toolName, input, undefined);
+    if (toolName === 'AskUserQuestion') return this.#askUserQuestion(toolId, input, o.signal);
+    const approvalId = newId('ap');
     return new Promise<PermissionResult>((resolve) => {
       this.#approvals.set(approvalId, { toolName, toolId, input, suggestions: o.suggestions, resolve });
       o.signal?.addEventListener(
         'abort',
-        () => this.#settle(approvalId, 'deny', { behavior: 'deny', message: 'Permission request cancelled.' }, 'agent'),
+        () => this.#settle(approvalId, 'cancelled', { behavior: 'deny', message: 'Permission request cancelled.' }, 'agent'),
         { once: true },
       );
-      const isQuestion = toolName === 'AskUserQuestion';
-      const description = isQuestion ? describeQuestions(input) : (o.description ?? o.decisionReason);
+      const description = o.description ?? o.decisionReason;
       this.#emit({
         type: 'approval.requested',
         data: {
@@ -307,7 +332,7 @@ export class ClaudeSession implements AdapterSession {
           ...(description ? { description } : {}),
           input,
           editable: true,
-          options: o.suppressAlwaysAllowRule || isQuestion ? ['allow', 'deny'] : ['allow', 'allow_always', 'deny'],
+          options: o.suppressAlwaysAllowRule ? ['allow', 'deny'] : ['allow', 'allow_always', 'deny'],
         },
       });
     });
@@ -323,10 +348,7 @@ export class ClaudeSession implements AdapterSession {
       this.#settle(approvalId, 'deny', { behavior: 'deny', message: decision.message || 'The user denied this action.' });
       return;
     }
-    let updatedInput = (decision.editedInput as Record<string, unknown> | undefined) ?? p.input;
-    if (p.toolName === 'AskUserQuestion' && !decision.editedInput && decision.message) {
-      updatedInput = { ...p.input, answers: answersFromMessage(p.input, decision.message) };
-    }
+    const updatedInput = (decision.editedInput as Record<string, unknown> | undefined) ?? p.input;
     const result: PermissionResult = { behavior: 'allow', updatedInput };
     if (decision.decision === 'allow_always') {
       result.updatedPermissions = p.suggestions?.length ? p.suggestions : fallbackRule(p.toolName, p.input);
@@ -334,18 +356,98 @@ export class ClaudeSession implements AdapterSession {
     this.#settle(approvalId, decision.decision, result);
   }
 
-  #settle(approvalId: string, decision: ApprovalDecisionKind, result: PermissionResult, by?: string): void {
+  #settle(approvalId: string, decision: ApprovalResolution, result: PermissionResult, by?: string): void {
     const p = this.#approvals.get(approvalId);
     if (!p) return;
     this.#approvals.delete(approvalId);
-    if (result.behavior === 'deny') this.#denied.add(p.toolId);
+    if (decision === 'cancelled') this.#cancelled.add(p.toolId);
+    else if (result.behavior === 'deny') this.#denied.add(p.toolId);
     p.resolve(result);
     this.#emit({ type: 'approval.resolved', data: by ? { approvalId, decision, by } : { approvalId, decision } });
   }
 
-  #denyAllApprovals(message: string, interrupt: boolean): void {
+  /** Interrupt / stop / process death: every pending approval and question ends as cancelled. */
+  #cancelPending(message: string): void {
     for (const id of [...this.#approvals.keys()]) {
-      this.#settle(id, 'deny', { behavior: 'deny', message, interrupt }, 'bizzi');
+      this.#settle(id, 'cancelled', { behavior: 'deny', message, interrupt: true }, 'bizzi');
+    }
+    for (const id of [...this.#questions.keys()]) this.#resolveQuestion(id, undefined, 'cancelled');
+  }
+
+  // ---------------------------------------------------------------- questions
+
+  /** AskUserQuestion: a structured question; the answers go back in the tool's updatedInput. */
+  #askUserQuestion(toolId: string, input: Record<string, unknown>, signal: AbortSignal | undefined): Promise<PermissionResult> {
+    const items = askUserQuestionItems(input);
+    return new Promise<PermissionResult>((resolve) => {
+      this.#openQuestion(items.length ? items : [{ id: 'answer', text: toolTitle('AskUserQuestion', input), allowText: true }], signal, (answers, outcome) => {
+        if (answers) {
+          resolve({ behavior: 'allow', updatedInput: { ...input, answers: askUserQuestionAnswers(input, answers) } });
+        } else if (outcome === 'cancelled') {
+          this.#cancelled.add(toolId);
+          resolve({ behavior: 'deny', message: 'The question was cancelled.', interrupt: true });
+        } else {
+          this.#denied.add(toolId);
+          resolve({ behavior: 'deny', message: 'The user declined to answer.' });
+        }
+      });
+    });
+  }
+
+  /** MCP elicitation (form or URL mode) as a question. */
+  readonly onElicitation: OnElicitation = (req, o) => {
+    if (this.#state !== 'running') return Promise.resolve({ action: 'cancel' });
+    const form = elicitationForm(req);
+    return new Promise<ElicitationResult>((resolve) => {
+      this.#openQuestion(form.items, o.signal, (answers, outcome) => {
+        if (!answers) return resolve({ action: outcome === 'cancelled' ? 'cancel' : 'decline' });
+        const content = form.content(answers);
+        if (content === null) return resolve({ action: 'decline' });
+        resolve(req.mode === 'url' ? { action: 'accept' } : { action: 'accept', content: content as ElicitationResult['content'] });
+      });
+    });
+  };
+
+  #openQuestion(items: QuestionItem[], signal: AbortSignal | undefined, settle: PendingQuestion['settle']): void {
+    const questionId = newId('q');
+    this.#questions.set(questionId, { settle });
+    signal?.addEventListener('abort', () => this.#resolveQuestion(questionId, undefined, 'cancelled'), { once: true });
+    const first = items[0];
+    this.#emit({
+      type: 'question.asked',
+      data: {
+        questionId,
+        text: first?.text ?? 'Question',
+        ...(first?.options?.length ? { options: first.options.map((o) => o.label) } : {}),
+        questions: items,
+      },
+    });
+    this.#emit({ type: 'session.status', data: { status: 'waiting_input', prompt: 'input' } });
+  }
+
+  async respondQuestion(questionId: string, answers: QuestionAnswers | undefined): Promise<void> {
+    if (!this.#questions.has(questionId)) throw new BizziError('not_found', `no pending question ${questionId}`);
+    if (answers !== undefined) {
+      const ok =
+        typeof answers === 'object' &&
+        answers !== null &&
+        !Array.isArray(answers) &&
+        Object.values(answers).every((v) => typeof v === 'string' || (Array.isArray(v) && v.every((x) => typeof x === 'string')));
+      if (!ok) throw new BizziError('bad_request', 'answers must map question ids to a string or string[]');
+    }
+    this.#resolveQuestion(questionId, answers, answers ? 'answered' : 'declined');
+  }
+
+  #resolveQuestion(questionId: string, answers: QuestionAnswers | undefined, outcome: QuestionOutcome): void {
+    const q = this.#questions.get(questionId);
+    if (!q) return;
+    this.#questions.delete(questionId);
+    q.settle(answers, outcome);
+    this.#emit({ type: 'question.resolved', data: answers ? { questionId, answers } : { questionId, cancelled: true } });
+    if (!this.#questions.size && this.#state === 'running') {
+      // A question between turns (e.g. an MCP elicitation) leaves the session idle.
+      const status = this.#approvals.size ? 'waiting_approval' : this.#active ? 'running' : 'idle';
+      this.#emit({ type: 'session.status', data: { status } });
     }
   }
 
@@ -374,7 +476,7 @@ export class ClaudeSession implements AdapterSession {
     const tail = this.#stderr.slice(-5).join('\n');
     const message = tail && !reason.includes(tail) ? `${reason}\n${tail}` : reason;
     this.#log.log('error', 'claude process died', { reason: message });
-    this.#denyAllApprovals('Claude Code process exited.', true);
+    this.#cancelPending('Claude Code process exited.');
     this.#input.end();
     this.#emit({ type: 'error', data: { message, code: 'agent_exited', fatal: true } });
     this.#failAllTurns('error', message);
@@ -517,28 +619,32 @@ export class ClaudeSession implements AdapterSession {
   }
 
   #onStream(m: AnyMsg): void {
-    if (m.parent_tool_use_id) return; // subagent internals; their tool calls arrive as assistant messages
+    const parent = typeof m.parent_tool_use_id === 'string' && m.parent_tool_use_id ? m.parent_tool_use_id : undefined;
+    const key = parent ?? '';
+    const pt = parent ? { parentToolId: parent } : {};
     const ev = m.event as { type: string; index?: number; message?: { id?: string }; content_block?: { type?: string }; delta?: Record<string, unknown> };
+    const streamMsgId = this.#streamMsgIds.get(key);
     switch (ev.type) {
       case 'message_start':
-        this.#streamMsgId = ev.message?.id;
+        if (ev.message?.id) this.#streamMsgIds.set(key, ev.message.id);
+        else this.#streamMsgIds.delete(key);
         return;
       case 'content_block_start': {
-        if (!this.#streamMsgId || ev.index === undefined) return;
-        const o = this.#ordinals(this.#streamMsgId);
+        if (!streamMsgId || ev.index === undefined) return;
+        const o = this.#ordinals(streamMsgId);
         const t = ev.content_block?.type;
-        if (t === 'text') o.byIndex.set(ev.index, `${this.#streamMsgId}:t${o.text++}`);
-        else if (t === 'thinking') o.byIndex.set(ev.index, `${this.#streamMsgId}:r${o.thinking++}`);
+        if (t === 'text') o.byIndex.set(ev.index, `${streamMsgId}:t${o.text++}`);
+        else if (t === 'thinking') o.byIndex.set(ev.index, `${streamMsgId}:r${o.thinking++}`);
         return;
       }
       case 'content_block_delta': {
-        if (!this.#streamMsgId || ev.index === undefined || !ev.delta) return;
-        const messageId = this.#ordinals(this.#streamMsgId).byIndex.get(ev.index);
+        if (!streamMsgId || ev.index === undefined || !ev.delta) return;
+        const messageId = this.#ordinals(streamMsgId).byIndex.get(ev.index);
         if (!messageId) return;
         if (ev.delta.type === 'text_delta' && typeof ev.delta.text === 'string' && ev.delta.text) {
-          this.#emit({ type: 'message.delta', data: { messageId, role: 'assistant', text: ev.delta.text } });
+          this.#emit({ type: 'message.delta', data: { messageId, role: 'assistant', text: ev.delta.text, ...pt } });
         } else if (ev.delta.type === 'thinking_delta' && typeof ev.delta.thinking === 'string' && ev.delta.thinking) {
-          this.#emit({ type: 'reasoning.delta', data: { messageId, text: ev.delta.thinking } });
+          this.#emit({ type: 'reasoning.delta', data: { messageId, text: ev.delta.thinking, ...pt } });
         }
         return;
       }
@@ -551,23 +657,22 @@ export class ClaudeSession implements AdapterSession {
     const msg = m.message as { id?: string; content?: unknown[] };
     const parent = typeof m.parent_tool_use_id === 'string' ? m.parent_tool_use_id : undefined;
     const apiId = msg.id ?? String(m.uuid);
+    const pt = parent ? { parentToolId: parent } : {};
     const unmapped: unknown[] = [];
     for (const raw of msg.content ?? []) {
       const b = raw as { type?: string; [k: string]: unknown };
       switch (b.type) {
         case 'text': {
-          if (parent) break;
           const o = this.#ordinals(apiId);
           const messageId = `${apiId}:t${o.doneText++}`;
-          this.#emit({ type: 'message.completed', data: { messageId, role: 'assistant', text: String(b.text ?? '') } });
+          this.#emit({ type: 'message.completed', data: { messageId, role: 'assistant', text: String(b.text ?? ''), ...pt } });
           break;
         }
         case 'thinking': {
-          if (parent) break;
           const o = this.#ordinals(apiId);
           const messageId = `${apiId}:r${o.doneThinking++}`;
           if (typeof b.thinking === 'string' && b.thinking) {
-            this.#emit({ type: 'reasoning.completed', data: { messageId, text: b.thinking } });
+            this.#emit({ type: 'reasoning.completed', data: { messageId, text: b.thinking, ...pt } });
           }
           break;
         }
@@ -579,7 +684,9 @@ export class ClaudeSession implements AdapterSession {
           this.#ensureToolStarted(String(b.id), String(b.name), b.input, parent);
           break;
         default:
-          unmapped.push(b);
+          if (typeof b.type === 'string' && b.type.endsWith('_tool_result') && typeof b.tool_use_id === 'string') {
+            this.#onServerToolResult(b);
+          } else unmapped.push(b);
       }
     }
     if (m.error) {
@@ -616,22 +723,41 @@ export class ClaudeSession implements AdapterSession {
     this.#emit({ type: 'plan.updated', data: { items: this.#plan.map((p) => ({ ...p })) } });
   }
 
+  /** Server-side tool results (web search, web fetch, code execution, MCP connector) arrive in assistant content. */
+  #onServerToolResult(b: Record<string, unknown>): void {
+    const toolId = String(b.tool_use_id);
+    const { status, text } = serverToolResult(b);
+    const trimmed = trimOutput(text, this.#cfg.maxToolOutputChars);
+    this.#emit({ type: 'tool.completed', data: status === 'ok' ? { toolId, status, output: trimmed } : { toolId, status, error: trimmed } });
+  }
+
   #onUser(m: AnyMsg): void {
     if (typeof m.uuid === 'string' && this.#sentUuids.has(m.uuid)) return; // echo of our own input
     const content = (m.message as { content?: unknown })?.content;
     const blocks = Array.isArray(content) ? (content as { type?: string; [k: string]: unknown }[]) : [];
     const results = blocks.filter((b) => b.type === 'tool_result');
-    if (!results.length) return this.#raw(m);
+    const parent = typeof m.parent_tool_use_id === 'string' && m.parent_tool_use_id ? m.parent_tool_use_id : undefined;
+    if (!results.length) {
+      // forwardSubagentText: the prompt a subagent received, shown nested under its Task/Agent call.
+      const text = typeof content === 'string' ? content : blocks.filter((b) => b.type === 'text').map((b) => String(b.text ?? '')).join('\n');
+      if (parent && text && m.isSynthetic !== true) {
+        this.#emit({ type: 'message.completed', data: { messageId: String(m.uuid ?? newId('msg')), role: 'user', text, parentToolId: parent } });
+        return;
+      }
+      return this.#raw(m);
+    }
     for (const b of results) {
       const toolId = String(b.tool_use_id);
       const tool = this.#tools.get(toolId);
       const text = toolResultText(b.content);
       const isError = b.is_error === true;
       let status: 'ok' | 'error' | 'denied' | 'cancelled' = 'ok';
-      if (this.#denied.has(toolId)) status = 'denied';
+      if (this.#cancelled.has(toolId)) status = 'cancelled';
+      else if (this.#denied.has(toolId)) status = 'denied';
       else if (isError && this.#active?.interrupted) status = 'cancelled';
       else if (isError) status = 'error';
       this.#denied.delete(toolId);
+      this.#cancelled.delete(toolId);
       const trimmed = trimOutput(text, this.#cfg.maxToolOutputChars);
       this.#emit({
         type: 'tool.completed',
@@ -688,8 +814,11 @@ export class ClaudeSession implements AdapterSession {
   #onResult(r: SDKResultMessage): void {
     const cumulative = sessionUsage(r, this.#info.model);
     const cost = r.total_cost_usd;
-    const turnCost = typeof cost === 'number' && cost >= this.#lastCost ? cost - this.#lastCost : undefined;
-    if (typeof cost === 'number') this.#lastCost = cost;
+    const turnCost = typeof cost === 'number' && this.#costBaselineKnown && cost >= this.#lastCost ? cost - this.#lastCost : undefined;
+    if (typeof cost === 'number') {
+      this.#lastCost = cost;
+      this.#costBaselineKnown = true;
+    }
     this.#emit({ type: 'usage.updated', data: cumulative });
 
     const turn = this.#active;
@@ -727,22 +856,6 @@ function assistantText(msg: { content?: unknown[] }): string {
   return (msg.content ?? [])
     .map((b) => ((b as { type?: string }).type === 'text' ? String((b as { text?: unknown }).text ?? '') : ''))
     .join('');
-}
-
-function describeQuestions(input: Record<string, unknown>): string | undefined {
-  const qs = Array.isArray(input.questions) ? (input.questions as { question?: string; options?: { label?: string }[] }[]) : [];
-  if (!qs.length) return undefined;
-  return qs
-    .map((q) => `${q.question ?? ''}${q.options?.length ? ` [${q.options.map((o) => o.label).join(' / ')}]` : ''}`)
-    .join('\n');
-}
-
-/** A plain-text answer applies to every question (usually there is one). */
-function answersFromMessage(input: Record<string, unknown>, message: string): Record<string, string> {
-  const qs = Array.isArray(input.questions) ? (input.questions as { question?: string }[]) : [];
-  const answers: Record<string, string> = {};
-  for (const q of qs) if (q.question) answers[q.question] = message;
-  return answers;
 }
 
 function fallbackRule(toolName: string, input: Record<string, unknown>): PermissionUpdate[] {

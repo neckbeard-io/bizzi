@@ -1,7 +1,8 @@
 // Pure mapping helpers between OpenCode v2 shapes and bizzi's normalized events.
 
-import type { ApprovalDecisionKind, ApprovalKind, PlanItem, ToolKind, Usage } from '@bizzi/protocol';
-import type { ModelRef, PermissionReply, ToolContent, TokenUsage } from './types.ts';
+import { BizziError } from '@bizzi/protocol';
+import type { ApprovalDecisionKind, ApprovalKind, PlanItem, QuestionAnswers, QuestionItem, ToolKind, Usage } from '@bizzi/protocol';
+import type { FormAnswer, FormField, FormInfo, ModelRef, PermissionReply, ToolContent, TokenUsage } from './types.ts';
 
 /**
  * OpenCode v2 built-in tool names (2.0.25: shell, read, edit, write, glob, grep, webfetch,
@@ -165,4 +166,115 @@ export function todoItems(input: Record<string, unknown> | undefined): PlanItem[
 export function isTodoTool(name: string): boolean {
   const n = name.toLowerCase();
   return n === 'todowrite' || n === 'todo' || n === 'todo_write';
+}
+
+/** Session-cumulative usage (`session.usage.updated` / `Session.Info`) → bizzi Usage. */
+export function usageOf(tokens: TokenUsage | undefined, cost: number | undefined): Usage {
+  const u: Usage = {};
+  addTokens(u, tokens, cost);
+  return u;
+}
+
+export function sumUsage(parts: Usage[]): Usage {
+  const out: Usage = {};
+  for (const p of parts) {
+    for (const k of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'costUsd'] as const) {
+      if (p[k] !== undefined) out[k] = (out[k] ?? 0) + p[k];
+    }
+  }
+  return out;
+}
+
+// --- forms (question tool, MCP elicitation) ----------------------------------------------------
+
+const BOOL_OPTIONS = [{ label: 'Yes' }, { label: 'No' }];
+
+function visibleFields(form: FormInfo): FormField[] {
+  return form.fields.filter((f) => !f.hidden);
+}
+
+function fieldItem(f: FormField): QuestionItem {
+  const label = f.title ?? f.key;
+  const item: QuestionItem = { id: f.key, text: f.description ?? label };
+  if (f.description && f.title && f.title !== f.description) item.header = f.title;
+  if (f.type === 'external') {
+    item.text = [f.description ?? f.title ?? 'Open this link', f.url].filter(Boolean).join(': ');
+    return item;
+  }
+  if (f.type === 'boolean') item.options = BOOL_OPTIONS.map((o) => ({ ...o }));
+  else if (f.options?.length) item.options = f.options.map((o) => (o.description ? { label: o.label, description: o.description } : { label: o.label }));
+  if (f.type === 'multiselect') item.multiSelect = true;
+  if (f.custom || (!item.options && f.type !== 'boolean')) item.allowText = true;
+  return item;
+}
+
+/** A pending form → `question.asked` payload (`text`/`options` summarize the first question). */
+export function formQuestion(form: FormInfo): { questionId: string; text: string; options?: string[]; questions: QuestionItem[] } {
+  const questions = visibleFields(form).map(fieldItem);
+  const first = questions[0];
+  let text = first?.text ?? form.title;
+  if (form.metadata?.kind !== 'question' && form.title && form.title !== text) text = first ? `${form.title}\n${text}` : form.title;
+  const out: { questionId: string; text: string; options?: string[]; questions: QuestionItem[] } = { questionId: form.id, text, questions };
+  if (first?.options?.length) out.options = first.options.map((o) => o.label);
+  return out;
+}
+
+function optionValue(f: FormField, answer: string): string {
+  const o = f.options?.find((x) => x.label === answer) ?? f.options?.find((x) => x.value === answer);
+  if (o) return o.value;
+  if (f.options?.length && f.custom === false) {
+    throw new BizziError('bad_request', `"${answer}" is not an option for "${f.title ?? f.key}"`);
+  }
+  return answer;
+}
+
+/**
+ * bizzi answers (keyed by QuestionItem.id = field key; the question text is accepted too) →
+ * the form answer the server expects: option labels become option values, multiselect values are
+ * arrays, booleans and numbers are typed.
+ */
+export function toFormAnswer(form: FormInfo, answers: QuestionAnswers): FormAnswer {
+  const fields = visibleFields(form).filter((f) => f.type !== 'external');
+  const out: FormAnswer = {};
+  for (const [k, v] of Object.entries(answers)) {
+    const f = fields.find((x) => x.key === k) ?? fields.find((x) => (x.description ?? x.title) === k);
+    if (!f) throw new BizziError('bad_request', `unknown question "${k}"`, { questions: fields.map((x) => x.key) });
+    const one = Array.isArray(v) ? v.join(', ') : v;
+    switch (f.type) {
+      case 'multiselect':
+        out[f.key] = (Array.isArray(v) ? v : [v]).map((x) => optionValue(f, String(x)));
+        break;
+      case 'boolean': {
+        if (/^(true|yes|y|1|on)$/i.test(one.trim())) out[f.key] = true;
+        else if (/^(false|no|n|0|off)$/i.test(one.trim())) out[f.key] = false;
+        else throw new BizziError('bad_request', `"${f.title ?? f.key}" needs yes or no`);
+        break;
+      }
+      case 'number':
+      case 'integer': {
+        const n = Number(one);
+        if (one.trim() === '' || !Number.isFinite(n) || (f.type === 'integer' && !Number.isInteger(n))) {
+          throw new BizziError('bad_request', `"${f.title ?? f.key}" needs ${f.type === 'integer' ? 'an integer' : 'a number'}`);
+        }
+        out[f.key] = n;
+        break;
+      }
+      default:
+        out[f.key] = optionValue(f, one);
+    }
+  }
+  return out;
+}
+
+/** A form answer from the server (e.g. answered in the TUI) → bizzi answers (option labels). */
+export function fromFormAnswer(form: FormInfo, answer: FormAnswer): QuestionAnswers {
+  const out: QuestionAnswers = {};
+  const label = (f: FormField | undefined, v: string): string => f?.options?.find((o) => o.value === v)?.label ?? v;
+  for (const [k, v] of Object.entries(answer)) {
+    const f = form.fields.find((x) => x.key === k);
+    if (Array.isArray(v)) out[k] = v.map((x) => label(f, String(x)));
+    else if (typeof v === 'boolean' && f?.type === 'boolean') out[k] = v ? 'Yes' : 'No';
+    else out[k] = label(f, String(v));
+  }
+  return out;
 }

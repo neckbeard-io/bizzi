@@ -24,10 +24,39 @@ interface FakeSession {
   interrupted: boolean;
   instructions: Record<string, unknown>;
   pendingPermissions: Map<string, (reply: string, message?: string) => void>;
+  pendingForms: Map<string, { form: FakeForm; settle: (r: FormOutcome) => void }>;
+  /** Session-cumulative usage, as `session.usage.updated` reports it. */
+  totals: { cost: number; input: number; output: number };
+  fork?: { sessionID: string; boundary: { type: 'through'; messageID: string } };
 }
+
+interface FakeForm {
+  id: string;
+  sessionID: string;
+  title: string;
+  metadata: Record<string, unknown>;
+  fields: { key: string; type: string; title?: string; description?: string; options?: { value: string; label: string; description?: string }[]; custom?: boolean }[];
+}
+
+type FormOutcome = { kind: 'reply'; answer: Record<string, unknown> } | { kind: 'cancel'; message?: string } | { kind: 'interrupt' };
 
 const FIXTURE = new URL('./fixtures/opencode-2.0.25-events.jsonl', import.meta.url);
 const FIXTURE_SESSION = 'ses_e50565c4bffed3oqv2RCnX0jhm';
+/** Real question-tool traffic (2.0.25 + qwen): answered single choice, declined multiselect, interrupted. */
+const QUESTION_FIXTURE = new URL('./fixtures/opencode-2.0.25-question.jsonl', import.meta.url);
+
+/** The n-th captured `question` tool call and the form the server created for it. */
+function capturedQuestion(n: number): { input: Record<string, unknown>; form: FakeForm } {
+  const events = readFileSync(QUESTION_FIXTURE, 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l) as { type: string; data: Record<string, unknown> });
+  const forms = events.filter((e) => e.type === 'form.created').map((e) => e.data.form as FakeForm);
+  const form = forms[n]!;
+  const toolId = (form.metadata.tool as { id: string }).id;
+  const called = events.find((e) => e.type === 'session.tool.called' && e.data.id === toolId)!;
+  return { input: called.data.input as Record<string, unknown>, form };
+}
 
 export class FakeOpenCode {
   readonly password: string | undefined;
@@ -98,7 +127,17 @@ export class FakeOpenCode {
   session(id: string, directory = '/tmp'): FakeSession {
     let s = this.sessions.get(id);
     if (!s) {
-      s = { id, directory, agent: 'build', running: false, interrupted: false, instructions: {}, pendingPermissions: new Map() };
+      s = {
+        id,
+        directory,
+        agent: 'build',
+        running: false,
+        interrupted: false,
+        instructions: {},
+        pendingPermissions: new Map(),
+        pendingForms: new Map(),
+        totals: { cost: 0, input: 0, output: 0 },
+      };
       this.sessions.set(id, s);
     }
     return s;
@@ -158,8 +197,28 @@ export class FakeOpenCode {
         case 'POST interrupt': {
           const was = s.running;
           if (was) s.interrupted = true;
-          return json(res, 200, { interrupted: was });
+          json(res, 200, { interrupted: was });
+          // Like the real server: an interrupt cancels the session's pending forms.
+          for (const f of [...s.pendingForms.values()]) f.settle({ kind: 'interrupt' });
+          for (const [pid, settle] of [...s.pendingPermissions]) {
+            s.pendingPermissions.delete(pid);
+            settle('reject', 'interrupted');
+          }
+          return;
         }
+        case 'POST fork': {
+          const src = this.sessions.get(id);
+          if (!src?.model) return json(res, 404, { _tag: 'SessionNotFoundError', sessionID: id, message: `Session not found: ${id}` });
+          const fork = this.session(this.id('ses'), src.directory);
+          fork.agent = '';
+          fork.model = src.model;
+          fork.title = `${src.title ?? 'Session'} (fork #1)`;
+          fork.fork = { sessionID: src.id, boundary: { type: 'through', messageID: this.id('msg') } };
+          this.messages.set(fork.id, [...(this.messages.get(src.id) ?? [])]);
+          return json(res, 200, { data: this.#info(fork) });
+        }
+        case 'GET form':
+          return json(res, 200, { data: [...s.pendingForms.values()].map((f) => f.form) });
         case 'POST model':
           s.model = body?.model as FakeSession['model'];
           this.emit('session.model.selected', { sessionID: s.id, model: s.model }, { directory: s.directory, durable: true });
@@ -182,6 +241,28 @@ export class FakeOpenCode {
       empty(res);
       resolve(String(body?.decision), body?.message as string | undefined);
       return;
+    }
+    if ((mm = /^\/api\/session\/(ses[^/]+)\/form\/(frm[^/]+)(\/reply)?$/.exec(p))) {
+      const s = this.session(mm[1]!);
+      const pending = s.pendingForms.get(mm[2]!);
+      if (m === 'GET' && !mm[3]) {
+        if (!pending) return json(res, 404, { _tag: 'FormNotFoundError', id: mm[2], message: 'Form not found' });
+        return json(res, 200, { data: { ...pending.form, state: { status: 'pending' } } });
+      }
+      if (!pending) return json(res, 404, { _tag: 'FormNotFoundError', id: mm[2], message: 'Form not found' });
+      if (m === 'POST' && mm[3]) {
+        const answer = (body?.answer ?? {}) as Record<string, unknown>;
+        const bad = Object.keys(answer).find((k) => !pending.form.fields.some((f) => f.key === k));
+        if (bad) return json(res, 400, { _tag: 'FormInvalidAnswerError', id: mm[2], message: `Unknown field ${bad}` });
+        empty(res);
+        pending.settle({ kind: 'reply', answer });
+        return;
+      }
+      if (m === 'DELETE' && !mm[3]) {
+        empty(res);
+        pending.settle({ kind: 'cancel', message: query.message });
+        return;
+      }
     }
     if ((mm = /^\/api\/experimental\/session\/(ses[^/]+)\/instructions\/entries\/([^/]+)$/.exec(p)) && m === 'PUT') {
       this.session(mm[1]!).instructions[decodeURIComponent(mm[2]!)] = body?.value;
@@ -214,11 +295,12 @@ export class FakeOpenCode {
   #info(s: FakeSession): Record<string, unknown> {
     return {
       id: s.id,
+      ...(s.fork ? { fork: s.fork } : {}),
       projectID: 'proj',
-      agent: s.agent,
+      ...(s.agent ? { agent: s.agent } : {}),
       model: s.model,
-      cost: 0,
-      tokens: { input: 0, output: 0, reasoning: 0, cache: { read: 0, write: 0 } },
+      cost: s.totals.cost,
+      tokens: { input: s.totals.input, output: s.totals.output, reasoning: 0, cache: { read: 0, write: 0 } },
       time: { created: Date.now(), updated: Date.now() },
       title: s.title,
       location: { directory: s.directory },
@@ -257,7 +339,11 @@ export class FakeOpenCode {
     const step = (m: string): void => ev('session.step.started', { assistantMessageID: m, agent: s.agent, model: s.model });
     const endStep = (m: string, finish: string, input: number, output: number, cost = 0): void => {
       ev('session.step.ended', { assistantMessageID: m, finish, cost, tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } } });
-      ev('session.usage.updated', { cost, tokens: { input, output, reasoning: 0, cache: { read: 0, write: 0 } } }, false);
+      const t = s.totals;
+      t.cost += cost;
+      t.input += input;
+      t.output += output;
+      ev('session.usage.updated', { cost: t.cost, tokens: { input: t.input, output: t.output, reasoning: 0, cache: { read: 0, write: 0 } } }, false);
     };
     const text = (m: string, parts: string[], ordinal = 0): void => {
       ev('session.text.started', { assistantMessageID: m, ordinal });
@@ -343,6 +429,10 @@ export class FakeOpenCode {
           );
         });
         this.emit('permission.replied', { sessionID: sid, requestID: per, reply: reply.reply }, { directory: dir });
+        if (s.interrupted) {
+          ev('session.tool.failed', { assistantMessageID: msg, id: 'call_rm', error: { type: 'aborted', message: 'Tool execution interrupted' } });
+          return done('interrupted', { reason: 'user' });
+        }
         if (reply.reply === 'reject') {
           ev('session.tool.failed', { assistantMessageID: msg, id: 'call_rm', error: { type: 'permission.rejected', message: reply.message ?? 'The user rejected permission to use this specific tool call.' } });
         } else {
@@ -365,6 +455,39 @@ export class FakeOpenCode {
         }
         ev('session.step.failed', { assistantMessageID: msg, error: { type: 'aborted', message: 'Step interrupted' } });
         return done('interrupted', { reason: 'user' });
+      }
+      case 'question':
+      case 'questionmulti': {
+        // Shapes from the real capture; the form waits for reply / DELETE / interrupt.
+        const cap = capturedQuestion(scenario === 'question' ? 0 : 1);
+        const callId = this.id('call');
+        step(msg);
+        tool(msg, callId, 'question', cap.input);
+        ev('session.step.streamed', { assistantMessageID: msg });
+        const form: FakeForm = { ...cap.form, id: this.id('frm'), sessionID: sid, metadata: { kind: 'question', tool: { messageID: msg, id: callId } } };
+        const outcome = await new Promise<FormOutcome>((settle) => {
+          s.pendingForms.set(form.id, { form, settle });
+          this.emit('form.created', { form }, { directory: dir });
+        });
+        s.pendingForms.delete(form.id);
+        if (outcome.kind === 'interrupt') {
+          this.emit('form.cancelled', { id: form.id, sessionID: sid }, { directory: dir });
+          ev('session.tool.failed', { assistantMessageID: msg, id: callId, error: { type: 'aborted', message: 'Tool execution interrupted' }, executed: false });
+          return done('interrupted', { reason: 'user' });
+        }
+        if (outcome.kind === 'cancel') {
+          this.emit('form.cancelled', { id: form.id, sessionID: sid }, { directory: dir });
+          ev('session.tool.failed', { assistantMessageID: msg, id: callId, error: { type: 'tool.execution', message: outcome.message ?? 'cancelled' }, executed: false });
+        } else {
+          this.emit('form.replied', { id: form.id, sessionID: sid, answer: outcome.answer }, { directory: dir });
+          ok(msg, callId, `User has answered your questions: ${JSON.stringify(outcome.answer)}`, { answers: Object.values(outcome.answer), truncated: false });
+        }
+        endStep(msg, 'tool-calls', 30, 4);
+        const msg2 = this.id('msg');
+        step(msg2);
+        text(msg2, [outcome.kind === 'cancel' ? 'You declined.' : `Answer: ${JSON.stringify(outcome.answer)}`]);
+        endStep(msg2, 'stop', 40, 2);
+        return done('succeeded');
       }
       case 'fail': {
         return done('failed', { error: { type: 'provider.no-route', message: 'Model unavailable: nope/bogus' } });

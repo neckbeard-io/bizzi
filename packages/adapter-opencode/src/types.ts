@@ -31,6 +31,8 @@ export interface TokenUsage {
 export interface SessionInfo {
   id: string;
   parentID?: string;
+  /** Set on forks: the source session and the message boundary. */
+  fork?: { sessionID: string; boundary: { type: 'before' | 'through'; messageID: string } };
   projectID: string;
   agent?: string;
   model?: ModelRef;
@@ -124,12 +126,47 @@ export interface PermissionRequest {
   message?: string;
 }
 
+export interface FormOption {
+  value: string;
+  label: string;
+  description?: string;
+}
+
+/** One field of a form (`Form.Field` in the OpenAPI document). */
+export interface FormField {
+  key: string;
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'multiselect' | 'external' | string;
+  title?: string;
+  description?: string;
+  required?: boolean;
+  hidden?: boolean;
+  options?: FormOption[];
+  /** Free text allowed besides the options. */
+  custom?: boolean;
+  default?: unknown;
+  url?: string;
+}
+
+/**
+ * A pending form (`Form.Info`). The `question` tool creates one per call with
+ * `metadata.kind === 'question'` and `metadata.tool` pointing at the tool call; fields are keyed
+ * `q0`, `q1`, … (type `string` for single choice, `multiselect` for multiple, `custom: true`).
+ */
 export interface FormInfo {
   id: string;
   sessionID: string;
   title: string;
-  fields: { key: string; type: string; title?: string; description?: string; options?: { value: string; label: string }[] }[];
+  metadata?: { kind?: string; tool?: { messageID: string; id: string }; [k: string]: unknown };
+  fields: FormField[];
 }
+
+/** A form answer (`Form.Answer`): field key -> value. */
+export type FormAnswer = Record<string, string | number | boolean | string[]>;
+
+export type FormState =
+  | { status: 'pending' }
+  | { status: 'answered'; answer: FormAnswer }
+  | { status: 'cancelled'; message?: string };
 
 /** Message history entries (GET /api/session/{id}/message), used to reconcile after a stream gap. */
 export type MessageInfo =
@@ -229,7 +266,7 @@ export interface OcEventMap {
   'permission.asked': PermissionRequest;
   'permission.replied': SessionScoped & { requestID: string; reply: PermissionReply };
   'form.created': { form: FormInfo };
-  'form.replied': SessionScoped & { id: string };
+  'form.replied': SessionScoped & { id: string; answer?: FormAnswer };
   'form.cancelled': SessionScoped & { id: string };
 }
 

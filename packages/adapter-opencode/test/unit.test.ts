@@ -1,6 +1,20 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { approvalKind, decisionToReply, parseModel, replyToDecision, todoItems, toolKind, toolTitle } from '../src/mapping.ts';
+import { BizziError } from '@bizzi/protocol';
+import {
+  approvalKind,
+  decisionToReply,
+  formQuestion,
+  fromFormAnswer,
+  parseModel,
+  replyToDecision,
+  sumUsage,
+  toFormAnswer,
+  todoItems,
+  toolKind,
+  toolTitle,
+  usageOf,
+} from '../src/mapping.ts';
 import { parseJsonc } from '../src/probe.ts';
 import { SseParser } from '../src/sse.ts';
 import { eventSessionId } from '../src/types.ts';
@@ -85,6 +99,36 @@ test('eventSessionId', () => {
   assert.equal(eventSessionId({ type: 'form.created', data: { form: { sessionID: 'ses_2' } } }), 'ses_2');
   assert.equal(eventSessionId({ type: 'shell.created', data: { info: { metadata: { sessionID: 'ses_3' } } } }), 'ses_3');
   assert.equal(eventSessionId({ type: 'server.connected', data: {} }), undefined);
+});
+
+test('forms: questions, answers both ways', () => {
+  const form = {
+    id: 'frm_1',
+    sessionID: 'ses_1',
+    title: 'Connect',
+    fields: [
+      { key: 'env', type: 'string', title: 'Env', options: [{ value: 'prod-1', label: 'Production' }], custom: false },
+      { key: 'tags', type: 'multiselect', title: 'Tags', options: [{ value: 'a', label: 'Alpha' }, { value: 'b', label: 'Beta' }] },
+      { key: 'auth', type: 'external', title: 'Sign in', url: 'https://example.com/login' },
+      { key: 'secret', type: 'string', hidden: true },
+    ],
+  };
+  const q = formQuestion(form);
+  assert.equal(q.text, 'Connect\nEnv');
+  assert.deepEqual(q.options, ['Production']);
+  assert.deepEqual(q.questions.map((x) => x.id), ['env', 'tags', 'auth']);
+  assert.equal(q.questions[0]!.allowText, undefined, 'custom:false → options only');
+  assert.equal(q.questions[2]!.text, 'Sign in: https://example.com/login');
+  assert.deepEqual(toFormAnswer(form, { env: 'Production', tags: ['Beta', 'zeta'] }), { env: 'prod-1', tags: ['b', 'zeta'] });
+  assert.throws(() => toFormAnswer(form, { env: 'staging' }), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
+  assert.throws(() => toFormAnswer(form, { auth: 'x' }), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
+  assert.deepEqual(fromFormAnswer(form, { env: 'prod-1', tags: ['a'] }), { env: 'Production', tags: ['Alpha'] });
+});
+
+test('usage helpers', () => {
+  const a = usageOf({ input: 10, output: 2, reasoning: 3, cache: { read: 4, write: 1 } }, 0.5);
+  assert.deepEqual(a, { inputTokens: 10, outputTokens: 5, cacheReadTokens: 4, cacheWriteTokens: 1, costUsd: 0.5 });
+  assert.deepEqual(sumUsage([a, { inputTokens: 1, costUsd: 0.25 }]), { inputTokens: 11, outputTokens: 5, cacheReadTokens: 4, cacheWriteTokens: 1, costUsd: 0.75 });
 });
 
 test('parseJsonc handles comments, trailing commas and strings with slashes', () => {
