@@ -5,23 +5,26 @@
 bizzi.example.com {
 	encode zstd gzip
 
-	# Machine and device endpoints skip interactive forward-auth: nodes and paired devices
-	# authenticate to the hub themselves (per-device keys, short-lived tokens).
-	@machine path /api/device/* /ws/device /ws/node
+	# Machine and device endpoints skip interactive forward-auth: the hub authenticates them itself
+	# (per-device Ed25519 keys, short-lived tokens; D8), and nodes and phone apps can't follow an SSO
+	# redirect.
+	#   /api/*     pairing and token API (POST /api/pair, /api/auth/challenge, /api/auth/token)
+	#   /ws        client protocol for paired devices (browser, phone, desktop)
+	#   /ws/node   node links (machines dial out to the hub)
+	@machine path /api/* /ws /ws/node
 	handle @machine {
 		reverse_proxy hub:7777 {
 			flush_interval -1
 		}
 	}
 
+	# The web UI (static files served by the hub).
 	handle {
 		# Optional, once an IdP is chosen (Authelia, Authentik, Pocket ID, ...):
 		# forward_auth authelia:9091 {
 		# 	uri /api/authz/forward-auth
 		# 	copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
 		# }
-		reverse_proxy hub:7777 {
-			flush_interval -1
-		}
+		reverse_proxy hub:7777
 	}
 }

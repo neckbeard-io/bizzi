@@ -1,2 +1,14 @@
-# The hub placeholder copies nothing from the repo; it builds on the node image.
+# Build context = repo root. The hub builds on the node image and only needs the sources for the UI stage.
 *
+!package.json
+!package-lock.json
+!packages/
+!apps/
+apps/desktop
+**/node_modules
+**/test
+**/dist
+**/out
+**/coverage
+**/*.log
+**/.DS_Store

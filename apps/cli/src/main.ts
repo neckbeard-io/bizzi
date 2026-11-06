@@ -2,6 +2,8 @@
 // `bizzi` command-line entry point.
 
 import { readFileSync } from 'node:fs';
+import { hub, HUB_HELP } from './hub.ts';
+import { pair, PAIR_HELP } from './pair.ts';
 import { serve, SERVE_HELP } from './serve.ts';
 import { status, STATUS_HELP } from './status.ts';
 import { UsageError } from './util.ts';
@@ -11,6 +13,8 @@ const HELP = `Usage: bizzi <command> [options]
 Commands:
   serve    run the node (sessions, workspaces, client-protocol server)
   status   show a running node's machine, workspaces and sessions
+  pair     pair this machine's node with a hub
+  hub      run a hub (bizzi hub serve) or mint pairing codes (bizzi hub code)
   version  print the bizzi version
 
 Run "bizzi <command> --help" for command options.`;
@@ -31,6 +35,10 @@ async function main(argv: string[]): Promise<void> {
       return serve(rest, cliVersion());
     case 'status':
       return status(rest);
+    case 'pair':
+      return pair(rest);
+    case 'hub':
+      return hub(rest, cliVersion());
     case 'version':
     case '--version':
     case '-v':
@@ -40,7 +48,7 @@ async function main(argv: string[]): Promise<void> {
     case 'help':
     case '--help':
     case '-h':
-      process.stdout.write(`${HELP}\n\n${SERVE_HELP}\n\n${STATUS_HELP}\n`);
+      process.stdout.write(`${HELP}\n\n${SERVE_HELP}\n\n${STATUS_HELP}\n\n${PAIR_HELP}\n\n${HUB_HELP}\n`);
       return;
     default:
       throw new UsageError(`unknown command: ${cmd}\n\n${HELP}`);

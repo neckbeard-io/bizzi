@@ -15,6 +15,7 @@
     "@bizzi/adapter-codex": "*",
     "@bizzi/adapter-opencode": "*",
     "@bizzi/core": "*",
+    "@bizzi/hub": "*",
     "@bizzi/knowledge": "*",
     "@bizzi/protocol": "*",
     "@bizzi/pty": "*",

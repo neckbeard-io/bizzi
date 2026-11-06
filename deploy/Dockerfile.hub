@@ -1,19 +1,33 @@
-# bizzi hub image: PLACEHOLDER. The hub role (registry, relay, auth, event-log replica, push)
-# is NOT implemented yet. This image only exists so the compose layout from topology.md §2.2 is in
-# place. It starts, logs that the hub is missing, idles, and reports unhealthy.
+# bizzi hub image: the node image's program run as `bizzi hub serve` (registry, relay, pairing/auth,
+# event-log replica, push), plus the built web UI served at `/`.
 #
-# It shares the node image's base on purpose: the hub will be the same `bizzi` program run as
-# `bizzi serve --hub` (tech-choices "Resulting shape"). When that lands, only CMD changes.
-#
-# With compose, BIZZI_NODE_IMAGE points at the `node` service's freshly built image
+# It shares the node image's base on purpose (tech-choices "Resulting shape": one program, roles by
+# configuration). With compose, BIZZI_NODE_IMAGE points at the `node` service's freshly built image
 # (additional_contexts: service:node). Standalone:
 #   docker build -f deploy/Dockerfile.node -t bizzi/node:latest .
 #   docker build -f deploy/Dockerfile.hub  -t bizzi/hub:latest  .
 
 ARG BIZZI_NODE_IMAGE=bizzi/node:latest
+ARG NODE_IMAGE=node:26-trixie-slim
+
+# ---- ui: build the React UI (packages/ui) -------------------------------------------------------
+FROM ${NODE_IMAGE} AS ui
+WORKDIR /src
+COPY package.json package-lock.json ./
+COPY packages/ packages/
+COPY apps/ apps/
+# A failed UI build must not block the hub: it then serves the API only (pair from the CLI instead).
+RUN (npm ci --no-audit --no-fund --workspace @bizzi/ui && npm run build --workspace @bizzi/ui) \
+ || (echo "warning: UI build failed; the hub will serve the API only" >&2 && mkdir -p packages/ui/dist)
+
+# ---- hub --------------------------------------------------------------------------------------
 FROM ${BIZZI_NODE_IMAGE}
 
-ENV BIZZI_XVFB=0
+ENV BIZZI_ROLE=hub \
+    BIZZI_XVFB=0 \
+    BIZZI_UI_DIR=/app/ui \
+    BIZZI_HUB_DATA_DIR=/data
 
-# TODO(hub): CMD ["node", "apps/cli/src/main.ts", "serve", "--hub", "--host", "0.0.0.0", "--port", "7777", "--data-dir", "/data"]
-CMD ["sh", "-c", "echo 'bizzi hub: not implemented yet; this container is a placeholder (see deploy/README.md)' >&2; exec sleep infinity"]
+COPY --from=ui /src/packages/ui/dist /app/ui
+
+CMD ["node", "apps/cli/src/main.ts", "hub", "serve", "--host", "0.0.0.0", "--port", "7777", "--data-dir", "/data"]
