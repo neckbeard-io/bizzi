@@ -250,7 +250,7 @@ class Connection {
     const client = p.client as { name?: unknown; version?: unknown } | undefined;
     this.#log = this.#log.child({ client: typeof client?.name === 'string' ? client.name : undefined });
     this.#log.log('debug', 'client connected');
-    this.#send({ id, result: { protocol: PROTOCOL_VERSION, serverVersion: this.#node.version, machine: this.#node.machine } });
+    this.#send({ id, result: { protocol: PROTOCOL_VERSION, serverVersion: this.#node.version, machine: this.#node.machine, role: 'node' } });
   }
 
   async #handle(id: string, method: string, params: unknown): Promise<void> {
