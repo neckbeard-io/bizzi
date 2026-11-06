@@ -1,0 +1,193 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { BizziClient, BizziStore, createManualScheduler } from '@bizzi/client';
+import type { KnowledgeItemInfo, MachineInfo, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
+import {
+  cardSummary,
+  filterByAgent,
+  groupByScope,
+  matchesAgent,
+  parseTags,
+  projectOptions,
+  retargetScope,
+  sameScope,
+  scopeComplete,
+  scopeLabel,
+} from '../src/lib/knowledge.ts';
+import type { ScopeContext } from '../src/lib/knowledge.ts';
+
+const machine = (id: string, name: string): MachineInfo => ({
+  id,
+  name,
+  hostname: `${name}.lan`,
+  os: 'linux',
+  arch: 'x64',
+  headful: false,
+  alwaysOn: true,
+  tags: [],
+  online: true,
+  roles: ['node'],
+  bizziVersion: '0',
+});
+
+const ws = (id: string, name: string, machineId: string, projectId?: string): WorkspaceInfo => {
+  const w: WorkspaceInfo = { id, name, machineId, path: `/src/${name}`, kind: 'git', createdAt: 'x' };
+  if (projectId) w.projectId = projectId;
+  return w;
+};
+
+const CTX: ScopeContext = {
+  machines: { m_a: machine('m_a', 'laptop'), m_b: machine('m_b', 'server-a') },
+  workspaces: { w_1: ws('w_1', 'acme-shop', 'm_a', 'p_acme'), w_2: ws('w_2', 'acme-shop', 'm_b', 'p_acme'), w_3: ws('w_3', 'notes', 'm_a') },
+  sessions: {
+    s_1: { id: 's_1', machineId: 'm_a', workspaceId: 'w_1', agent: 'claude', mode: 'structured', status: 'idle', title: 'Fix it', createdAt: 'x', updatedAt: 'x', lastSeq: 0 } satisfies SessionInfo,
+    s_3: { id: 's_3', machineId: 'm_a', workspaceId: 'w_3', agent: 'codex', mode: 'structured', status: 'idle', createdAt: 'x', updatedAt: 'x', lastSeq: 0 } satisfies SessionInfo,
+  },
+};
+
+function item(over: Partial<KnowledgeItemInfo>): KnowledgeItemInfo {
+  return {
+    id: 'k_1',
+    type: 'memory',
+    scope: { level: 'global' },
+    title: 't',
+    body: 'b',
+    tags: [],
+    source: { machineId: 'm_a', via: 'tool', agent: 'claude', sessionId: 's_1' },
+    status: 'suggested',
+    createdAt: 'x',
+    updatedAt: 'x',
+    ...over,
+  };
+}
+
+test('scope labels resolve names and fall back to ids', () => {
+  assert.equal(scopeLabel({ level: 'global' }, CTX), 'global');
+  assert.equal(scopeLabel({ level: 'machine', machineId: 'm_b' }, CTX), 'machine · server-a');
+  assert.equal(scopeLabel({ level: 'machine', machineId: 'm_x' }, CTX), 'machine · m_x');
+  assert.equal(scopeLabel({ level: 'workspace', workspaceId: 'w_3' }, CTX), 'workspace · notes');
+  assert.equal(scopeLabel({ level: 'project', projectId: 'p_acme' }, CTX), 'project · acme-shop');
+  assert.equal(scopeLabel({ level: 'project', projectId: 'p_other' }, CTX), 'project · other');
+  assert.equal(scopeLabel({ level: 'session', sessionId: 's_1' }, CTX), 'session · Fix it');
+});
+
+test('retargetScope fills ids from the item scope, then its source session', () => {
+  const it = item({ scope: { level: 'workspace', workspaceId: 'w_1' } });
+  assert.deepEqual(retargetScope(it, 'workspace', CTX), { level: 'workspace', workspaceId: 'w_1' });
+  assert.deepEqual(retargetScope(it, 'global', CTX), { level: 'global' });
+  assert.deepEqual(retargetScope(it, 'project', CTX), { level: 'project', projectId: 'p_acme' });
+  assert.deepEqual(retargetScope(it, 'machine', CTX), { level: 'machine', machineId: 'm_a' });
+
+  // A global suggestion from session s_1 can be narrowed to that session's workspace / project.
+  const g = item({});
+  assert.deepEqual(retargetScope(g, 'workspace', CTX), { level: 'workspace', workspaceId: 'w_1' });
+  assert.deepEqual(retargetScope(g, 'project', CTX), { level: 'project', projectId: 'p_acme' });
+
+  // No project link: project scope is impossible.
+  const n = item({ source: { machineId: 'm_a', via: 'tool', sessionId: 's_3' } });
+  assert.equal(retargetScope(n, 'project', CTX), null);
+  // No session at all: machine falls back to the source machine, workspace is impossible.
+  const bare = item({ source: { machineId: 'm_b', via: 'ui' } });
+  assert.deepEqual(retargetScope(bare, 'machine', CTX), { level: 'machine', machineId: 'm_b' });
+  assert.equal(retargetScope(bare, 'workspace', CTX), null);
+});
+
+test('agent filter: no appliesTo means every agent', () => {
+  const all = item({ id: 'a' });
+  const codex = item({ id: 'c', appliesTo: ['codex'] });
+  assert.equal(matchesAgent(all, 'claude'), true);
+  assert.equal(matchesAgent(codex, 'claude'), false);
+  assert.equal(matchesAgent(codex, 'all'), true);
+  assert.deepEqual(filterByAgent([all, codex], 'codex').map((i) => i.id), ['a', 'c']);
+  assert.deepEqual(filterByAgent([all, codex], 'opencode').map((i) => i.id), ['a']);
+});
+
+test('card summary, tags, scope helpers', () => {
+  assert.equal(cardSummary({ items: [item({}), item({}), item({ type: 'rule' })] }), '2 suggested memories, 1 rule');
+  assert.equal(cardSummary({ items: [item({ type: 'rule' })] }), '1 suggested rule');
+  assert.equal(cardSummary({ items: [] }), 'No suggestions');
+  assert.deepEqual(parseTags(' db, #infra,, db\nci '), ['db', 'infra', 'ci']);
+  assert.equal(sameScope({ level: 'workspace', workspaceId: 'w_1' }, { level: 'workspace', workspaceId: 'w_1' }), true);
+  assert.equal(sameScope({ level: 'workspace', workspaceId: 'w_1' }, { level: 'workspace', workspaceId: 'w_2' }), false);
+  assert.equal(scopeComplete({ level: 'project' }), false);
+  assert.equal(scopeComplete({ level: 'global' }), true);
+  assert.deepEqual(projectOptions(CTX, ['p_zeta']), [
+    { projectId: 'p_acme', label: 'acme-shop' },
+    { projectId: 'p_zeta', label: 'zeta' },
+  ]);
+});
+
+test('groupByScope makes one accept call per target scope', () => {
+  const groups = groupByScope([
+    { id: 'a' },
+    { id: 'b', scope: { level: 'global' } },
+    { id: 'c' },
+    { id: 'd', scope: { level: 'global' } },
+    { id: 'e', scope: { level: 'workspace', workspaceId: 'w_1' } },
+  ]);
+  assert.deepEqual(groups, [
+    { ids: ['a', 'c'] },
+    { scope: { level: 'global' }, ids: ['b', 'd'] },
+    { scope: { level: 'workspace', workspaceId: 'w_1' }, ids: ['e'] },
+  ]);
+});
+
+function waitFor(cond: () => boolean, timeoutMs = 3000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const start = Date.now();
+    const tick = (): void => {
+      if (cond()) return resolve();
+      if (Date.now() - start > timeoutMs) return reject(new Error('waitFor timed out'));
+      setTimeout(tick, 2);
+    };
+    tick();
+  });
+}
+
+test('mock knowledge: list filters, inbox, accept with scope, forget, settings', async (t) => {
+  const core = new MockCore({ speed: 0, autoplay: false });
+  const client = new BizziClient({ createSocket: createMockSocketFactory(core) });
+  const scheduler = createManualScheduler();
+  const store = new BizziStore(client, { scheduler });
+  t.after(() => {
+    store.dispose();
+    client.close();
+  });
+  await client.connect('mock://local');
+  const flushUntil = (cond: () => boolean): Promise<void> =>
+    waitFor(() => {
+      scheduler.flush();
+      return cond();
+    });
+  await flushUntil(() => store.getState().knowledgeInbox !== null && store.getState().knowledgeSettings !== null);
+
+  const all = await store.listKnowledge();
+  assert.ok(all.length >= 12);
+  assert.ok(all.every((i) => i.status === 'active'));
+  const rules = await store.listKnowledge({ type: 'rule', scopeLevel: 'workspace' });
+  assert.ok(rules.length > 0 && rules.every((i) => i.type === 'rule' && i.scope.level === 'workspace'));
+  assert.deepEqual((await store.listKnowledge({ query: 'YARN' })).map((i) => i.id), ['k_pnpm']);
+
+  const cards = store.getState().knowledgeInbox ?? [];
+  assert.equal(cards.length, 2);
+  const demo = cards.find((c) => c.sessionId === 's_demo');
+  assert.equal(demo?.items.length, 3);
+  assert.equal(demo?.agent, 'claude');
+
+  const rev = store.getState().knowledgeRev;
+  await store.acceptKnowledge(['k_sug_mock'], { level: 'workspace', workspaceId: 'w_acme' });
+  await flushUntil(() => store.getState().knowledgeRev > rev + 1);
+  const accepted = (await store.listKnowledge({ scopeLevel: 'workspace', workspaceId: 'w_acme' })).find((i) => i.id === 'k_sug_mock');
+  assert.ok(accepted);
+  await store.rejectKnowledge(['k_sug_sandbox']);
+  await flushUntil(() => (store.getState().knowledgeInbox ?? []).length === 1);
+
+  const item = await store.addKnowledge({ type: 'memory', title: 'New fact', body: 'x', scope: { level: 'global' }, kind: 'fact', appliesTo: ['codex'] });
+  assert.deepEqual(item.appliesTo, ['codex']);
+  await store.forgetKnowledge(item.id);
+  assert.equal((await store.listKnowledge()).some((i) => i.id === item.id), false);
+
+  const s = await store.setKnowledgeSettings({ preset: 'strict' });
+  assert.deepEqual(s, { preset: 'strict', defaultAgentScope: 'project' });
+});

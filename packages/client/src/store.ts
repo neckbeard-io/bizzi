@@ -5,11 +5,26 @@ import type {
   AgentListing,
   ApprovalDecision,
   ChannelEvent,
+  DeviceInfo,
+  DeviceKind,
+  ErrorObject,
   GlobalEvent,
+  GlobalEventMap,
   InputBlock,
+  InstallAction,
+  InstallPlan,
+  KnowledgeInboxCard,
+  KnowledgeItemInfo,
+  KnowledgeScope,
+  KnowledgeSettings,
   Logger,
   MachineInfo,
+  MachineRole,
+  MachineTarget,
   MethodParams,
+  MethodResult,
+  QuestionAnswers,
+  SecretInfo,
   SessionEvent,
   SessionInfo,
   WorkspaceInfo,
@@ -20,25 +35,43 @@ import { createFrameScheduler } from './scheduler.ts';
 import type { FrameScheduler } from './scheduler.ts';
 import { TerminalStreams } from './terminal.ts';
 import { emptyTimeline, reduceTimeline } from './timeline.ts';
-import type { ApprovalItem, QuestionItem, Timeline } from './timeline.ts';
+import type { ApprovalItem, QuestionItem, SessionPrompt, Timeline } from './timeline.ts';
 
-export interface InstallProgress {
+/** One provisioning run (`agent.install`), fed by `install.progress` events with its jobId. */
+export interface InstallJob {
+  jobId: string;
+  /** Machine the job runs on; null when it was started elsewhere (global events carry no machine id). */
+  machineId: string | null;
   agent: AgentKind;
+  tool?: string;
+  action: InstallAction | null;
+  plan: InstallPlan | null;
   stage: string;
   message?: string;
-  done?: boolean;
+  step?: number;
+  total?: number;
+  done: boolean;
   ok?: boolean;
+  log: readonly { stage: string; message?: string; ts: string }[];
+  startedAt: string;
+  updatedAt: string;
 }
 
 export interface BizziState {
   /** Incremented on every change; cheap staleness check for memoized selectors. */
   version: number;
   connection: ConnectionInfo;
-  /** The machine this connection is attached to (from `hello`). */
+  /** The machine this connection is attached to (from `hello`): the node itself, or the hub's host. */
   machine: MachineInfo | null;
+  /** 'hub' (multi-machine) or 'node'; null before the first handshake. */
+  role: MachineRole | null;
+  /** The machine the UI works on (machine-targeted calls default to it). */
+  selectedMachineId: string | null;
   machines: Readonly<Record<string, MachineInfo>>;
-  /** null until loaded. */
-  agents: readonly AgentListing[] | null;
+  /** Agents per machine id (absent until loaded). */
+  agents: Readonly<Record<string, readonly AgentListing[]>>;
+  /** Last load failure per machine (e.g. machine_offline); cleared on a successful load. */
+  machineErrors: Readonly<Record<string, ErrorObject>>;
   /** null until loaded. */
   workspaces: Readonly<Record<string, WorkspaceInfo>> | null;
   sessions: Readonly<Record<string, SessionInfo>>;
@@ -46,9 +79,31 @@ export interface BizziState {
   /** Per session, from `session.get`. */
   capabilities: Readonly<Record<string, AgentCapabilities>>;
   timelines: Readonly<Record<string, Timeline>>;
-  install: Readonly<Partial<Record<AgentKind, InstallProgress>>>;
+  jobs: Readonly<Record<string, InstallJob>>;
+  /** Hub only; null until loaded (or on a node). */
+  devices: Readonly<Record<string, DeviceInfo>> | null;
+  /** Knowledge suggestions for the selected machine; null until loaded. */
+  knowledgeInbox: readonly KnowledgeInboxCard[] | null;
+  knowledgeSettings: KnowledgeSettings | null;
+  /** Bumped on every `knowledge.changed`; knowledge views refetch when it changes. */
+  knowledgeRev: number;
   /** Last gap per channel (shown as "some events may be missing"). */
   gaps: Readonly<Record<string, GapInfo>>;
+}
+
+/** What survives a reload, so offline machines still show their last known state. */
+export interface StoreSnapshot {
+  v: 1;
+  machines: Record<string, MachineInfo>;
+  agents: Record<string, readonly AgentListing[]>;
+  workspaces: Record<string, WorkspaceInfo>;
+  sessions: Record<string, SessionInfo>;
+  selectedMachineId: string | null;
+}
+
+export interface StoreCache {
+  load(): StoreSnapshot | null;
+  save(snapshot: StoreSnapshot): void;
 }
 
 export interface BizziStoreOptions {
@@ -59,6 +114,12 @@ export interface BizziStoreOptions {
   autoLoad?: boolean;
   /** Subscribe to sessions that wait for an approval or input, so the inbox has details (default true). */
   watchAttention?: boolean;
+  /** Preferred machine to select once machines are known (e.g. the last one used). */
+  initialMachineId?: string | null;
+  /** Persist a small snapshot (machines, agents, workspaces, sessions) for offline display. */
+  cache?: StoreCache;
+  /** Debounce for cache writes, ms (default 1500). */
+  cacheDelayMs?: number;
 }
 
 export type Listener = () => void;
@@ -90,11 +151,27 @@ export function shallowEqual<T>(a: T, b: T): boolean {
 }
 
 const ATTENTION = new Set(['waiting_approval', 'waiting_input']);
+const EMPTY_AGENTS: readonly AgentListing[] = [];
+
+function toErrorObject(e: unknown): ErrorObject {
+  if (e instanceof BizziError) return e.toObject();
+  return { code: 'internal', message: e instanceof Error ? e.message : String(e) };
+}
+
+function withoutKey<T>(rec: Readonly<Record<string, T>>, key: string): Record<string, T> {
+  const out = { ...rec };
+  delete out[key];
+  return out;
+}
 
 /**
  * Normalized client state built from list calls and channel events. Events are buffered and applied
  * at most once per animation frame; subscribers are notified once per flush. Framework-agnostic:
  * `subscribe` + `getState` plug straight into React's `useSyncExternalStore`.
+ *
+ * Machine routing: every machine-targeted call (agents, workspaces, sessions lists, provisioning,
+ * knowledge) carries a `machineId`, defaulting to the selected machine. A node ignores its own id; a hub
+ * routes by it.
  */
 export class BizziStore {
   readonly client: BizziClient;
@@ -103,6 +180,9 @@ export class BizziStore {
   private readonly logger: Logger;
   private readonly autoLoad: boolean;
   private readonly watchAttention: boolean;
+  private readonly cache: StoreCache | null;
+  private readonly cacheDelayMs: number;
+  private preferredMachineId: string | null;
   private state: BizziState;
   private readonly listeners = new Set<Listener>();
   private buffer: ChannelEvent[] = [];
@@ -110,6 +190,10 @@ export class BizziStore {
   private notifyPending = false;
   private readonly opened = new Set<string>();
   private readonly unsubs: (() => void)[] = [];
+  private cacheTimer: ReturnType<typeof setTimeout> | null = null;
+  private cached: { machines: unknown; agents: unknown; workspaces: unknown; sessions: unknown; selected: unknown } | null = null;
+  private knowledgeTimer: ReturnType<typeof setTimeout> | null = null;
+  private disposed = false;
 
   /** Number of notifications sent (handy for perf tests). */
   notifications = 0;
@@ -121,20 +205,31 @@ export class BizziStore {
     this.logger = options.logger ?? noopLogger;
     this.autoLoad = options.autoLoad ?? true;
     this.watchAttention = options.watchAttention ?? true;
+    this.cache = options.cache ?? null;
+    this.cacheDelayMs = options.cacheDelayMs ?? 1500;
+    this.preferredMachineId = options.initialMachineId ?? null;
     this.state = {
       version: 0,
       connection: client.getConnection(),
       machine: null,
+      role: null,
+      selectedMachineId: null,
       machines: {},
-      agents: null,
+      agents: {},
+      machineErrors: {},
       workspaces: null,
       sessions: {},
       sessionsLoaded: false,
       capabilities: {},
       timelines: {},
-      install: {},
+      jobs: {},
+      devices: null,
+      knowledgeInbox: null,
+      knowledgeSettings: null,
+      knowledgeRev: 0,
       gaps: {},
     };
+    this.hydrate();
     this.unsubs.push(
       client.onEvent((ev) => this.onEvent(ev)),
       client.onConnection((c) => this.onConnection(c)),
@@ -148,10 +243,14 @@ export class BizziStore {
   }
 
   dispose(): void {
+    this.disposed = true;
     for (const u of this.unsubs) u();
     this.unsubs.length = 0;
     this.cancelFlush?.();
     this.cancelFlush = null;
+    if (this.cacheTimer) clearTimeout(this.cacheTimer);
+    if (this.knowledgeTimer) clearTimeout(this.knowledgeTimer);
+    this.saveCache();
     this.listeners.clear();
   }
 
@@ -194,6 +293,7 @@ export class BizziStore {
     if (this.notifyPending) {
       this.notifyPending = false;
       this.notifications++;
+      this.scheduleCache();
       for (const l of this.listeners) {
         try {
           l();
@@ -233,11 +333,123 @@ export class BizziStore {
     }
   }
 
+  // ---------------------------------------------------------------- offline cache
+
+  private hydrate(): void {
+    if (!this.cache) return;
+    let snap: StoreSnapshot | null = null;
+    try {
+      snap = this.cache.load();
+    } catch (e) {
+      this.logger.log('warn', 'cache load failed', { error: String(e) });
+    }
+    if (!snap || snap.v !== 1) return;
+    // Cached machines are shown as offline until the server says otherwise.
+    const machines: Record<string, MachineInfo> = {};
+    for (const [id, m] of Object.entries(snap.machines ?? {})) machines[id] = { ...m, online: false };
+    this.state = {
+      ...this.state,
+      machines,
+      agents: snap.agents ?? {},
+      workspaces: snap.workspaces ?? null,
+      sessions: snap.sessions ?? {},
+      selectedMachineId: snap.selectedMachineId ?? null,
+    };
+    this.preferredMachineId ??= snap.selectedMachineId ?? null;
+    const s = this.state;
+    this.cached = { machines: s.machines, agents: s.agents, workspaces: s.workspaces, sessions: s.sessions, selected: s.selectedMachineId };
+  }
+
+  private scheduleCache(): void {
+    if (!this.cache || this.cacheTimer || this.disposed) return;
+    const s = this.state;
+    const c = this.cached;
+    if (c && c.machines === s.machines && c.agents === s.agents && c.workspaces === s.workspaces && c.sessions === s.sessions && c.selected === s.selectedMachineId) return;
+    this.cacheTimer = setTimeout(() => {
+      this.cacheTimer = null;
+      this.saveCache();
+    }, this.cacheDelayMs);
+  }
+
+  private saveCache(): void {
+    if (!this.cache) return;
+    const s = this.state;
+    const c = this.cached;
+    if (c && c.machines === s.machines && c.agents === s.agents && c.workspaces === s.workspaces && c.sessions === s.sessions && c.selected === s.selectedMachineId) return;
+    this.cached = { machines: s.machines, agents: s.agents, workspaces: s.workspaces, sessions: s.sessions, selected: s.selectedMachineId };
+    try {
+      this.cache.save({
+        v: 1,
+        machines: { ...s.machines },
+        agents: { ...s.agents },
+        workspaces: { ...(s.workspaces ?? {}) },
+        sessions: { ...s.sessions },
+        selectedMachineId: s.selectedMachineId,
+      });
+    } catch (e) {
+      this.logger.log('warn', 'cache save failed', { error: String(e) });
+    }
+  }
+
+  // ---------------------------------------------------------------- machine routing
+
+  isHub(): boolean {
+    return this.state.role === 'hub';
+  }
+
+  /** The machine a machine-targeted call goes to: the given one, else the selected one, else the node itself. */
+  targetMachineId(machineId?: string | null): string | null {
+    return machineId ?? this.state.selectedMachineId ?? this.state.machine?.id ?? null;
+  }
+
+  /** `MachineTarget` params for a call (always names the machine once it is known). */
+  target(machineId?: string | null): MachineTarget {
+    const id = this.targetMachineId(machineId);
+    return id ? { machineId: id } : {};
+  }
+
+  selectMachine(machineId: string): void {
+    this.preferredMachineId = machineId;
+    if (this.state.selectedMachineId === machineId) return;
+    this.patch({ selectedMachineId: machineId, knowledgeInbox: null, knowledgeSettings: null });
+    if (this.client.isOpen()) void this.loadKnowledgeMeta();
+  }
+
+  /** Machines whose data this connection can load: every node behind a hub, or just the node itself. */
+  private reachableMachines(): string[] {
+    const self = this.state.machine;
+    if (!this.isHub()) return self ? [self.id] : [];
+    return Object.values(this.state.machines)
+      .filter((m) => m.roles.includes('node') || !m.roles.includes('hub'))
+      .map((m) => m.id);
+  }
+
+  private pickSelection(): string | null {
+    const s = this.state;
+    if (!this.isHub()) return s.machine?.id ?? null;
+    const nodes = this.reachableMachines();
+    const pref = this.preferredMachineId;
+    if (pref && nodes.includes(pref)) return pref;
+    if (s.selectedMachineId && nodes.includes(s.selectedMachineId)) return s.selectedMachineId;
+    const online = nodes.find((id) => s.machines[id]?.online);
+    return online ?? nodes[0] ?? s.machine?.id ?? null;
+  }
+
+  private setMachineError(machineId: string, e: unknown): void {
+    this.patch({ machineErrors: { ...this.state.machineErrors, [machineId]: toErrorObject(e) } });
+  }
+
+  private clearMachineError(machineId: string): void {
+    if (!(machineId in this.state.machineErrors)) return;
+    this.patch({ machineErrors: withoutKey(this.state.machineErrors, machineId) });
+  }
+
   // ---------------------------------------------------------------- inbound
 
   private onConnection(c: ConnectionInfo): void {
     const p: Partial<BizziState> = { connection: c };
     if (c.machine && c.machine !== this.state.machine) p.machine = c.machine;
+    if (c.role && c.role !== this.state.role) p.role = c.role;
     this.patch(p);
     if (c.state === 'open') {
       this.client.subscribe(GLOBAL_CHANNEL).catch((e) => this.logger.log('warn', 'subscribe global failed', { error: String(e) }));
@@ -306,9 +518,15 @@ export class BizziStore {
     switch (ev.type) {
       case 'machine.updated': {
         const m = ev.data.machine;
+        const prev = this.state.machines[m.id];
         const p: Partial<BizziState> = { machines: { ...this.state.machines, [m.id]: m } };
         if (this.state.machine?.id === m.id) p.machine = m;
         this.patch(p);
+        if (this.isHub()) {
+          if (!this.state.selectedMachineId) this.patch({ selectedMachineId: this.pickSelection() });
+          // A machine that came (back) online: refresh what we know about it.
+          if (m.online && prev?.online !== true && this.client.isOpen()) void this.loadMachine(m.id);
+        }
         return;
       }
       case 'workspace.created':
@@ -316,29 +534,101 @@ export class BizziStore {
         return;
       case 'workspace.removed': {
         if (!this.state.workspaces) return;
-        const ws = { ...this.state.workspaces };
-        delete ws[ev.data.workspaceId];
-        this.patch({ workspaces: ws });
+        this.patch({ workspaces: withoutKey(this.state.workspaces, ev.data.workspaceId) });
         return;
       }
       case 'session.created':
       case 'session.updated':
         this.upsertSession(ev.data.session);
         return;
-      case 'install.progress':
-        this.patch({ install: { ...this.state.install, [ev.data.agent]: ev.data } });
+      case 'session.removed':
+        this.dropSession(ev.data.sessionId);
         return;
+      case 'install.progress':
+        this.applyProgress(ev.data, ev.ts);
+        return;
+      case 'knowledge.changed':
+        this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
+        this.scheduleKnowledgeReload();
+        return;
+      case 'device.updated': {
+        const d = ev.data.device;
+        this.patch({ devices: { ...(this.state.devices ?? {}), [d.id]: d } });
+        return;
+      }
     }
+  }
+
+  private applyProgress(data: GlobalEventMap['install.progress'], ts: string): void {
+    const jobId = data.jobId ?? `${data.agent}:${data.tool ?? 'agent'}`;
+    const prev = this.state.jobs[jobId];
+    const job: InstallJob = prev
+      ? { ...prev }
+      : {
+          jobId,
+          machineId: null,
+          agent: data.agent,
+          action: null,
+          plan: null,
+          stage: data.stage,
+          done: false,
+          log: [],
+          startedAt: ts,
+          updatedAt: ts,
+        };
+    if (data.tool !== undefined) job.tool = data.tool;
+    job.stage = data.stage;
+    if (data.message !== undefined) job.message = data.message;
+    else delete job.message;
+    if (data.step !== undefined) job.step = data.step;
+    if (data.total !== undefined) job.total = data.total;
+    job.done = data.done ?? false;
+    if (data.ok !== undefined) job.ok = data.ok;
+    job.updatedAt = ts;
+    const entry: { stage: string; message?: string; ts: string } = { stage: data.stage, ts };
+    if (data.message !== undefined) entry.message = data.message;
+    job.log = [...job.log.slice(-199), entry];
+    this.patch({ jobs: { ...this.state.jobs, [jobId]: job } });
+    if (job.done && !prev?.done) {
+      // The probe changed (installed / version / removed): refresh the agent list of that machine.
+      const mid = job.machineId ?? this.targetMachineId();
+      if (mid && this.client.isOpen()) this.loadAgents(mid, true).catch((e) => this.logger.log('warn', 'reload agents failed', { error: String(e) }));
+    }
+  }
+
+  private scheduleKnowledgeReload(): void {
+    if (this.knowledgeTimer || this.disposed) return;
+    this.knowledgeTimer = setTimeout(() => {
+      this.knowledgeTimer = null;
+      if (this.client.isOpen()) this.loadKnowledgeInbox().catch((e) => this.logger.log('debug', 'knowledge inbox reload failed', { error: String(e) }));
+    }, 250);
   }
 
   // ---------------------------------------------------------------- loading
 
   async loadAll(): Promise<void> {
-    const tasks = [this.loadMachines(), this.loadAgents(), this.loadWorkspaces(), this.loadSessions()];
+    try {
+      await this.loadMachines();
+    } catch (e) {
+      this.logger.log('warn', 'machines.list failed', { error: String(e) });
+      if (!this.state.selectedMachineId) this.patch({ selectedMachineId: this.pickSelection() });
+    }
+    const tasks: Promise<unknown>[] = this.reachableMachines().map((id) => this.loadMachine(id));
+    if (this.isHub()) tasks.push(this.loadDevices());
+    tasks.push(this.loadKnowledgeMeta());
     const results = await Promise.allSettled(tasks);
     for (const r of results) {
       if (r.status === 'rejected') this.logger.log('warn', 'initial load failed', { error: String(r.reason) });
     }
+    if (!this.state.sessionsLoaded) this.patch({ sessionsLoaded: true });
+  }
+
+  /** Agents, workspaces and sessions of one machine. Failures are recorded in `machineErrors`; cached data stays. */
+  async loadMachine(machineId: string): Promise<void> {
+    const results = await Promise.allSettled([this.loadAgents(machineId), this.loadWorkspaces(machineId), this.loadSessions({ machineId })]);
+    const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
+    if (failed) this.setMachineError(machineId, failed.reason);
+    else this.clearMachineError(machineId);
   }
 
   async loadMachines(): Promise<void> {
@@ -349,32 +639,76 @@ export class BizziStore {
     const self = this.state.machine && rec[this.state.machine.id];
     if (self) p.machine = self;
     this.patch(p);
+    const sel = this.pickSelection();
+    if (sel !== this.state.selectedMachineId) this.patch({ selectedMachineId: sel });
   }
 
-  async loadAgents(refresh = false): Promise<void> {
-    const { agents } = await this.client.request('agents.list', refresh ? { refresh: true } : {}, refresh ? { timeoutMs: 60_000 } : {});
-    this.patch({ agents });
+  async loadAgents(machineId?: string | null, refresh = false): Promise<void> {
+    const t = this.target(machineId);
+    const params: MethodParams<'agents.list'> = refresh ? { ...t, refresh: true } : t;
+    const { agents } = await this.client.request('agents.list', params, refresh ? { timeoutMs: 60_000 } : {});
+    const key = t.machineId ?? '';
+    this.patch({ agents: { ...this.state.agents, [key]: agents } });
   }
 
-  async loadWorkspaces(): Promise<void> {
-    const { workspaces } = await this.client.request('workspaces.list', {});
+  async loadWorkspaces(machineId?: string | null): Promise<void> {
+    const t = this.target(machineId);
+    const { workspaces } = await this.client.request('workspaces.list', t);
     const rec: Record<string, WorkspaceInfo> = {};
+    // Replace only this machine's workspaces.
+    for (const w of Object.values(this.state.workspaces ?? {})) if (t.machineId && w.machineId !== t.machineId) rec[w.id] = w;
     for (const w of workspaces) rec[w.id] = w;
     this.patch({ workspaces: rec });
   }
 
-  async loadSessions(workspaceId?: string): Promise<void> {
-    const { sessions } = await this.client.request('sessions.list', workspaceId ? { workspaceId } : {});
-    const rec: Record<string, SessionInfo> = workspaceId ? { ...this.state.sessions } : {};
+  async loadSessions(opts: { machineId?: string | null; workspaceId?: string } = {}): Promise<void> {
+    const t = this.target(opts.machineId);
+    const params: MethodParams<'sessions.list'> = opts.workspaceId ? { ...t, workspaceId: opts.workspaceId } : t;
+    const { sessions } = await this.client.request('sessions.list', params);
+    const rec: Record<string, SessionInfo> = {};
+    for (const s of Object.values(this.state.sessions)) {
+      const replaced = opts.workspaceId ? s.workspaceId === opts.workspaceId : !t.machineId || s.machineId === t.machineId;
+      if (!replaced) rec[s.id] = s;
+    }
     for (const s of sessions) rec[s.id] = s;
-    this.patch(workspaceId ? { sessions: rec } : { sessions: rec, sessionsLoaded: true });
+    this.patch({ sessions: rec });
     for (const s of sessions) this.maybeWatch(s);
   }
 
-  // ---------------------------------------------------------------- actions
+  async loadDevices(): Promise<void> {
+    const { devices } = await this.client.request('devices.list', {});
+    const rec: Record<string, DeviceInfo> = {};
+    for (const d of devices) rec[d.id] = d;
+    this.patch({ devices: rec });
+  }
+
+  /** Knowledge goes to the selected machine, or any online one (knowledge replicates to every node). */
+  knowledgeTarget(): MachineTarget {
+    const s = this.state;
+    const sel = this.targetMachineId();
+    if (!this.isHub() || (sel && s.machines[sel]?.online)) return this.target(sel);
+    const online = this.reachableMachines().find((id) => s.machines[id]?.online);
+    return this.target(online ?? sel);
+  }
+
+  async loadKnowledgeMeta(): Promise<void> {
+    await Promise.allSettled([this.loadKnowledgeInbox(), this.loadKnowledgeSettings()]);
+  }
+
+  async loadKnowledgeInbox(): Promise<void> {
+    const { cards } = await this.client.request('knowledge.inbox', this.knowledgeTarget());
+    this.patch({ knowledgeInbox: cards });
+  }
+
+  async loadKnowledgeSettings(): Promise<void> {
+    const { settings } = await this.client.request('knowledge.settings.get', this.knowledgeTarget());
+    this.patch({ knowledgeSettings: settings });
+  }
+
+  // ---------------------------------------------------------------- workspaces & sessions
 
   async createWorkspace(params: MethodParams<'workspace.create'>): Promise<WorkspaceInfo> {
-    const { workspace } = await this.client.request('workspace.create', params);
+    const { workspace } = await this.client.request('workspace.create', { ...this.target(params.machineId), ...params });
     this.patch({ workspaces: { ...this.state.workspaces, [workspace.id]: workspace } });
     return workspace;
   }
@@ -382,9 +716,7 @@ export class BizziStore {
   async removeWorkspace(workspaceId: string): Promise<void> {
     await this.client.request('workspace.remove', { workspaceId });
     if (!this.state.workspaces) return;
-    const ws = { ...this.state.workspaces };
-    delete ws[workspaceId];
-    this.patch({ workspaces: ws });
+    this.patch({ workspaces: withoutKey(this.state.workspaces, workspaceId) });
   }
 
   async createSession(params: MethodParams<'session.create'>): Promise<SessionInfo> {
@@ -393,23 +725,72 @@ export class BizziStore {
     return session;
   }
 
-  /** Subscribe to a session's channel (replay + live) and fetch its capabilities. Idempotent. */
+  async forkSession(sessionId: string, title?: string): Promise<SessionInfo> {
+    const { session } = await this.client.request('session.fork', title ? { sessionId, title } : { sessionId });
+    this.upsertSession(session);
+    return session;
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await this.client.request('session.delete', { sessionId });
+    this.dropSession(sessionId);
+  }
+
+  private dropSession(sessionId: string): void {
+    const wasOpen = this.opened.delete(sessionId);
+    if (wasOpen) this.client.unsubscribe(sessionChannel(sessionId)).catch(() => {});
+    this.client.resetChannel(sessionChannel(sessionId));
+    this.terminal.clear(sessionId);
+    const s = this.state;
+    if (!(sessionId in s.sessions) && !(sessionId in s.timelines)) return;
+    this.patch({
+      sessions: withoutKey(s.sessions, sessionId),
+      timelines: withoutKey(s.timelines, sessionId),
+      capabilities: withoutKey(s.capabilities, sessionId),
+    });
+  }
+
+  /**
+   * Subscribe to a session's channel (replay + live) and fetch its capabilities. Idempotent.
+   * Terminal sessions joined late start from `term.snapshot` and subscribe from its seq, instead of
+   * replaying every output chunk since the session started.
+   */
   async openSession(sessionId: string): Promise<void> {
-    if (!this.opened.has(sessionId)) {
-      this.opened.add(sessionId);
-      if (!this.state.timelines[sessionId]) this.patchTimeline(sessionId, emptyTimeline(sessionId));
-      const sub = this.client.subscribe(sessionChannel(sessionId));
+    if (this.opened.has(sessionId)) return;
+    this.opened.add(sessionId);
+    if (!this.state.timelines[sessionId]) this.patchTimeline(sessionId, emptyTimeline(sessionId));
+    const ch = sessionChannel(sessionId);
+    try {
       const get = this.client.request('session.get', { sessionId }).then(({ session, capabilities }) => {
         this.patch({ capabilities: { ...this.state.capabilities, [sessionId]: capabilities } });
         this.upsertSession(session);
+        return session;
       });
-      try {
-        await Promise.all([sub, get]);
-      } catch (e) {
-        this.opened.delete(sessionId);
-        throw e;
-      }
+      const info = this.state.sessions[sessionId] ?? (await get);
+      const fresh = this.client.lastSeq(ch) === 0 && !this.client.isSubscribed(ch);
+      const sub = info.mode === 'terminal' && fresh ? this.lateJoinTerminal(sessionId) : this.client.subscribe(ch);
+      await Promise.all([sub, get]);
+    } catch (e) {
+      this.opened.delete(sessionId);
+      throw e;
     }
+  }
+
+  private async lateJoinTerminal(sessionId: string): Promise<void> {
+    const ch = sessionChannel(sessionId);
+    let snap: MethodResult<'term.snapshot'>;
+    try {
+      snap = await this.client.request('term.snapshot', { sessionId });
+    } catch (e) {
+      // Older nodes: replay the channel from the start instead.
+      if (e instanceof BizziError && (e.code === 'unsupported' || e.code === 'bad_request')) return this.client.subscribe(ch);
+      throw e;
+    }
+    this.terminal.clear(sessionId);
+    if (snap.dataBase64) this.terminal.write(sessionId, base64ToBytes(snap.dataBase64));
+    const tl = this.state.timelines[sessionId] ?? emptyTimeline(sessionId);
+    if (tl.lastSeq < snap.seq) this.patchTimeline(sessionId, { ...tl, lastSeq: snap.seq });
+    await this.client.subscribe(ch, { since: snap.seq });
   }
 
   /** Stop receiving live events for a session (its timeline stays cached; reopening resumes from the cursor). */
@@ -449,9 +830,24 @@ export class BizziStore {
   }
 
   /**
-   * Answer a `question.asked`. The protocol has no dedicated method yet, so the answer is sent as user
-   * input (steer while a turn runs, otherwise a new turn).
+   * Answer a `question.asked` with `question.respond` (or decline it with `cancel`). Agents that predate
+   * `question.respond` get the answer as user input instead (steer while a turn runs, else a new turn).
    */
+  async respondQuestion(sessionId: string, questionId: string, reply: { answers: QuestionAnswers } | { cancel: true }): Promise<void> {
+    const params: MethodParams<'question.respond'> = 'cancel' in reply ? { sessionId, questionId, cancel: true } : { sessionId, questionId, answers: reply.answers };
+    try {
+      await this.client.request('question.respond', params);
+    } catch (e) {
+      if (!(e instanceof BizziError && e.code === 'unsupported') || 'cancel' in reply) throw e;
+      const text = Object.values(reply.answers)
+        .map((v) => (Array.isArray(v) ? v.join(', ') : v))
+        .filter(Boolean)
+        .join('\n');
+      await this.answerQuestion(sessionId, text);
+    }
+  }
+
+  /** Send a free-text answer as user input (legacy question flow). */
   async answerQuestion(sessionId: string, answer: string): Promise<void> {
     const tl = this.state.timelines[sessionId];
     const caps = this.state.capabilities[sessionId];
@@ -465,6 +861,128 @@ export class BizziStore {
 
   termResize(sessionId: string, cols: number, rows: number): Promise<unknown> {
     return this.client.request('term.resize', { sessionId, cols, rows });
+  }
+
+  // ---------------------------------------------------------------- provisioning
+
+  async planAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string }): Promise<InstallPlan> {
+    const { machineId, ...rest } = params;
+    const { plan } = await this.client.request('agent.plan', { ...this.target(machineId), ...rest });
+    return plan;
+  }
+
+  /** Start an install/update/uninstall; progress lands in `jobs[jobId]`. */
+  async installAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string }): Promise<InstallJob> {
+    const { machineId, ...rest } = params;
+    const t = this.target(machineId);
+    const { jobId, plan } = await this.client.request('agent.install', { ...t, ...rest });
+    const now = new Date().toISOString();
+    const prev = this.state.jobs[jobId];
+    const job: InstallJob = prev
+      ? { ...prev, machineId: t.machineId ?? null, action: params.action, plan }
+      : {
+          jobId,
+          machineId: t.machineId ?? null,
+          agent: params.agent,
+          action: params.action,
+          plan,
+          stage: 'starting',
+          done: false,
+          log: [],
+          startedAt: now,
+          updatedAt: now,
+        };
+    this.patch({ jobs: { ...this.state.jobs, [jobId]: job } });
+    return job;
+  }
+
+  dismissJob(jobId: string): void {
+    if (!(jobId in this.state.jobs)) return;
+    this.patch({ jobs: withoutKey(this.state.jobs, jobId) });
+  }
+
+  /** Start a login flow; returns its terminal-mode session (watch `timelines[id].login`). */
+  async loginAgent(params: MethodParams<'agent.login'>): Promise<SessionInfo> {
+    const { session } = await this.client.request('agent.login', { ...this.target(params.machineId), ...params });
+    this.upsertSession(session);
+    return session;
+  }
+
+  async listSecrets(machineId?: string | null, agent?: AgentKind): Promise<SecretInfo[]> {
+    const t = this.target(machineId);
+    const { secrets } = await this.client.request('agent.secrets', agent ? { ...t, agent } : t);
+    return secrets;
+  }
+
+  async setSecret(params: { machineId?: string | null; agent: AgentKind; name: string; value: string }): Promise<void> {
+    const { machineId, ...rest } = params;
+    await this.client.request('agent.setSecret', { ...this.target(machineId), ...rest });
+  }
+
+  async deleteSecret(params: { machineId?: string | null; agent: AgentKind; name: string }): Promise<void> {
+    const { machineId, ...rest } = params;
+    await this.client.request('agent.deleteSecret', { ...this.target(machineId), ...rest });
+  }
+
+  // ---------------------------------------------------------------- knowledge
+
+  async listKnowledge(params: Omit<MethodParams<'knowledge.list'>, 'machineId'> = {}): Promise<KnowledgeItemInfo[]> {
+    const { items } = await this.client.request('knowledge.list', { ...this.knowledgeTarget(), ...params });
+    return items;
+  }
+
+  async addKnowledge(params: Omit<MethodParams<'knowledge.add'>, 'machineId'>): Promise<KnowledgeItemInfo> {
+    const { item } = await this.client.request('knowledge.add', { ...this.knowledgeTarget(), ...params });
+    this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
+    return item;
+  }
+
+  async updateKnowledge(params: Omit<MethodParams<'knowledge.update'>, 'machineId'>): Promise<KnowledgeItemInfo> {
+    const { item } = await this.client.request('knowledge.update', { ...this.knowledgeTarget(), ...params });
+    this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
+    return item;
+  }
+
+  async forgetKnowledge(id: string): Promise<void> {
+    await this.client.request('knowledge.forget', { ...this.knowledgeTarget(), id });
+    this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
+  }
+
+  /** Accept suggestions (optionally moving them all to `scope`). Updates the inbox optimistically. */
+  async acceptKnowledge(ids: string[], scope?: KnowledgeScope): Promise<void> {
+    await this.client.request('knowledge.accept', scope ? { ...this.knowledgeTarget(), ids, scope } : { ...this.knowledgeTarget(), ids });
+    this.removeFromInbox(ids);
+  }
+
+  async rejectKnowledge(ids: string[]): Promise<void> {
+    await this.client.request('knowledge.reject', { ...this.knowledgeTarget(), ids });
+    this.removeFromInbox(ids);
+  }
+
+  private removeFromInbox(ids: string[]): void {
+    const inbox = this.state.knowledgeInbox;
+    if (!inbox) return;
+    const drop = new Set(ids);
+    const next = inbox.map((c) => ({ ...c, items: c.items.filter((i) => !drop.has(i.id)) })).filter((c) => c.items.length > 0);
+    this.patch({ knowledgeInbox: next, knowledgeRev: this.state.knowledgeRev + 1 });
+  }
+
+  async setKnowledgeSettings(settings: Partial<KnowledgeSettings>): Promise<KnowledgeSettings> {
+    const res = await this.client.request('knowledge.settings.set', { ...this.knowledgeTarget(), settings });
+    this.patch({ knowledgeSettings: res.settings });
+    return res.settings;
+  }
+
+  // ---------------------------------------------------------------- hub: devices
+
+  async createPairing(kind: DeviceKind, name?: string): Promise<MethodResult<'pairing.create'>> {
+    return this.client.request('pairing.create', name ? { kind, name } : { kind });
+  }
+
+  async revokeDevice(deviceId: string): Promise<void> {
+    await this.client.request('device.revoke', { deviceId });
+    const d = this.state.devices?.[deviceId];
+    if (d) this.patch({ devices: { ...this.state.devices, [deviceId]: { ...d, revoked: true } } });
   }
 }
 
@@ -506,13 +1024,68 @@ export function inboxEqual(a: InboxEntry[], b: InboxEntry[]): boolean {
   return true;
 }
 
+/** Number of suggested knowledge items waiting in the inbox. */
+export function selectKnowledgeSuggestionCount(s: BizziState): number {
+  let n = 0;
+  for (const c of s.knowledgeInbox ?? []) n += c.items.length;
+  return n;
+}
+
 /** Best-known status: the session's own channel when watched, else the list. */
 export function selectSessionStatus(s: BizziState, sessionId: string): SessionInfo['status'] | null {
   return s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status ?? null;
+}
+
+/** What a waiting session waits on, when known. */
+export function selectSessionPrompt(s: BizziState, sessionId: string): SessionPrompt | null {
+  const tl = s.timelines[sessionId];
+  if (tl?.prompt) return tl.prompt;
+  const st = selectSessionStatus(s, sessionId);
+  return st === 'waiting_approval' ? 'approval' : st === 'waiting_input' ? 'input' : null;
 }
 
 export function selectWorkspaceSessions(s: BizziState, workspaceId: string): SessionInfo[] {
   return Object.values(s.sessions)
     .filter((x) => x.workspaceId === workspaceId)
     .sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+}
+
+/** The machine machine-targeted calls default to. */
+export function selectTargetMachineId(s: BizziState): string | null {
+  return s.selectedMachineId ?? s.machine?.id ?? null;
+}
+
+export function selectAgents(s: BizziState, machineId: string | null): readonly AgentListing[] | null {
+  if (!machineId) return null;
+  return s.agents[machineId] ?? null;
+}
+
+/** Whether requests to a machine can reach it right now. */
+export function selectMachineOnline(s: BizziState, machineId: string | null | undefined): boolean {
+  if (!machineId) return s.connection.state === 'open';
+  if (s.connection.state !== 'open') return false;
+  if (s.role !== 'hub') return machineId === s.machine?.id;
+  return s.machines[machineId]?.online ?? false;
+}
+
+/** Machines in the switcher: every node behind a hub, or the node itself first then the others it knows. */
+export function selectMachineList(s: BizziState): MachineInfo[] {
+  const all = Object.values(s.machines).filter((m) => s.role !== 'hub' || m.roles.includes('node') || !m.roles.includes('hub'));
+  if (s.role !== 'hub' && s.machine && !s.machines[s.machine.id]) all.push(s.machine);
+  return all.sort((a, b) => (a.id === s.machine?.id ? -1 : b.id === s.machine?.id ? 1 : a.online === b.online ? a.name.localeCompare(b.name) : a.online ? -1 : 1));
+}
+
+/** The most recent job for an agent on a machine (jobs started elsewhere match any machine). */
+export function selectAgentJob(s: BizziState, machineId: string | null, agent: AgentKind): InstallJob | null {
+  let best: InstallJob | null = null;
+  for (const j of Object.values(s.jobs)) {
+    if (j.agent !== agent || j.tool !== undefined) continue;
+    if (j.machineId !== null && j.machineId !== machineId) continue;
+    if (!best || j.startedAt > best.startedAt) best = j;
+  }
+  return best;
+}
+
+export function selectAgentList(s: BizziState, machineId: string | null): readonly AgentListing[] {
+  return (machineId && s.agents[machineId]) || EMPTY_AGENTS;
 }

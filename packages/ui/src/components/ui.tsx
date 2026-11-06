@@ -1,7 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import type { SessionStatus } from '@bizzi/protocol';
-import { STATUS_LABEL, STATUS_TONE } from '../lib/format.ts';
+import type { SessionPrompt } from '@bizzi/client';
+import { STATUS_LABEL, STATUS_TONE, errorInfo } from '../lib/format.ts';
 import type { Tone } from '../lib/format.ts';
 import { Icon } from './icons.tsx';
 import type { IconName } from './icons.tsx';
@@ -77,8 +79,16 @@ export function Badge(props: { tone?: Tone; children: ReactNode; className?: str
   );
 }
 
-export function StatusBadge(props: { status: SessionStatus | null | undefined }): ReactNode {
+export function StatusBadge(props: { status: SessionStatus | null | undefined; prompt?: SessionPrompt | null }): ReactNode {
   if (!props.status) return null;
+  if (props.prompt === 'login' && (props.status === 'waiting_input' || props.status === 'running' || props.status === 'starting')) {
+    return (
+      <Badge tone="warn">
+        <Icon name="key" size={11} />
+        login
+      </Badge>
+    );
+  }
   const tone = STATUS_TONE[props.status];
   return (
     <Badge tone={tone}>
@@ -112,16 +122,21 @@ export function Field(props: { label: string; hint?: string; children: ReactNode
   );
 }
 
-const inputCls = 'h-9 w-full rounded-md border border-border bg-panel px-2.5 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none';
+const inputCls = 'h-9 rounded-md border border-border bg-panel px-2.5 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none';
+
+/** Full width unless the caller sets a width (`w-auto`, `w-40`, …): utilities can't override each other reliably. */
+function widthCls(className: string | undefined): string {
+  return className && /(^|\s)w-/.test(className) ? '' : 'w-full';
+}
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>): ReactNode {
   const { className, ...rest } = props;
-  return <input className={cx(inputCls, className)} {...rest} />;
+  return <input className={cx(inputCls, widthCls(className), className)} {...rest} />;
 }
 
 export function Select(props: SelectHTMLAttributes<HTMLSelectElement>): ReactNode {
   const { className, ...rest } = props;
-  return <select className={cx(inputCls, 'pr-7', className)} {...rest} />;
+  return <select className={cx(inputCls, widthCls(className), 'pr-7', className)} {...rest} />;
 }
 
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>): ReactNode {
@@ -148,10 +163,118 @@ export function Empty(props: { icon?: IconName; title: string; children?: ReactN
   );
 }
 
-export function ErrorText(props: { error: unknown }): ReactNode {
+/** An error message; `machine_offline` errors render as a calmer "machine offline" notice. */
+export function ErrorText(props: { error: unknown; className?: string }): ReactNode {
   if (!props.error) return null;
-  const msg = props.error instanceof Error ? props.error.message : String(props.error);
-  return <div className="rounded-md border border-err/30 bg-err/5 px-3 py-2 text-sm text-err">{msg}</div>;
+  const { message, offline } = errorInfo(props.error);
+  if (offline) {
+    return (
+      <div className={cx('flex items-start gap-2 rounded-md border border-warn/30 bg-warn/5 px-3 py-2 text-sm text-warn', props.className)} role="status">
+        <Icon name="wifiOff" size={16} className="mt-0.5 shrink-0" />
+        <span className="min-w-0 flex-1">
+          <span className="font-medium">Machine offline.</span> {message}
+        </span>
+      </div>
+    );
+  }
+  return <div className={cx('rounded-md border border-err/30 bg-err/5 px-3 py-2 text-sm text-err', props.className)}>{message}</div>;
+}
+
+/** Centered dialog with a backdrop; closes on Escape and backdrop click. */
+export function Modal(props: { title: ReactNode; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean }): ReactNode {
+  const { onClose } = props;
+  const panel = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    panel.current?.focus();
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  return createPortal(
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/40 p-0 sm:items-center sm:p-4" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        ref={panel}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        className={cx('flex max-h-[92vh] w-full flex-col rounded-t-xl border border-border bg-panel shadow-xl outline-none sm:rounded-xl', props.wide ? 'sm:max-w-2xl' : 'sm:max-w-md')}
+      >
+        <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+          <div className="min-w-0 flex-1 truncate font-semibold">{props.title}</div>
+          <IconButton icon="x" label="Close" onClick={onClose} className="-mr-2" />
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">{props.children}</div>
+        {props.footer ? <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border px-4 py-3">{props.footer}</div> : null}
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+/** Copies `text` to the clipboard and confirms briefly. */
+export function CopyButton(props: { text: string; label?: string; size?: 'sm' | 'md'; variant?: ButtonVariant; className?: string }): ReactNode {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const t = setTimeout(() => setCopied(false), 1500);
+    return () => clearTimeout(t);
+  }, [copied]);
+  return (
+    <Button
+      size={props.size ?? 'sm'}
+      variant={props.variant ?? 'secondary'}
+      icon={copied ? 'check' : 'copy'}
+      className={props.className}
+      onClick={() => {
+        void navigator.clipboard?.writeText(props.text).then(
+          () => setCopied(true),
+          () => setCopied(false),
+        );
+      }}
+    >
+      {copied ? 'Copied' : (props.label ?? 'Copy')}
+    </Button>
+  );
+}
+
+/** Determinate (value 0..1) or indeterminate (value null) progress bar. */
+export function ProgressBar(props: { value: number | null; tone?: 'accent' | 'ok' | 'err'; className?: string }): ReactNode {
+  const color = props.tone === 'ok' ? 'bg-ok' : props.tone === 'err' ? 'bg-err' : 'bg-accent';
+  return (
+    <div className={cx('relative h-1.5 w-full overflow-hidden rounded-full bg-panel-2', props.className)} role="progressbar" aria-valuenow={props.value === null ? undefined : Math.round(props.value * 100)}>
+      {props.value === null ? (
+        <span className={cx('absolute inset-y-0 w-1/3 animate-[indeterminate_1.2s_ease-in-out_infinite] rounded-full', color)} />
+      ) : (
+        <span className={cx('absolute inset-y-0 left-0 rounded-full transition-[width] duration-300', color)} style={{ width: `${Math.round(Math.min(1, Math.max(0, props.value)) * 100)}%` }} />
+      )}
+    </div>
+  );
+}
+
+/** A row of mutually exclusive buttons. */
+export function Segmented<T extends string>(props: { value: T; onChange: (v: T) => void; items: { value: T; label: ReactNode }[]; className?: string; size?: 'sm' | 'md' }): ReactNode {
+  return (
+    <div className={cx('inline-flex gap-0.5 rounded-md border border-border bg-panel p-0.5', props.className)} role="radiogroup">
+      {props.items.map((it) => (
+        <button
+          key={it.value}
+          type="button"
+          role="radio"
+          aria-checked={props.value === it.value}
+          onClick={() => props.onChange(it.value)}
+          className={cx(
+            'rounded px-2 whitespace-nowrap',
+            props.size === 'sm' ? 'h-6 text-xs' : 'h-7 text-sm',
+            props.value === it.value ? 'bg-panel-2 font-medium text-fg' : 'text-muted hover:text-fg',
+          )}
+        >
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
 }
 
 export function Tabs<T extends string>(props: { value: T; onChange: (v: T) => void; items: { value: T; label: string; icon?: IconName; badge?: ReactNode }[]; className?: string }): ReactNode {

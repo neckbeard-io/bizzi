@@ -9,13 +9,15 @@ import type {
   RawItem,
   ReasoningItem,
   StatusItem,
+  SteerItem,
   SubagentItem,
   TimelineItem,
   ToolItem,
   TurnEndItem,
   TurnItem,
 } from '@bizzi/client';
-import type { ApprovalDecisionKind, ApprovalResolution, ToolKind } from '@bizzi/protocol';
+import { questionSpecs, selectMachineOnline } from '@bizzi/client';
+import type { ApprovalDecisionKind, ApprovalResolution, InputBlock, QuestionItem as QuestionSpec, ToolKind } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
 import { DiffBlock } from '../../components/DiffView.tsx';
@@ -24,6 +26,8 @@ import type { IconName } from '../../components/icons.tsx';
 import { Badge, Button, Disclosure, ErrorText, Input, Spinner, Textarea, cx } from '../../components/ui.tsx';
 import { diffStats, parseUnifiedDiff } from '../../lib/diff.ts';
 import { formatDuration, prettyJson, tail, usageSummary } from '../../lib/format.ts';
+import { EMPTY_DRAFT, answerText, buildAnswers, isOptional, isQuickPick, missingAnswers, setText, toggleOption } from '../../lib/questions.ts';
+import type { QuestionDraft } from '../../lib/questions.ts';
 import { Markdown } from './Markdown.tsx';
 
 /** One timeline row. Subscribes to its own item only, so a streaming delta re-renders just this row. */
@@ -38,6 +42,8 @@ function ItemView(props: { sessionId: string; item: TimelineItem }): ReactNode {
   switch (item.kind) {
     case 'turn':
       return <TurnRow item={item} />;
+    case 'steer':
+      return <SteerRow item={item} />;
     case 'message':
       return <MessageRow item={item} />;
     case 'reasoning':
@@ -71,8 +77,8 @@ function UserBubble(props: { children: ReactNode }): ReactNode {
   );
 }
 
-function TurnRow(props: { item: TurnItem }): ReactNode {
-  const parts = props.item.input.map((b, i) =>
+function inputParts(input: readonly InputBlock[]): ReactNode[] {
+  return input.map((b, i) =>
     b.type === 'text' ? (
       <span key={i}>{b.text}</span>
     ) : b.type === 'file' ? (
@@ -85,8 +91,26 @@ function TurnRow(props: { item: TurnItem }): ReactNode {
       </span>
     ),
   );
+}
+
+function TurnRow(props: { item: TurnItem }): ReactNode {
+  const parts = inputParts(props.item.input);
   if (parts.length === 0) return null;
   return <UserBubble>{parts}</UserBubble>;
+}
+
+/** Input steered into the running turn: a user bubble marked as such. */
+function SteerRow(props: { item: SteerItem }): ReactNode {
+  const parts = inputParts(props.item.input);
+  if (parts.length === 0) return null;
+  return (
+    <div className="flex flex-col items-end gap-0.5">
+      <span className="flex items-center gap-1 pr-1 text-[11px] text-muted">
+        <Icon name="send" size={11} /> steered mid-turn
+      </span>
+      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-accent/50 bg-accent-soft/60 px-3.5 py-2 whitespace-pre-wrap text-fg">{parts}</div>
+    </div>
+  );
 }
 
 function MessageRow(props: { item: MessageItem }): ReactNode {
@@ -188,6 +212,7 @@ const DECISION_LABEL: Record<ApprovalResolution, string> = { allow: 'Allow', all
 export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; compact?: boolean }): ReactNode {
   const store = useStore();
   const editableCap = useBizzi((s) => s.capabilities[props.sessionId]?.editableApprovals ?? true);
+  const online = useBizzi((s) => selectMachineOnline(s, s.sessions[props.sessionId]?.machineId));
   const a = props.item;
   const req = a.request;
   const editable = req.editable && editableCap && req.input !== undefined;
@@ -224,7 +249,9 @@ export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; com
           {req.description ? <div className="mt-0.5 text-sm text-muted">{req.description}</div> : null}
         </div>
         {!pending ? (
-          <Badge tone={a.status === 'expired' ? 'neutral' : a.decision === 'deny' ? 'err' : 'ok'}>{a.status === 'expired' ? 'expired' : a.decision ? DECISION_LABEL[a.decision] : 'resolved'}</Badge>
+          <Badge tone={a.status === 'expired' || a.decision === 'cancelled' ? 'neutral' : a.decision === 'deny' ? 'err' : 'ok'} title={a.decision === 'cancelled' ? 'The turn ended or the node restarted before anyone decided' : undefined}>
+            {a.status === 'expired' ? 'expired' : a.decision ? DECISION_LABEL[a.decision] : 'resolved'}
+          </Badge>
         ) : (
           <Badge tone="warn">{req.kind}</Badge>
         )}
@@ -252,7 +279,7 @@ export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; com
                 variant={o === 'deny' ? 'secondary' : o === 'allow' ? 'primary' : 'secondary'}
                 icon={o === 'deny' ? 'x' : 'check'}
                 busy={respond.busy && sent === null}
-                disabled={sent !== null || (editing && parseError !== null && o !== 'deny')}
+                disabled={!online || sent !== null || (editing && parseError !== null && o !== 'deny')}
                 onClick={() => void respond.run(o)}
               >
                 {DECISION_LABEL[o]}
@@ -271,6 +298,7 @@ export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; com
             ) : null}
           </div>
           {sent ? <div className="text-xs text-muted">Sent “{DECISION_LABEL[sent]}”, waiting for the agent…</div> : null}
+          {!online ? <div className="text-xs text-warn">The machine is offline; you can decide once it reconnects.</div> : null}
           <ErrorText error={respond.error} />
         </div>
       ) : null}
@@ -278,46 +306,161 @@ export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; com
   );
 }
 
+/**
+ * A question from the agent (`question.asked`): one or more questions with options (single or multi
+ * select), optional free text. Answers go out with `question.respond`; "Decline" cancels.
+ */
 export function QuestionCard(props: { sessionId: string; item: QuestionItem }): ReactNode {
   const store = useStore();
   const q = props.item;
-  const [answer, setAnswer] = useState('');
-  const send = useAction((text: string) => store.answerQuestion(props.sessionId, text));
+  const specs = useMemo(() => questionSpecs(q), [q]);
+  const online = useBizzi((s) => selectMachineOnline(s, s.sessions[props.sessionId]?.machineId));
+  const [draft, setDraft] = useState<QuestionDraft>(EMPTY_DRAFT);
+  const [sent, setSent] = useState<'answer' | 'cancel' | null>(null);
+  const missing = missingAnswers(specs, draft);
+  const quick = isQuickPick(specs);
+  const respond = useAction(async (reply: { answers: Record<string, string | string[]> } | { cancel: true }) => {
+    setSent('cancel' in reply ? 'cancel' : 'answer');
+    try {
+      await store.respondQuestion(props.sessionId, q.questionId, reply);
+    } catch (e) {
+      setSent(null);
+      throw e;
+    }
+  });
   const pending = q.status === 'pending';
+  const locked = !online || sent !== null || respond.busy;
+
+  const pick = (spec: QuestionSpec, label: string): void => {
+    const next = toggleOption(draft, spec, label);
+    setDraft(next);
+    if (quick) void respond.run({ answers: buildAnswers(specs, next) });
+  };
+
   return (
-    <div className={cx('rounded-lg border bg-panel px-3 py-2.5', pending ? 'border-info/50' : 'border-border')}>
-      <div className="flex items-start gap-2">
-        <Icon name="question" size={16} className="mt-0.5 shrink-0 text-info" />
-        <div className="min-w-0 flex-1 whitespace-pre-wrap">{q.text}</div>
-        {!pending ? <Badge>answered</Badge> : null}
+    <div className={cx('rounded-lg border bg-panel', pending ? 'border-info/50 shadow-sm' : 'border-border')}>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Icon name="question" size={16} className="shrink-0 text-info" />
+        <span className="min-w-0 flex-1 text-sm font-medium">{specs.length > 1 ? `${specs.length} questions from the agent` : 'The agent asks'}</span>
+        {pending ? <Badge tone="info">waiting for you</Badge> : q.status === 'cancelled' ? <Badge>declined</Badge> : <Badge tone="ok">answered</Badge>}
+      </div>
+      <div className="flex flex-col gap-3 px-3 py-2.5">
+        {specs.map((spec) => (
+          <QuestionField
+            key={spec.id}
+            spec={spec}
+            draft={draft}
+            pending={pending}
+            locked={locked}
+            answer={q.answers?.[spec.id]}
+            showText={pending && (!!spec.allowText || !spec.options?.length)}
+            onPick={(label) => pick(spec, label)}
+            onText={(text) => setDraft((d) => setText(d, spec.id, text))}
+          />
+        ))}
       </div>
       {pending ? (
-        <div className="mt-2 flex flex-col gap-2">
-          {q.options?.length ? (
-            <div className="flex flex-wrap gap-1.5">
-              {q.options.map((o) => (
-                <Button key={o} size="sm" busy={send.busy} onClick={() => void send.run(o)}>
-                  {o}
-                </Button>
-              ))}
-            </div>
-          ) : null}
-          <form
-            className="flex gap-1.5"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (answer.trim()) void send.run(answer).then(() => setAnswer(''));
-            }}
-          >
-            <Input value={answer} onChange={(e) => setAnswer(e.target.value)} placeholder="Answer…" />
-            <Button type="submit" size="md" variant="primary" icon="send" disabled={!answer.trim()} busy={send.busy}>
-              Send
+        <div className="flex flex-col gap-2 border-t border-border px-3 py-2">
+          <div className="flex flex-wrap items-center gap-1.5">
+            {!quick ? (
+              <Button
+                size="sm"
+                variant="primary"
+                icon="send"
+                busy={respond.busy && sent === 'answer'}
+                disabled={locked || missing.length > 0}
+                onClick={() => void respond.run({ answers: buildAnswers(specs, draft) })}
+              >
+                Send answer{specs.length > 1 ? 's' : ''}
+              </Button>
+            ) : null}
+            <Button size="sm" variant="ghost" busy={respond.busy && sent === 'cancel'} disabled={locked} onClick={() => void respond.run({ cancel: true })}>
+              Decline
             </Button>
-          </form>
-          <ErrorText error={send.error} />
+            <div className="flex-1" />
+            {!quick && missing.length > 0 && specs.length > 1 ? <span className="text-xs text-muted">{missing.length} still unanswered</span> : null}
+          </div>
+          {sent && !respond.error ? <div className="text-xs text-muted">{sent === 'cancel' ? 'Declined' : 'Sent'}, waiting for the agent…</div> : null}
+          {!online ? <div className="text-xs text-warn">The machine is offline; you can answer once it reconnects.</div> : null}
+          <ErrorText error={respond.error} />
         </div>
       ) : null}
     </div>
+  );
+}
+
+function QuestionField(props: {
+  spec: QuestionSpec;
+  draft: QuestionDraft;
+  pending: boolean;
+  locked: boolean;
+  answer: string | string[] | undefined;
+  showText: boolean;
+  onPick: (label: string) => void;
+  onText: (text: string) => void;
+}): ReactNode {
+  const { spec, draft } = props;
+  const selected = draft.selected[spec.id] ?? [];
+  const answered = props.answer !== undefined ? (typeof props.answer === 'string' ? [props.answer] : props.answer) : [];
+  const described = spec.options?.some((o) => o.description) ?? false;
+  return (
+    <fieldset className="min-w-0">
+      <legend className="mb-1.5 flex flex-wrap items-baseline gap-x-2">
+        {spec.header ? <span className="rounded bg-info/10 px-1.5 py-px text-[11px] font-semibold tracking-wide text-info uppercase">{spec.header}</span> : null}
+        <span className="text-sm whitespace-pre-wrap">{spec.text}</span>
+        {props.pending && spec.multiSelect ? <span className="text-xs text-muted">choose any</span> : null}
+        {props.pending && isOptional(spec) ? <span className="text-xs text-muted">optional</span> : null}
+      </legend>
+      {spec.options?.length ? (
+        <div className={cx('grid gap-1.5', described ? 'grid-cols-1' : 'grid-cols-2 sm:grid-cols-4')}>
+          {spec.options.map((o) => {
+            const on = props.pending ? selected.includes(o.label) : answered.includes(o.label);
+            return (
+              <button
+                key={o.label}
+                type="button"
+                role={spec.multiSelect ? 'checkbox' : 'radio'}
+                aria-checked={on}
+                disabled={!props.pending || props.locked}
+                onClick={() => props.onPick(o.label)}
+                className={cx(
+                  'flex min-w-0 items-start gap-2 rounded-md border px-2.5 py-1.5 text-left text-sm transition-colors',
+                  on ? 'border-accent bg-accent-soft' : 'border-border',
+                  props.pending && !props.locked ? 'hover:bg-panel-2' : 'cursor-default',
+                  !props.pending && !on && 'opacity-50',
+                )}
+              >
+                <span
+                  className={cx(
+                    'mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center border',
+                    spec.multiSelect ? 'rounded' : 'rounded-full',
+                    on ? 'border-accent bg-accent text-accent-fg' : 'border-border',
+                  )}
+                >
+                  {on ? <Icon name="check" size={11} strokeWidth={3} /> : null}
+                </span>
+                <span className="min-w-0">
+                  <span className="block font-medium">{o.label}</span>
+                  {o.description ? <span className="block text-xs text-muted">{o.description}</span> : null}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {props.showText ? (
+        <Input
+          className="mt-1.5"
+          value={draft.text[spec.id] ?? ''}
+          onChange={(e) => props.onText(e.target.value)}
+          disabled={props.locked}
+          placeholder={spec.options?.length ? 'Other (type your own answer)…' : 'Your answer…'}
+        />
+      ) : null}
+      {!props.pending && props.answer !== undefined && !spec.options?.some((o) => answered.includes(o.label)) ? (
+        <div className="mt-1 rounded-md bg-panel-2 px-2.5 py-1.5 text-sm">{answerText(props.answer)}</div>
+      ) : null}
+    </fieldset>
   );
 }
 

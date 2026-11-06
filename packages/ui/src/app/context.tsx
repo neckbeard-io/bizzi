@@ -1,21 +1,36 @@
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { ReactNode } from 'react';
-import { BizziClient, BizziStore } from '@bizzi/client';
-import type { BizziState, SocketFactory } from '@bizzi/client';
+import { BizziClient, BizziStore, hubTokenProvider } from '@bizzi/client';
+import type { BizziState, FetchLike, SocketFactory, StoreCache, StoreSnapshot, TokenProvider } from '@bizzi/client';
 import type { ConnectionTarget } from '../lib/connection.ts';
+import { loadJson, loadString, saveJson, saveString } from '../lib/storage.ts';
 
 export interface BizziContextValue {
   client: BizziClient;
   store: BizziStore;
   target: ConnectionTarget;
+  /** This device's id on the hub (hub connections), to mark it in the device list. */
+  deviceId: string | null;
   /** Leave this connection (back to the connect screen). */
   disconnect: () => void;
 }
 
 const Ctx = createContext<BizziContextValue | null>(null);
 
-export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: () => void; children: ReactNode }): ReactNode {
-  const { target, onDisconnect } = props;
+/** Storage key prefix for per-connection state (cache, last machine). */
+function connectionKey(t: ConnectionTarget): string {
+  return t.hub ? `hub:${t.hub.hubUrl}` : `node:${t.url}`;
+}
+
+function localStorageCache(key: string): StoreCache {
+  return {
+    load: () => loadJson<StoreSnapshot>(`bizzi.cache.${key}`),
+    save: (snap) => saveJson(`bizzi.cache.${key}`, snap),
+  };
+}
+
+export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: () => void; onError: (message: string) => void; children: ReactNode }): ReactNode {
+  const { target, onDisconnect, onError } = props;
   const [value, setValue] = useState<BizziContextValue | null>(null);
 
   useEffect(() => {
@@ -23,15 +38,47 @@ export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: (
     let cleanup: (() => void) | null = null;
     void (async () => {
       let createSocket: SocketFactory | undefined;
-      if (target.source === 'mock') {
-        const { MockCore, createMockSocketFactory } = await import('../mock/mockServer.ts');
-        createSocket = createMockSocketFactory(new MockCore());
+      let hubFetch: FetchLike | undefined;
+      let deviceId: string | null = target.hub?.deviceId ?? null;
+      let cache: StoreCache | undefined = target.mock ? undefined : localStorageCache(connectionKey(target));
+      if (target.mock) {
+        const mock = await import('../mock/index.ts');
+        const core = target.source === 'hub' ? mock.sharedMockHub() : new mock.MockCore({ role: target.mock.role, demo: target.mock.demo });
+        createSocket = mock.createMockSocketFactory(core);
+        hubFetch = mock.createMockHubFetch(core);
+        if (target.source === 'mock' && target.mock.role === 'hub') deviceId = 'd_mac';
+        if (target.mock.role === 'hub') {
+          const snap = mock.mockSnapshot();
+          cache = { load: () => snap, save: () => {} };
+        }
+      }
+      let auth: string | TokenProvider | undefined = target.token;
+      if (target.hub) {
+        try {
+          auth = await hubTokenProvider(target.hub, hubFetch ? { fetch: hubFetch } : {});
+        } catch (e) {
+          if (!disposed) onError(e instanceof Error ? e.message : String(e));
+          return;
+        }
       }
       if (disposed) return;
+      const key = connectionKey(target);
+      const machineKey = `bizzi.machine.${key}`;
       const client = new BizziClient({ clientName: '@bizzi/ui', clientVersion: '0.0.1', ...(createSocket ? { createSocket } : {}) });
-      const store = new BizziStore(client);
-      client.connect(target.url, target.token).catch(() => {
-        // Fatal errors (bad token, protocol mismatch) surface through the connection state.
+      const store = new BizziStore(client, {
+        initialMachineId: loadString(machineKey),
+        ...(cache ? { cache } : {}),
+      });
+      let lastMachine = store.getState().selectedMachineId;
+      const unsubMachine = store.subscribe(() => {
+        const id = store.getState().selectedMachineId;
+        if (id && id !== lastMachine) {
+          lastMachine = id;
+          saveString(machineKey, id);
+        }
+      });
+      client.connect(target.url, auth).catch(() => {
+        // Fatal errors (bad token, revoked device, protocol mismatch) surface through the connection state.
       });
       const wake = (): void => client.reconnectNow();
       const onVisible = (): void => {
@@ -42,17 +89,18 @@ export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: (
       cleanup = () => {
         window.removeEventListener('online', wake);
         document.removeEventListener('visibilitychange', onVisible);
+        unsubMachine();
         store.dispose();
         client.close();
       };
-      setValue({ client, store, target, disconnect: onDisconnect });
+      setValue({ client, store, target, deviceId, disconnect: onDisconnect });
     })();
     return () => {
       disposed = true;
       cleanup?.();
       setValue(null);
     };
-  }, [target, onDisconnect]);
+  }, [target, onDisconnect, onError]);
 
   if (!value) return null;
   return <Ctx.Provider value={value}>{props.children}</Ctx.Provider>;

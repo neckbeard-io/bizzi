@@ -100,6 +100,11 @@ textarea {
   outline-offset: 1px;
 }
 
+/* Dialog panels take focus programmatically (for Escape / screen readers); no ring around the whole panel. */
+[role='dialog']:focus-visible {
+  outline: none;
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -233,4 +238,15 @@ textarea {
 }
 .term-host .xterm-viewport {
   scrollbar-width: thin;
+}
+
+/* ---------------------------------------------------------------- progress */
+
+@keyframes indeterminate {
+  0% {
+    left: -35%;
+  }
+  100% {
+    left: 100%;
+  }
 }

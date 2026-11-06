@@ -1,9 +1,13 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { selectSessionPrompt } from '@bizzi/client';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
+import { useMachine, useMachineOnline } from '../../app/machine.ts';
+import { Icon } from '../../components/icons.tsx';
 import { PageHeader } from '../../components/layout.tsx';
 import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
+import { machinePresence } from '../../lib/format.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
 import { PlanPanel } from './PlanPanel.tsx';
@@ -29,6 +33,11 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const session = useBizzi((s) => s.sessions[sessionId] ?? null);
   const sessionsLoaded = useBizzi((s) => s.sessionsLoaded);
   const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status ?? null);
+  const prompt = useBizzi((s) => selectSessionPrompt(s, sessionId));
+  const canFork = useBizzi((s) => s.capabilities[sessionId]?.fork ?? false);
+  const isLogin = useBizzi((s) => s.timelines[sessionId]?.login != null);
+  const machine = useMachine(session?.machineId);
+  const online = useMachineOnline(session?.machineId);
   const workspace = useBizzi((s) => (session ? (s.workspaces?.[session.workspaceId] ?? null) : null));
   const planCount = useBizzi((s) => s.timelines[sessionId]?.plan?.filter((p) => p.status !== 'completed').length ?? 0);
   const fileCount = useBizzi((s) => Object.keys(s.timelines[sessionId]?.files ?? {}).length);
@@ -37,6 +46,15 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const [showControls, setShowControls] = useState(false);
   const [sideTab, setSideTab] = useState<SideTab>(props.tab === 'chat' ? 'plan' : props.tab);
   const stop = useAction(() => store.stop(sessionId));
+  const fork = useAction(async () => {
+    const s = await store.forkSession(sessionId);
+    navigate({ name: 'session', sessionId: s.id, tab: 'chat' });
+  });
+  const remove = useAction(async () => {
+    const workspaceId = session?.workspaceId;
+    await store.deleteSession(sessionId);
+    navigate(workspaceId ? { name: 'workspace', workspaceId } : { name: 'workspaces' }, { replace: true });
+  });
 
   useEffect(() => {
     setOpenError(null);
@@ -52,7 +70,9 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             <ErrorText error={openError} />
           </div>
         ) : sessionsLoaded ? (
-          <Empty icon="chat" title="Session not found" />
+          <Empty icon="chat" title="Session not found">
+            It may have been deleted.
+          </Empty>
         ) : (
           <Loading />
         )}
@@ -110,9 +130,18 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
         back={() => navigate({ name: 'workspace', workspaceId: session.workspaceId })}
         actions={
           <>
-            <StatusBadge status={status} />
+            <StatusBadge status={status} prompt={prompt} />
             {!terminal ? <IconButton icon="settings" label="Session settings" onClick={() => setShowControls((v) => !v)} className={cx(showControls && 'bg-panel-2 text-fg')} /> : null}
-            {!ended ? (
+            {canFork ? <IconButton icon="fork" label="Fork: new session continuing this conversation" disabled={!online || fork.busy} onClick={() => void fork.run()} /> : null}
+            <IconButton
+              icon="trash"
+              label="Delete session"
+              disabled={!online || remove.busy}
+              onClick={() => {
+                if (window.confirm(`Delete "${session.title || 'this session'}"? The agent is stopped and the session and its history are removed. This cannot be undone.`)) void remove.run();
+              }}
+            />
+            {!ended && online ? (
               <Button
                 size="sm"
                 variant="ghost"
@@ -139,7 +168,21 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
           ) : null}
         </div>
       ) : null}
-      <ErrorText error={openError ?? stop.error} />
+      {!online ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-warn/30 bg-warn/10 px-3 py-1.5 text-xs text-warn md:px-5" role="status">
+          <Icon name="wifiOff" size={14} className="shrink-0" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium">{machine?.name ?? 'The machine'} is offline</span>
+            {machine ? ` (${machinePresence(machine)})` : ''}. Showing the cached timeline; sending, approvals and changes are disabled until it reconnects.
+          </span>
+        </div>
+      ) : null}
+      {isLogin ? (
+        <a href={`#/login/${encodeURIComponent(sessionId)}`} className="flex shrink-0 items-center gap-2 border-b border-border bg-accent-soft px-3 py-1.5 text-xs text-accent md:px-5">
+          <Icon name="key" size={14} /> This is a login session. Open the login helper for links and codes.
+        </a>
+      ) : null}
+      <ErrorText error={openError ?? stop.error ?? fork.error ?? remove.error} />
       {split ? (
         <div className="flex min-h-0 flex-1">
           <section className="min-w-0 flex-1">{main}</section>

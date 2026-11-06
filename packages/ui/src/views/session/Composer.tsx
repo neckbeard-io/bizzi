@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
+import { selectMachineOnline } from '@bizzi/client';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useIsWide } from '../../app/hooks.ts';
 import { Button, ErrorText, cx } from '../../components/ui.tsx';
@@ -12,11 +13,12 @@ export function Composer(props: { sessionId: string }): ReactNode {
   const caps = useBizzi((s) => s.capabilities[sessionId] ?? null);
   const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status ?? null);
   const activeTurn = useBizzi((s) => s.timelines[sessionId]?.activeTurnId ?? null);
+  const online = useBizzi((s) => selectMachineOnline(s, s.sessions[sessionId]?.machineId));
   const [text, setText] = useState('');
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const busy = activeTurn !== null || isBusy(status);
-  const closed = status === 'ended' || status === 'failed';
+  const closed = status === 'ended' || status === 'failed' || !online;
   const canSteer = busy && (caps?.steer ?? false);
   const canInterrupt = busy && (caps?.interrupt ?? false);
 
@@ -45,7 +47,9 @@ export function Composer(props: { sessionId: string }): ReactNode {
   };
 
   const disabled = closed || (busy && !canSteer);
-  const placeholder = closed
+  const placeholder = !online
+    ? 'Machine offline: read-only until it reconnects'
+    : closed
     ? `Session ${status}`
     : busy
       ? canSteer

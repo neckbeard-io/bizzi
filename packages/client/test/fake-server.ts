@@ -1,7 +1,7 @@
 import { WebSocketServer } from 'ws';
 import type { WebSocket } from 'ws';
-import { PROTOCOL_VERSION } from '@bizzi/protocol';
-import type { ChannelEvent, ErrorObject, GlobalEventBody, MachineInfo, RequestMsg, SessionEventBody } from '@bizzi/protocol';
+import { BizziError, PROTOCOL_VERSION } from '@bizzi/protocol';
+import type { ChannelEvent, ErrorObject, GlobalEventBody, MachineInfo, MachineRole, RequestMsg, SessionEventBody } from '@bizzi/protocol';
 
 export const MACHINE: MachineInfo = {
   id: 'm_1',
@@ -32,7 +32,12 @@ export class FakeServer {
   readonly conns = new Set<Conn>();
   readonly requests: RequestMsg[] = [];
   token = 'secret';
+  /** Accept any of these tokens too (hub tests rotate tokens). */
+  readonly tokens = new Set<string>();
   helloCount = 0;
+  /** What `hello` answers with. */
+  helloMachine: MachineInfo = MACHINE;
+  helloRole: MachineRole | undefined = undefined;
   /** Extra events replayed on subscribe below `since` (simulates a sloppy server; client must dedupe). */
   replayOverlap = 0;
   /** Methods that never get a response. */
@@ -102,10 +107,12 @@ export class FakeServer {
       const fail = (error: ErrorObject): void => ws.send(JSON.stringify({ id: req.id, error }));
       const params = req.params as Record<string, unknown>;
       if (req.method === 'hello') {
-        if (params.token !== this.token) return fail({ code: 'unauthorized', message: 'bad token' });
+        if (params.token !== this.token && !this.tokens.has(params.token as string)) return fail({ code: 'unauthorized', message: 'bad token' });
         conn.authed = true;
         this.helloCount++;
-        return reply({ protocol: PROTOCOL_VERSION, serverVersion: 'fake', machine: MACHINE });
+        const hello: Record<string, unknown> = { protocol: PROTOCOL_VERSION, serverVersion: 'fake', machine: this.helloMachine };
+        if (this.helloRole) hello.role = this.helloRole;
+        return reply(hello);
       }
       if (!conn.authed) return fail({ code: 'unauthorized', message: 'hello first' });
       if (req.method === 'subscribe') {
@@ -125,7 +132,7 @@ export class FakeServer {
       try {
         return reply(h(params, conn));
       } catch (e) {
-        return fail({ code: 'internal', message: String(e) });
+        return fail(e instanceof BizziError ? e.toObject() : { code: 'internal', message: String(e) });
       }
     });
   }

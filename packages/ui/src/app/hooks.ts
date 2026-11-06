@@ -71,6 +71,17 @@ export function useDomTheme(): 'light' | 'dark' {
   return useSyncExternalStore(subscribe, () => (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'), () => 'light');
 }
 
+/** The current time, re-rendering every `intervalMs` while mounted (countdowns, "last seen" labels). */
+export function useNow(intervalMs = 1000, enabled = true): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    const t = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(t);
+  }, [intervalMs, enabled]);
+  return now;
+}
+
 /** Run an async action with busy/error state. */
 export function useAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>): { run: (...args: A) => Promise<R | undefined>; busy: boolean; error: unknown; reset: () => void } {
   const [busy, setBusy] = useState(false);
