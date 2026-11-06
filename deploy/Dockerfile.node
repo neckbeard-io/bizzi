@@ -1,0 +1,69 @@
+# bizzi node image: Debian slim + Node 26 + the core + a base toolset for agents.
+# Agents run inside this container, so the image *is* the dev environment (topology.md §2.2).
+#
+# Build from the repo root (the context must be the repo, the Dockerfile lives in deploy/):
+#   docker build -f deploy/Dockerfile.node -t bizzi/node:latest .
+# Deploy/Dockerfile.node.dockerignore limits what gets sent (BuildKit picks it up automatically).
+#
+# Extend it with root-level tools in your own Dockerfile:  FROM bizzi/node  +  RUN apt-get install ...
+# Per-user tools (ADEs, mise toolchains, logins) live on the /home/bizzi volume instead.
+
+ARG NODE_IMAGE=node:26-trixie-slim
+
+# ---- base: OS + toolset, shared with Dockerfile.hub ------------------------------------------
+FROM ${NODE_IMAGE} AS base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    TINI_SUBREAPER=1
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl git openssh-client \
+      python3 build-essential \
+      ripgrep less procps \
+      xvfb xauth \
+      tini gosu \
+ && rm -rf /var/lib/apt/lists/* \
+ # the upstream image ships a `node` user at uid 1000; the entrypoint manages `bizzi` instead
+ && (userdel --remove node 2>/dev/null || true) \
+ && groupadd --gid 1000 bizzi \
+ && useradd --uid 1000 --gid 1000 --home-dir /home/bizzi --create-home --shell /bin/bash bizzi \
+ && mkdir -p /data /workspaces \
+ && chown bizzi:bizzi /data /workspaces \
+ && gosu nobody true
+
+COPY deploy/docker/entrypoint.sh /usr/local/bin/bizzi-entrypoint
+RUN chmod 0755 /usr/local/bin/bizzi-entrypoint
+
+# ---- node: the core ------------------------------------------------------------------------
+FROM base AS node
+
+WORKDIR /app
+# Root manifests + workspace sources (see the .dockerignore for what is excluded: ui, desktop, tests).
+COPY package.json package-lock.json ./
+COPY packages/ packages/
+COPY apps/ apps/
+# Production deps only. Native addons (node-pty, ...) build here against Node 26 with build-essential.
+# Installs just the CLI's dependency tree when apps/cli exists, everything else otherwise.
+RUN if [ -f apps/cli/package.json ]; then \
+      npm ci --omit=dev --no-audit --no-fund --workspace @bizzi/cli; \
+    else \
+      echo "warning: apps/cli not in the build context; installing all workspaces" >&2; \
+      npm ci --omit=dev --no-audit --no-fund; \
+    fi \
+ && npm cache clean --force
+
+ENV NODE_ENV=production \
+    BIZZI_DATA_DIR=/data \
+    DISPLAY=:99
+
+VOLUME ["/data", "/home/bizzi"]
+EXPOSE 7777
+STOPSIGNAL SIGTERM
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:7777/healthz >/dev/null || exit 1
+
+ENTRYPOINT ["tini", "--", "bizzi-entrypoint"]
+CMD ["node", "apps/cli/src/main.ts", "serve", "--host", "0.0.0.0", "--port", "7777", "--data-dir", "/data"]

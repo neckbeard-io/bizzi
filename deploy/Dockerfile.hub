@@ -1,0 +1,19 @@
+# bizzi hub image: PLACEHOLDER. The hub role (registry, relay, auth, event-log replica, push)
+# is NOT implemented yet. This image only exists so the compose layout from topology.md §2.2 is in
+# place. It starts, logs that the hub is missing, idles, and reports unhealthy.
+#
+# It shares the node image's base on purpose: the hub will be the same `bizzi` program run as
+# `bizzi serve --hub` (tech-choices "Resulting shape"). When that lands, only CMD changes.
+#
+# With compose, BIZZI_NODE_IMAGE points at the `node` service's freshly built image
+# (additional_contexts: service:node). Standalone:
+#   docker build -f deploy/Dockerfile.node -t bizzi/node:latest .
+#   docker build -f deploy/Dockerfile.hub  -t bizzi/hub:latest  .
+
+ARG BIZZI_NODE_IMAGE=bizzi/node:latest
+FROM ${BIZZI_NODE_IMAGE}
+
+ENV BIZZI_XVFB=0
+
+# TODO(hub): CMD ["node", "apps/cli/src/main.ts", "serve", "--hub", "--host", "0.0.0.0", "--port", "7777", "--data-dir", "/data"]
+CMD ["sh", "-c", "echo 'bizzi hub: not implemented yet; this container is a placeholder (see deploy/README.md)' >&2; exec sleep infinity"]

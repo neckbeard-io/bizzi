@@ -1,0 +1,16 @@
+# Build context = repo root. Send only what the node image needs.
+*
+!package.json
+!package-lock.json
+!deploy/docker/
+!packages/
+!apps/
+packages/ui
+apps/desktop
+**/node_modules
+**/test
+**/dist
+**/out
+**/coverage
+**/*.log
+**/.DS_Store
