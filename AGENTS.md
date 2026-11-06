@@ -14,11 +14,14 @@ packages/
   pty/               @bizzi/pty           node-pty terminal host + terminal-mode adapter (agy, shell, any TUI)
   knowledge/         @bizzi/knowledge     rules + memory store, resolver, policy, MCP server
   provision/         @bizzi/provision     ADE detection, install/login recipes
+  services/          @bizzi/services      node extensions: provisioning, secrets, login, knowledge methods
+  hub/               @bizzi/hub           hub role: relay, replica, routing, device pairing/auth; node→hub link
   client/            @bizzi/client        protocol client + normalized store (no UI deps)
   ui/                @bizzi/ui            React app shared by every client
 apps/
-  cli/               @bizzi/cli           `bizzi serve`, `bizzi status`
+  cli/               @bizzi/cli           `bizzi serve [--connect]`, `bizzi hub serve`, `bizzi pair`, `bizzi status`
   desktop/           @bizzi/desktop       Electron shell
+  mobile/            @bizzi/mobile        Capacitor shell (phones, client only)
 deploy/                                   Dockerfiles, docker-compose.yml, proxy examples
 ```
 
@@ -39,7 +42,14 @@ deploy/                                   Dockerfiles, docker-compose.yml, proxy
 
 - **Wire protocol:** `packages/protocol/src/{envelope,methods,events,model,capabilities}.ts`. Changing it affects every package; keep changes additive.
 - **Adapter contract:** `packages/protocol/src/adapter.ts`. The core owns `seq`/`ts` and turn bookkeeping; adapters only emit `SessionEventBody` values.
+- **Hub contract:** `packages/protocol/src/hub.ts` (HTTP pairing/auth, node link). The node link reuses the client protocol with roles flipped: the node dials out, the hub acts as a client.
+- **Node extensions:** `NodeExtension` in `@bizzi/core` lets packages such as `@bizzi/services` own groups of methods (`agent.*`, `knowledge.*`).
 - **CLI ↔ desktop contract:** `bizzi serve` prints exactly one JSON line `{"event":"ready",...}` to stdout when listening (see `ServeReady` in `packages/protocol/src/model.ts`).
+
+## Tooling notes
+
+- Don't drive the Playwright MCP tools in this environment (extension mode blocks). For UI screenshots use the desktop smoke mode: `BIZZI_UI_URL=… BIZZI_SMOKE_MS=8000 npm run dev -w @bizzi/desktop` writes `<data dir>/smoke.png`.
+- npm 11 blocks install scripts; fetch the Electron binary with `node node_modules/electron/install.js`.
 
 ## Commits
 
