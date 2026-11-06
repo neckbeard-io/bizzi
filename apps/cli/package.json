@@ -18,6 +18,7 @@
     "@bizzi/knowledge": "*",
     "@bizzi/protocol": "*",
     "@bizzi/pty": "*",
+    "@bizzi/services": "*",
     "ws": "^8.22.1"
   },
   "devDependencies": {

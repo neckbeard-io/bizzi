@@ -2,6 +2,7 @@
 // contract onto it. Structured features are absent; `send` types text + Enter and completes the
 // turn when output goes idle (best effort).
 
+import { isAbsolute, resolve as resolvePath } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import {
   BizziError,
@@ -22,11 +23,20 @@ import {
   type StopReason,
 } from '@bizzi/protocol';
 import { ActivityMonitor, DEFAULT_DETECTORS, detectorsFor, type IdleResult, type PromptDetector } from './activity.ts';
-import { agySpec, claudeSpec, codexSpec, opencodeSpec, shellSpec, type ShellCommand, type TerminalAgentSpec } from './agents.ts';
+import {
+  agySpec,
+  claudeSpec,
+  codexSpec,
+  opencodeSpec,
+  shellSpec,
+  type LaunchPlan,
+  type ShellCommand,
+  type TerminalAgentSpec,
+} from './agents.ts';
 import { lastBracketedPasteState } from './ansi.ts';
 import { DEFAULT_COLS, DEFAULT_ROWS, clampSize, type ExitInfo } from './backend.ts';
 import { DEFAULT_COALESCE_BYTES, chunkBuffer } from './coalescer.ts';
-import { readVersion } from './probe.ts';
+import { findBinary, readVersion } from './probe.ts';
 import { DEFAULT_SCROLLBACK_BYTES } from './ring-buffer.ts';
 import {
   attachSupervisor,
@@ -196,9 +206,7 @@ export class TerminalAdapter implements AgentAdapter {
       logger.log('warn', 'ignoring unrecognised resumeRef', { resumeRef: opts.resumeRef });
     }
 
-    const binary = this.spec.resolveBinary(this.#lookup());
-    if (!binary) throw new BizziError('agent_unavailable', `${this.spec.binaryName} not found`);
-    const plan = this.spec.buildLaunch(opts, nativeRef);
+    const { binary, plan } = this.#resolveLaunch(opts, nativeRef);
     if (plan.ignored?.length) logger.log('info', 'start options not supported in terminal mode', { ignored: plan.ignored });
     const env = buildPtyEnv(opts.env, this.#opts.baseEnv, this.spec.unsetEnv);
     const cols = clampSize(opts.cols, DEFAULT_COLS);
@@ -261,6 +269,34 @@ export class TerminalAdapter implements AgentAdapter {
     const session = new TerminalSession(host, this.spec, this.#opts, emit, logger, plan.nativeRef);
     session.announce();
     return session;
+  }
+
+  /**
+   * What to run: the agent's TUI built from the start options, or `opts.command` (e.g. a login
+   * command) verbatim. A custom command keeps cwd/env/size; agent launch flags don't apply to it.
+   */
+  #resolveLaunch(opts: StartSessionOptions, nativeRef: string | undefined): { binary: string; plan: LaunchPlan } {
+    const command = opts.command?.length ? opts.command : undefined;
+    if (!command) {
+      const binary = this.spec.resolveBinary(this.#lookup());
+      if (!binary) throw new BizziError('agent_unavailable', `${this.spec.binaryName} not found`);
+      return { binary, plan: this.spec.buildLaunch(opts, nativeRef) };
+    }
+    const [name, ...args] = command as [string, ...string[]];
+    if (typeof name !== 'string' || name === '' || args.some((a) => typeof a !== 'string')) {
+      throw new BizziError('bad_request', 'command must be a non-empty array of strings');
+    }
+    const lookup = { path: opts.env?.PATH ?? this.#opts.path, extraDirs: this.#opts.extraDirs };
+    // `./bin/x` or `sub/x` are relative to the session's cwd; bare names are looked up on PATH.
+    const target = !isAbsolute(name) && name.includes('/') ? resolvePath(opts.cwd, name) : name;
+    const binary = findBinary(target, lookup);
+    if (!binary) throw new BizziError('agent_unavailable', `${name} not found`);
+    const ignored = (['model', 'permissionMode', 'effort', 'systemPromptAppend', 'mcpServers'] as const).filter((k) => {
+      const v = opts[k];
+      return v !== undefined && !(typeof v === 'object' && Object.keys(v).length === 0);
+    }) as string[];
+    if (nativeRef) ignored.push('resumeRef');
+    return { binary, plan: { args, ignored } };
   }
 
   #sessionFromAttachment(

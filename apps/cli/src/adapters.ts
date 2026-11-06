@@ -7,7 +7,7 @@ interface AdapterModule {
   createAdapters?: () => AgentAdapter[] | Promise<AgentAdapter[]>;
 }
 
-function isMissing(err: unknown, name: string): boolean {
+export function isMissing(err: unknown, name: string): boolean {
   const e = err as NodeJS.ErrnoException;
   return (e?.code === 'ERR_MODULE_NOT_FOUND' || e?.code === 'MODULE_NOT_FOUND') && String(e.message).includes(name);
 }

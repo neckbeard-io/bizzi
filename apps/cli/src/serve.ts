@@ -7,7 +7,8 @@ import { parseArgs } from 'node:util';
 import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
 import { loadAdapters } from './adapters.ts';
-import { createKnowledgeHook } from './knowledge.ts';
+import { createKnowledgeRuntime } from './knowledge.ts';
+import { loadServices } from './services.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
 
 export const SERVE_HELP = `Usage: bizzi serve [options]
@@ -19,6 +20,7 @@ export const SERVE_HELP = `Usage: bizzi serve [options]
   --token <token>      client token (default: $BIZZI_TOKEN, else random)
   --fake               add scripted fake adapters (for manual testing)
   --no-knowledge       don't inject rules, memory or the bizzi-memory MCP server
+  --no-services        don't load @bizzi/services (agent install/login, secrets, knowledge methods)
   --log-level <level>  debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
@@ -50,6 +52,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
       token: { type: 'string' },
       fake: { type: 'boolean', default: false },
       'no-knowledge': { type: 'boolean', default: false },
+      'no-services': { type: 'boolean', default: false },
       'log-level': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -84,17 +87,22 @@ export async function serve(argv: string[], version: string): Promise<void> {
   }
   adapters.push(...(await loadAdapters(logger)));
 
-  let machineId = '';
-  const prepareStart = values['no-knowledge'] ? undefined : await createKnowledgeHook(dataDir, logger, () => machineId);
+  // One knowledge store, shared by session-start injection and the knowledge.* methods.
+  const knowledge = values['no-knowledge'] ? undefined : await createKnowledgeRuntime(dataDir, logger);
+
+  // ---- services (@bizzi/services): agent install/login, secrets, knowledge methods
+  const services = values['no-services'] ? undefined : await loadServices({ dataDir, logger, ...(knowledge ? { knowledge } : {}) });
+  // ---- end services
+
   const node = await createNode({
     dataDir,
     machineName: values.name,
     adapters,
     logger,
     version,
-    ...(prepareStart ? { prepareStart } : {}),
+    ...(knowledge ? { prepareStart: knowledge.prepareStart } : {}),
+    ...(services ? { extensions: services.extensions } : {}),
   });
-  machineId = node.machine.id;
   let server: BizziServer;
   try {
     server = await startServer(node, { host: values.host, port, token, logger });
