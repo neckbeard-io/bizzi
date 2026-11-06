@@ -30,6 +30,16 @@ const LIGHT: ITheme = {
  * Terminal-mode session: xterm.js with the WebGL renderer. Output comes straight from the client's
  * TerminalStreams (never through the React store); keystrokes go out as term.input, size as term.resize.
  */
+
+
+function wantsWebgl(): boolean {
+  if (new URLSearchParams(location.search).get('term') === 'webgl') return true;
+  try {
+    return localStorage.getItem('bizzi.term.renderer') === 'webgl';
+  } catch {
+    return false;
+  }
+}
 export function TerminalView(props: { sessionId: string }): ReactNode {
   const { sessionId } = props;
   const store = useStore();
@@ -43,7 +53,9 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
     const host = hostRef.current;
     if (!host) return;
     const term = new Terminal({
-      fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, monospace",
+      // No CSS-only generic keywords (ui-monospace): the WebGL renderer draws its glyph atlas with
+      // canvas `ctx.font`, which rejects them and falls back to 10px sans-serif (tiny, widely spaced text).
+      fontFamily: "'SF Mono', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace",
       fontSize: 13,
       cursorBlink: true,
       scrollback: 10_000,
@@ -54,17 +66,35 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(host);
-    try {
-      const webgl = new WebglAddon();
-      webgl.onContextLoss(() => {
-        webgl.dispose();
+    // Renderer: DOM by default. With @xterm/xterm 6.0.0 + @xterm/addon-webgl 0.19.0 in Electron 45 /
+    // Chromium 156 (2x display) the WebGL glyph atlas rasterizes glyphs at roughly the canvas default
+    // font size: cell metrics are right but glyphs are tiny, so text looks widely spaced. Font stack,
+    // fonts-ready and fit ordering were ruled out. Opt in with `?term=webgl` or
+    // localStorage `bizzi.term.renderer = 'webgl'` to re-test after upgrading xterm.
+    const forceDom = !wantsWebgl();
+    let disposed = false;
+    let webgl: WebglAddon | undefined;
+    const attachWebgl = () => {
+      if (disposed || forceDom) return;
+      try {
+        webgl = new WebglAddon();
+        webgl.onContextLoss(() => {
+          webgl?.dispose();
+          webgl = undefined;
+          setRenderer('dom');
+        });
+        term.loadAddon(webgl);
+        setRenderer('webgl');
+      } catch {
+        webgl = undefined;
         setRenderer('dom');
-      });
-      term.loadAddon(webgl);
-      setRenderer('webgl');
-    } catch {
-      setRenderer('dom');
-    }
+      }
+    };
+    const fontsReady: Promise<unknown> = document.fonts?.ready ?? Promise.resolve();
+    void fontsReady.then(() => requestAnimationFrame(attachWebgl));
+    const dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+    const onDprChange = () => webgl && term.clearTextureAtlas();
+    dprQuery.addEventListener('change', onDprChange);
 
     const unsubOut = store.terminal.subscribe(sessionId, (chunk) => term.write(chunk));
     const onData = term.onData((d) => {
@@ -99,6 +129,8 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
     term.focus();
 
     return () => {
+      disposed = true;
+      dprQuery.removeEventListener('change', onDprChange);
       cancelAnimationFrame(raf);
       ro.disconnect();
       unsubOut();

@@ -83,7 +83,7 @@ The comparison that led here is kept below. The UI choice affects **presentation
 | Virtualized everything | timeline, file lists, logs, diffs: only visible rows are mounted (TanStack Virtual) |
 | Fine-grained subscriptions | components subscribe to the slice they show (selector-based store); a new event re-renders one row, not the session |
 | Heavy work off the main thread | markdown parsing, syntax highlighting, diff computation in web workers |
-| Terminal | xterm.js with the WebGL renderer, the same as VS Code's terminal |
+| Terminal | xterm.js. **DOM renderer for now**: with xterm 6.0.0 + addon-webgl 0.19.0 in Electron 45 (Chromium 156, 2× display) the WebGL glyph atlas draws glyphs far too small. WebGL is opt-in (`?term=webgl` or localStorage `bizzi.term.renderer=webgl`); re-test on each xterm upgrade |
 | Budgets in CI | startup to interactive < 1.5 s; input latency < 50 ms while a session streams; idle RAM budget per window; a perf test streams a large synthetic session and fails the build on regressions |
 
 **Fallback shell:** if Electron's footprint still bothers you, the same React app can move to **Tauri** on desktop (system webview: very light on macOS, good on Windows, weaker on Linux). The core is a separate process either way, so this is a contained change.
