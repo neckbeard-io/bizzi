@@ -27,6 +27,8 @@ export interface AgentCapabilities {
   usage: 'tokens' | 'tokens+cost' | 'none';
   /** Terminal mode: raw PTY in/out is available. */
   terminal: boolean;
+  /** The agent can ask the user structured questions (`question.asked` / `question.respond`). */
+  questions?: boolean;
 }
 
 export const NO_CAPABILITIES: AgentCapabilities = {

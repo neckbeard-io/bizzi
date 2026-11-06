@@ -42,6 +42,31 @@ export interface NodeOptions {
 /** Methods served by the dispatcher (subscriptions are per-connection and handled separately). */
 export type DispatchMethod = Exclude<MethodName, 'subscribe' | 'unsubscribe'>;
 
+const UNIMPLEMENTED = [
+  'session.fork',
+  'session.delete',
+  'question.respond',
+  'term.snapshot',
+  'agent.plan',
+  'agent.install',
+  'agent.login',
+  'agent.setSecret',
+  'agent.deleteSecret',
+  'agent.secrets',
+  'knowledge.list',
+  'knowledge.add',
+  'knowledge.update',
+  'knowledge.forget',
+  'knowledge.inbox',
+  'knowledge.accept',
+  'knowledge.reject',
+  'knowledge.settings.get',
+  'knowledge.settings.set',
+  'pairing.create',
+  'devices.list',
+  'device.revoke',
+] as const satisfies readonly DispatchMethod[];
+
 export interface Subscription {
   lastSeq: number;
   unsubscribe(): void;
@@ -191,6 +216,18 @@ class Node implements BizziNode {
   }
 
   #buildHandlers(): Record<DispatchMethod, Handler> {
+    return { ...this.#unimplemented(), ...this.#implemented() };
+  }
+
+  /** Protocol v1.1 methods not implemented yet; they answer `unsupported`. */
+  #unimplemented(): Record<DispatchMethod, Handler> {
+    const notYet: Handler = () => {
+      throw new BizziError('unsupported', 'not implemented yet');
+    };
+    return Object.fromEntries(UNIMPLEMENTED.map((m) => [m, notYet])) as Record<DispatchMethod, Handler>;
+  }
+
+  #implemented(): Omit<Record<DispatchMethod, Handler>, (typeof UNIMPLEMENTED)[number]> {
     const s = this.sessions;
     const ws = this.workspaces;
     return {

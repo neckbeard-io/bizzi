@@ -1,6 +1,6 @@
 import type {
   AgentKind,
-  ApprovalDecisionKind,
+  ApprovalResolution,
   ApprovalRequest,
   InputBlock,
   PlanItem,
@@ -74,7 +74,7 @@ export interface ApprovalItem extends ItemBase {
   approvalId: string;
   request: ApprovalRequest;
   status: 'pending' | 'resolved' | 'expired';
-  decision?: ApprovalDecisionKind;
+  decision?: ApprovalResolution;
   by?: string;
 }
 
@@ -482,6 +482,12 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       d.put(item);
       return;
     }
+    case 'turn.steered':
+    case 'question.resolved':
+    case 'login.prompt':
+    case 'login.completed':
+      // Protocol v1.1 events: rendered once the UI supports them.
+      return;
     default: {
       const unknown: never = ev;
       void unknown;

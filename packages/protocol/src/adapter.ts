@@ -2,7 +2,7 @@
 
 import type { AgentCapabilities } from './capabilities.ts';
 import type { SessionEventBody } from './events.ts';
-import type { AgentKind, AgentProbe, ApprovalDecision, InputBlock, SessionMode } from './model.ts';
+import type { AgentKind, AgentProbe, ApprovalDecision, InputBlock, QuestionAnswers, SessionMode } from './model.ts';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -26,6 +26,10 @@ export interface StartSessionOptions {
   effort?: string;
   /** Resume an agent-native session instead of starting fresh. */
   resumeRef?: string;
+  /** With resumeRef: start a new agent session forked from it (capability `fork`). */
+  fork?: boolean;
+  /** Terminal mode only: run this argv instead of the agent's TUI (e.g. a login command). */
+  command?: string[];
   /** Extra environment for the agent process (merged over the node's environment). */
   env?: Record<string, string>;
   /** MCP servers to inject for this session (e.g. bizzi-memory). */
@@ -59,6 +63,10 @@ export interface AdapterSession {
   interrupt(): Promise<void>;
   /** Answer an `approval.requested` event. The adapter emits `approval.resolved`. */
   respondApproval(approvalId: string, decision: ApprovalDecision): Promise<void>;
+  /** Answer a `question.asked` event (`answers` undefined = declined). The adapter emits `question.resolved`. */
+  respondQuestion?(questionId: string, answers: QuestionAnswers | undefined): Promise<void>;
+  /** Terminal mode: recent output for late joiners. */
+  snapshotTerminal?(): Uint8Array;
   /** Change model / permission mode / effort mid-session (capability-gated). */
   set?(opts: { model?: string; permissionMode?: string; effort?: string }): Promise<void>;
   /** Terminal mode: raw input and resize. */
@@ -74,4 +82,6 @@ export interface AgentAdapter {
   probe(): Promise<AgentProbe>;
   capabilities(mode: SessionMode): AgentCapabilities;
   start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession>;
+  /** Release shared resources (e.g. a per-node agent server) when the node shuts down. */
+  dispose?(): Promise<void>;
 }

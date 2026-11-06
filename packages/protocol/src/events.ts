@@ -1,7 +1,10 @@
 import type {
   AgentKind,
-  ApprovalDecisionKind,
   ApprovalRequest,
+  ApprovalResolution,
+  DeviceInfo,
+  QuestionAnswers,
+  QuestionItem,
   InputBlock,
   MachineInfo,
   SessionInfo,
@@ -26,10 +29,22 @@ export interface PlanItem {
  *
  * Status bookkeeping: the core derives `session.status` from turn.started (running),
  * approval.requested (waiting_approval), approval.resolved (running) and turn.completed (idle).
- * Adapters only emit `session.status` for other transitions (failed, ended, waiting_input).
+ * Adapters emit `session.status` for other transitions (failed, ended, waiting_input, and running
+ * when activity resumes without a turn, e.g. typing into a terminal session).
+ *
+ * Turns: exactly one `turn.completed` per turnId reaches the log. Adapters emit it; if `send()` rejects
+ * the core completes the turn itself. The core drops duplicates and completions for unknown turns.
+ *
+ * Usage: `turn.completed.usage` is per turn; `usage.updated` is the running session total.
+ * `tool.updated.output` is a chunk to append, not the full output so far.
  */
 export interface SessionEventMap {
-  'session.status': { status: SessionStatus; reason?: string };
+  'session.status': {
+    status: SessionStatus;
+    reason?: string;
+    /** What the session is waiting on, when known (terminal heuristics, login flows). */
+    prompt?: 'approval' | 'input' | 'login';
+  };
   /** Adapter-reported metadata changes (agent session id assigned, model switched, …). */
   'session.info': {
     agentSessionRef?: string;
@@ -42,12 +57,20 @@ export interface SessionEventMap {
   };
   /** Emitted by the core when a turn starts; echoes the user input. */
   'turn.started': { turnId: string; input: InputBlock[] };
+  /** Emitted by the core when input is steered into the in-flight turn. */
+  'turn.steered': { turnId: string; input: InputBlock[] };
   /** Emitted by the adapter when the turn finishes, with the same turnId. */
   'turn.completed': { turnId: string; stopReason: StopReason; usage?: Usage; error?: string };
-  'message.delta': { messageId: string; role: 'assistant'; text: string };
-  'message.completed': { messageId: string; role: 'assistant' | 'user' | 'system'; text: string };
-  'reasoning.delta': { messageId: string; text: string };
-  'reasoning.completed': { messageId: string; text: string; summary?: boolean };
+  /** `parentToolId` set when the text comes from a subagent started by that tool call. */
+  'message.delta': { messageId: string; role: 'assistant'; text: string; parentToolId?: string };
+  'message.completed': {
+    messageId: string;
+    role: 'assistant' | 'user' | 'system';
+    text: string;
+    parentToolId?: string;
+  };
+  'reasoning.delta': { messageId: string; text: string; parentToolId?: string };
+  'reasoning.completed': { messageId: string; text: string; summary?: boolean; parentToolId?: string };
   'tool.started': {
     toolId: string;
     kind: ToolKind;
@@ -68,14 +91,23 @@ export interface SessionEventMap {
   'file.changed': { path: string; change: 'created' | 'modified' | 'deleted'; diff?: string };
   'plan.updated': { items: PlanItem[] };
   'approval.requested': ApprovalRequest;
-  'approval.resolved': { approvalId: string; decision: ApprovalDecisionKind; by?: string };
-  'question.asked': { questionId: string; text: string; options?: string[] };
+  'approval.resolved': { approvalId: string; decision: ApprovalResolution; by?: string };
+  /**
+   * The agent asks the user something (Claude AskUserQuestion, Codex requestUserInput, MCP elicitation…).
+   * `text`/`options` summarize the first question for simple clients; `questions` carries the full form.
+   * Answer with `question.respond`.
+   */
+  'question.asked': { questionId: string; text: string; options?: string[]; questions?: QuestionItem[] };
+  'question.resolved': { questionId: string; answers?: QuestionAnswers; cancelled?: boolean };
   'usage.updated': Usage;
   'subagent.started': { subagentId: string; name?: string; description?: string; parentToolId?: string };
   'subagent.completed': { subagentId: string; status: 'ok' | 'error' | 'cancelled' };
   /** Terminal-mode output. */
   'term.output': { dataBase64: string };
   'term.exited': { exitCode: number | null; signal?: string };
+  /** Login sessions (`agent.login`): URLs / one-time codes detected in the terminal output. */
+  'login.prompt': { urls: string[]; codes: string[]; callbackPort?: number; awaitingCodeInput?: boolean };
+  'login.completed': { ok: boolean; account?: string; message?: string };
   /** Untranslated native event, always allowed; UIs render it generically. */
   'agent.raw': { agent: AgentKind; payload: unknown };
   error: { message: string; code?: string; fatal?: boolean };
@@ -88,7 +120,22 @@ export interface GlobalEventMap {
   'workspace.removed': { workspaceId: string };
   'session.created': { session: SessionInfo };
   'session.updated': { session: SessionInfo };
-  'install.progress': { agent: AgentKind; stage: string; message?: string; done?: boolean; ok?: boolean };
+  'session.removed': { sessionId: string; workspaceId: string };
+  'install.progress': {
+    agent: AgentKind;
+    /** Set for non-agent tools (e.g. 'node'); `agent` is then the agent it was installed for. */
+    tool?: string;
+    jobId?: string;
+    stage: string;
+    message?: string;
+    step?: number;
+    total?: number;
+    done?: boolean;
+    ok?: boolean;
+  };
+  'knowledge.changed': { ids: string[] };
+  /** Hub only. */
+  'device.updated': { device: DeviceInfo };
 }
 
 export type SessionEventType = keyof SessionEventMap;

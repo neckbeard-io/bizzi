@@ -15,7 +15,7 @@ import type {
   TurnEndItem,
   TurnItem,
 } from '@bizzi/client';
-import type { ApprovalDecisionKind, ToolKind } from '@bizzi/protocol';
+import type { ApprovalDecisionKind, ApprovalResolution, ToolKind } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
 import { DiffBlock } from '../../components/DiffView.tsx';
@@ -183,7 +183,7 @@ export function ToolCard(props: { item: ToolItem }): ReactNode {
   );
 }
 
-const DECISION_LABEL: Record<ApprovalDecisionKind, string> = { allow: 'Allow', allow_always: 'Allow always', deny: 'Deny' };
+const DECISION_LABEL: Record<ApprovalResolution, string> = { allow: 'Allow', allow_always: 'Allow always', deny: 'Deny', cancelled: 'Cancelled' };
 
 export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; compact?: boolean }): ReactNode {
   const store = useStore();
