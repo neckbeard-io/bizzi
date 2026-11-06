@@ -49,7 +49,7 @@ deploy/                                   Dockerfiles, docker-compose.yml, proxy
 ## Tooling notes
 
 - Don't drive the Playwright MCP tools in this environment (extension mode blocks). For UI screenshots use the desktop smoke mode: `BIZZI_UI_URL=… BIZZI_SMOKE_MS=8000 npm run dev -w @bizzi/desktop` writes `<data dir>/smoke.png`.
-- npm 11 blocks install scripts; fetch the Electron binary with `node node_modules/electron/install.js`.
+- Fresh clone: `npm run setup` (strict install + fetches the Electron binary, which Electron 45 otherwise downloads on first use). `npm run check` = typecheck + tests + UI build. Install scripts are allow-listed in the root `package.json` (`allowScripts`); CI fails on unreviewed ones. See CONTRIBUTING.md.
 
 ## Commits
 
