@@ -11,7 +11,8 @@
   },
   "scripts": {
     "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present"
+    "test": "npm run test --workspaces --if-present",
+    "smoke:live": "node scripts/smoke-live.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

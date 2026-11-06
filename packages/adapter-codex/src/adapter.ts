@@ -120,8 +120,11 @@ export class CodexAdapter implements AgentAdapter {
     const prefix = this.#opts.codexArgsPrefix ?? [];
     const env = this.#env() as NodeJS.ProcessEnv;
     const version = await codexVersion(path, env, prefix);
-    const probe: AgentProbe = { agent: 'codex', installed: true, path, auth: 'unknown' };
-    if (version) probe.version = version;
+    if (!version) {
+      // A shim or wrapper (e.g. a terminal app's CLI shim) can sit on PATH without a real codex behind it.
+      return { agent: 'codex', installed: false, path, auth: 'unknown', notes: [`found ${path}, but \`codex --version\` failed`] };
+    }
+    const probe: AgentProbe = { agent: 'codex', installed: true, path, auth: 'unknown', version };
     const auth = await this.#readAccount(path);
     probe.auth = auth.auth;
     if (auth.account) probe.account = auth.account;

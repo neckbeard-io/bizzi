@@ -11,8 +11,12 @@
     "test": "node --test test/*.test.ts"
   },
   "dependencies": {
+    "@bizzi/adapter-claude": "*",
+    "@bizzi/adapter-codex": "*",
     "@bizzi/core": "*",
+    "@bizzi/knowledge": "*",
     "@bizzi/protocol": "*",
+    "@bizzi/pty": "*",
     "ws": "^8.22.1"
   },
   "devDependencies": {

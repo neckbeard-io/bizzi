@@ -7,6 +7,7 @@ import { parseArgs } from 'node:util';
 import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
 import { loadAdapters } from './adapters.ts';
+import { createKnowledgeHook } from './knowledge.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
 
 export const SERVE_HELP = `Usage: bizzi serve [options]
@@ -17,6 +18,7 @@ export const SERVE_HELP = `Usage: bizzi serve [options]
   --name <name>        machine display name (default: hostname)
   --token <token>      client token (default: $BIZZI_TOKEN, else random)
   --fake               add scripted fake adapters (for manual testing)
+  --no-knowledge       don't inject rules, memory or the bizzi-memory MCP server
   --log-level <level>  debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
@@ -47,6 +49,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
       name: { type: 'string' },
       token: { type: 'string' },
       fake: { type: 'boolean', default: false },
+      'no-knowledge': { type: 'boolean', default: false },
       'log-level': { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
@@ -81,7 +84,17 @@ export async function serve(argv: string[], version: string): Promise<void> {
   }
   adapters.push(...(await loadAdapters(logger)));
 
-  const node = await createNode({ dataDir, machineName: values.name, adapters, logger, version });
+  let machineId = '';
+  const prepareStart = values['no-knowledge'] ? undefined : await createKnowledgeHook(dataDir, logger, () => machineId);
+  const node = await createNode({
+    dataDir,
+    machineName: values.name,
+    adapters,
+    logger,
+    version,
+    ...(prepareStart ? { prepareStart } : {}),
+  });
+  machineId = node.machine.id;
   let server: BizziServer;
   try {
     server = await startServer(node, { host: values.host, port, token, logger });
