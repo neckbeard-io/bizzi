@@ -13,6 +13,7 @@
   "dependencies": {
     "@bizzi/adapter-claude": "*",
     "@bizzi/adapter-codex": "*",
+    "@bizzi/adapter-opencode": "*",
     "@bizzi/core": "*",
     "@bizzi/knowledge": "*",
     "@bizzi/protocol": "*",
