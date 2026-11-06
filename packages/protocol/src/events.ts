@@ -28,7 +28,8 @@ export interface PlanItem {
  * the core assigns `ch`, `seq` and `ts`.
  *
  * Status bookkeeping: the core derives `session.status` from turn.started (running),
- * approval.requested (waiting_approval), approval.resolved (running) and turn.completed (idle).
+ * approval.requested (waiting_approval), approval.resolved (running), question.asked (waiting_input),
+ * question.resolved (running) and turn.completed (idle).
  * Adapters emit `session.status` for other transitions (failed, ended, waiting_input, and running
  * when activity resumes without a turn, e.g. typing into a terminal session).
  *
