@@ -10,12 +10,24 @@
     "node": ">=26"
   },
   "scripts": {
+    "setup": "npm ci --no-audit --no-fund && npm run setup:electron",
+    "setup:electron": "node node_modules/electron/install.js",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
+    "build:ui": "npm run build -w @bizzi/ui",
+    "check": "npm run typecheck && npm test && npm run build:ui",
+    "dev:desktop": "npm run build:ui && node scripts/dev-desktop.ts",
+    "dev:ui": "npm run dev -w @bizzi/ui -- --open \"/?mock=1\"",
+    "serve": "node apps/cli/src/main.ts serve --data-dir .bizzi-dev/data",
     "smoke:live": "node scripts/smoke-live.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
     "typescript": "^7.0.2"
+  },
+  "allowScripts": {
+    "esbuild@0.28.2": true,
+    "fsevents": false,
+    "electron-winstaller": false
   }
 }

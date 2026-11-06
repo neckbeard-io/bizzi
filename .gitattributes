@@ -1,0 +1,10 @@
+# LF in the repo and in every checkout (Windows included); matches .editorconfig.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.woff2 binary
+
+package-lock.json linguist-generated=true

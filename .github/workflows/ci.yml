@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Offline-only tests: live agent tests stay skipped (they need BIZZI_LIVE=1 plus real logins).
+  BIZZI_LIVE: '0'
+  NPM_CONFIG_FUND: 'false'
+  NPM_CONFIG_AUDIT: 'false'
+
+jobs:
+  check:
+    name: check (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # --strict-allow-scripts: a new dependency with install scripts that isn't listed in
+      # package.json "allowScripts" fails CI instead of being skipped with a warning.
+      - run: npm ci --strict-allow-scripts
+
+      - run: npm run typecheck
+
+      # No test spawns Electron or needs a display (desktop tests use a stub core over node:test),
+      # so Linux runs without xvfb. The UI package's test also does a `vite build`.
+      - run: npm test
+
+      - run: npm run build:ui
+
+  docker:
+    name: docker (node image)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build deploy/Dockerfile.node (no push)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.node
+          push: false
+          tags: bizzi/node:ci
+          cache-from: type=gha,scope=node-image
+          cache-to: type=gha,scope=node-image,mode=max
+
+  desktop-pack:
+    name: desktop pack (macOS, unsigned)
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: check
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      # Unsigned: don't look for a signing identity in the keychain.
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - run: npm ci --strict-allow-scripts
+
+      # Stage the real UI build instead of the placeholder page.
+      - run: npm run build:ui
+
+      # build (esbuild) + stage + electron-builder --dir -> apps/desktop/release/mac*/bizzi.app
+      - run: npm run pack -w @bizzi/desktop
+
+      # upload-artifact drops symlinks and permissions, which an .app bundle needs; zip with ditto.
+      - name: Zip the unpacked app
+        run: |
+          mkdir -p artifacts
+          for app in apps/desktop/release/mac*/*.app; do
+            dir=$(basename "$(dirname "$app")")
+            ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/bizzi-${dir}-unsigned.zip"
+          done
+          ls -la artifacts
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bizzi-desktop-mac-unpacked
+          path: artifacts/*.zip
+          if-no-files-found: error
+          retention-days: 14
