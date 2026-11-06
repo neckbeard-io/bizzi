@@ -1,0 +1,201 @@
+import { randomUUID } from 'node:crypto';
+import { BizziError, NO_CAPABILITIES } from '@bizzi/protocol';
+import type {
+  AdapterContext,
+  AdapterSession,
+  AgentAdapter,
+  AgentCapabilities,
+  AgentProbe,
+  EmitFn,
+  McpServerSpec,
+  SessionMode,
+  StartSessionOptions,
+} from '@bizzi/protocol';
+import type { McpServerConfig, Options, SettingSource } from '@anthropic-ai/claude-agent-sdk';
+import { EFFORT_LEVELS, PERMISSION_MODES, isEffort, isPermissionMode } from './mapping.ts';
+import { findClaudeBinary, probeClaude } from './probe.ts';
+import { ClaudeSession } from './session.ts';
+import type { QueryFn } from './types.ts';
+
+export interface ClaudeAdapterOptions {
+  /** Defaults to the SDK's `query`. Tests inject scripted streams here. */
+  queryFn?: QueryFn;
+  /**
+   * Path to the `claude` executable. Default: the user's installed binary (PATH, ~/.local/bin,
+   * ~/.claude/local, /opt/homebrew/bin), else the binary bundled with the SDK. `null` forces the bundled one.
+   */
+  claudePath?: string | null;
+  /** Directories searched for `claude` instead of PATH + well-known dirs. */
+  searchDirs?: string[];
+  /** Filesystem settings loaded by Claude Code. Default: user, project, local (CLAUDE.md, AGENTS.md, settings). */
+  settingSources?: SettingSource[];
+  /** Stream token deltas (`message.delta` / `reasoning.delta`). Default true. */
+  includePartialMessages?: boolean;
+  /** Max characters of tool output carried in `tool.completed`. Default 8000. */
+  maxToolOutputChars?: number;
+  /** Launch with `allowDangerouslySkipPermissions` so `bypassPermissions` can be selected. Default true. */
+  allowBypassPermissions?: boolean;
+  /** How long to wait for the SDK's interrupted result before completing the turn anyway. Default 10s. */
+  interruptGraceMs?: number;
+  /** Extra SDK options merged last (hooks, agents, thinking, sandbox, plugins, …). */
+  sdkOptions?: Partial<Options>;
+}
+
+/** Fork support until StartSessionOptions grows a field for it (see README). */
+export interface ClaudeStartSessionOptions extends StartSessionOptions {
+  /** With `resumeRef`: continue in a new Claude session id instead of appending to the original. */
+  fork?: boolean;
+}
+
+const CLIENT_APP = 'bizzi/0.0.1';
+
+const STRUCTURED_CAPABILITIES: AgentCapabilities = {
+  modes: ['structured'],
+  streaming: 'token',
+  steer: true,
+  interrupt: true,
+  fork: true,
+  resume: true,
+  resumeAfterNodeRestart: true,
+  approvals: 'per-tool',
+  editableApprovals: true,
+  permissionModes: [...PERMISSION_MODES],
+  models: 'dynamic',
+  setModelMidSession: true,
+  effort: [...EFFORT_LEVELS],
+  planMode: true,
+  todos: true,
+  subagents: true,
+  slashCommands: true,
+  skills: true,
+  images: true,
+  mcpInjection: 'launch',
+  instructionInjection: 'system-append',
+  usage: 'tokens+cost',
+  terminal: false,
+};
+
+export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<string, McpServerConfig> {
+  const out: Record<string, McpServerConfig> = {};
+  for (const [name, s] of Object.entries(specs)) {
+    out[name] =
+      s.type === 'stdio'
+        ? { type: 'stdio', command: s.command, ...(s.args ? { args: s.args } : {}), ...(s.env ? { env: s.env } : {}) }
+        : { type: 'http', url: s.url, ...(s.headers ? { headers: s.headers } : {}) };
+  }
+  return out;
+}
+
+export class ClaudeAdapter implements AgentAdapter {
+  readonly agent = 'claude' as const;
+  readonly #opts: ClaudeAdapterOptions;
+
+  constructor(opts: ClaudeAdapterOptions = {}) {
+    this.#opts = opts;
+  }
+
+  probe(): Promise<AgentProbe> {
+    const claudePath = this.#opts.claudePath ?? undefined;
+    return probeClaude({ claudePath, searchDirs: this.#opts.searchDirs }).catch(() => ({
+      agent: 'claude' as const,
+      installed: false,
+      auth: 'unknown' as const,
+    }));
+  }
+
+  capabilities(mode: SessionMode): AgentCapabilities {
+    if (mode !== 'structured') return { ...NO_CAPABILITIES, modes: [] };
+    return { ...STRUCTURED_CAPABILITIES, permissionModes: [...PERMISSION_MODES], effort: [...EFFORT_LEVELS], modes: ['structured'] };
+  }
+
+  async start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession> {
+    if (opts.mode !== 'structured') {
+      throw new BizziError('unsupported', 'the Claude SDK adapter only runs structured sessions');
+    }
+    const log = ctx.logger.child({ adapter: 'claude', sessionId: opts.sessionId });
+    const fork = (opts as ClaudeStartSessionOptions).fork === true && !!opts.resumeRef;
+    const allowBypass = this.#opts.allowBypassPermissions ?? true;
+
+    let permissionMode: Options['permissionMode'];
+    if (opts.permissionMode) {
+      if (!isPermissionMode(opts.permissionMode)) throw new BizziError('bad_request', `unknown permission mode: ${opts.permissionMode}`);
+      if (opts.permissionMode === 'bypassPermissions' && !allowBypass) {
+        throw new BizziError('unsupported', 'bypassPermissions is disabled for this adapter');
+      }
+      permissionMode = opts.permissionMode;
+    }
+    let effort: Options['effort'];
+    if (opts.effort) {
+      if (!isEffort(opts.effort)) throw new BizziError('bad_request', `unknown effort level: ${opts.effort}`);
+      effort = opts.effort;
+    }
+
+    // A fresh session gets its id up front so agentSessionRef is known before the first turn.
+    const sessionUuid = opts.resumeRef && !fork ? undefined : randomUUID();
+    const ref = sessionUuid ?? opts.resumeRef;
+
+    let executable: string | undefined;
+    if (this.#opts.claudePath !== null) {
+      const found = await findClaudeBinary({ claudePath: this.#opts.claudePath, searchDirs: this.#opts.searchDirs });
+      executable = found?.path;
+      if (!found) log.log('info', 'no installed claude binary found; using the SDK-bundled one');
+      else if (found.wrapper) log.log('warn', 'only a shell-wrapped claude was found; SDK flags may conflict', { path: found.path });
+    }
+
+    const session = new ClaudeSession(
+      emit,
+      log,
+      {
+        maxToolOutputChars: this.#opts.maxToolOutputChars ?? 8000,
+        interruptGraceMs: this.#opts.interruptGraceMs ?? 10_000,
+        allowBypassPermissions: allowBypass,
+      },
+      ref,
+    );
+
+    const options: Options = {
+      cwd: opts.cwd,
+      env: { ...process.env, ...opts.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP },
+      settingSources: this.#opts.settingSources ?? ['user', 'project', 'local'],
+      systemPrompt: opts.systemPromptAppend
+        ? { type: 'preset', preset: 'claude_code', append: opts.systemPromptAppend }
+        : { type: 'preset', preset: 'claude_code' },
+      includePartialMessages: this.#opts.includePartialMessages ?? true,
+      canUseTool: session.canUseTool,
+      stderr: (d) => session.onStderr(d),
+      ...(allowBypass ? { allowDangerouslySkipPermissions: true } : {}),
+      ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(effort ? { effort } : {}),
+      ...(opts.resumeRef ? { resume: opts.resumeRef } : {}),
+      ...(fork ? { forkSession: true } : {}),
+      ...(sessionUuid ? { sessionId: sessionUuid } : {}),
+      ...(opts.mcpServers && Object.keys(opts.mcpServers).length ? { mcpServers: toSdkMcpServers(opts.mcpServers) } : {}),
+      ...this.#opts.sdkOptions,
+    };
+
+    const queryFn = this.#opts.queryFn ?? (await loadSdkQuery());
+    let q;
+    try {
+      q = queryFn({ prompt: session.input, options });
+    } catch (e) {
+      throw new BizziError('agent_unavailable', `failed to start Claude Code: ${(e as Error)?.message ?? String(e)}`);
+    }
+    session.attach(q, {
+      ...(opts.model ? { model: opts.model } : {}),
+      ...(permissionMode ? { permissionMode } : {}),
+      ...(effort ? { effort } : {}),
+    });
+    return session;
+  }
+}
+
+async function loadSdkQuery(): Promise<QueryFn> {
+  const sdk = await import('@anthropic-ai/claude-agent-sdk');
+  return sdk.query as QueryFn;
+}
+
+export function createAdapters(options?: ClaudeAdapterOptions): AgentAdapter[] {
+  return [new ClaudeAdapter(options)];
+}
