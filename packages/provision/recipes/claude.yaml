@@ -1,0 +1,177 @@
+# Claude Code. Verified 2026-11-05 against code.claude.com/docs (setup, authentication,
+# cli-reference) and the installer at claude.ai/install.sh (-> downloads.claude.ai/.../bootstrap.sh).
+schema: 1
+name: claude
+kind: agent
+displayName: Claude Code
+homepage: https://code.claude.com/docs
+docs:
+  - https://code.claude.com/docs/en/setup
+  - https://code.claude.com/docs/en/authentication
+  - https://code.claude.com/docs/en/cli-reference
+  - https://downloads.claude.ai/claude-code-releases/bootstrap.sh
+verified: true
+notes:
+  - Native installs auto-update in the background; set DISABLE_AUTOUPDATER=1 (settings.json env) to pin.
+  - Config and logins live in ~/.claude and ~/.claude.json (in containers, on the persistent home volume).
+
+platforms:
+  darwin-arm64: {}
+  darwin-x64: {}
+  linux-x64: {}
+  linux-arm64: {}
+  linux-x64-musl:
+    notes: [Alpine needs bash, curl, libgcc, libstdc++ and ripgrep, plus USE_BUILTIN_RIPGREP=0.]
+  linux-arm64-musl:
+    notes: [Alpine needs bash, curl, libgcc, libstdc++ and ripgrep, plus USE_BUILTIN_RIPGREP=0.]
+
+detect:
+  binaries: [claude]
+  searchPaths: ["~/.local/bin"]
+  version:
+    args: [--version]
+    # "2.1.311 (Claude Code)"
+    regex: '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)'
+    timeoutMs: 10000
+
+latest:
+  - type: url
+    url: https://downloads.claude.ai/claude-code-releases/latest
+    format: text
+    verified: true
+    notes: [The file the native installer reads. `.../stable` serves the stable channel.]
+  - type: npm
+    package: "@anthropic-ai/claude-code"
+    verified: true
+
+methods:
+  - id: native
+    kind: script
+    label: Native installer (claude.ai/install.sh)
+    requires: [{ command: curl }, { command: bash }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    selfUpdates: true
+    pathHints: [/.local/share/claude/versions/]
+    verified: true
+    sources:
+      - https://code.claude.com/docs/en/setup#install-a-specific-version
+      - https://downloads.claude.ai/claude-code-releases/bootstrap.sh
+    notes:
+      - Launcher ~/.local/bin/claude symlinks into ~/.local/share/claude/versions/.
+      - Accepts a version (2.1.89) or a channel (latest, stable); the channel becomes the auto-update default.
+      - The installer refuses to run under sudo.
+    install:
+      - description: Download and run the Claude Code native installer
+        run: curl -fsSL https://claude.ai/install.sh | bash -s {{version|latest}}
+    update:
+      - description: Update to the latest version
+        when: unpinned
+        argv: [claude, update]
+      - description: Install the pinned version
+        when: pinned
+        argv: [claude, install, "{{version}}"]
+    uninstall:
+      - description: Remove the launcher
+        run: rm -f "$HOME/.local/bin/claude"
+      - description: Remove installed versions (keeps ~/.claude config and logins)
+        run: rm -rf "$HOME/.local/share/claude"
+
+  - id: brew
+    kind: brew
+    label: Homebrew cask (claude-code, stable channel)
+    platforms: [darwin]
+    requires: [{ command: brew }]
+    targetDir: "{{brewBin}}"
+    pinnable: false
+    pathHints: [/Caskroom/claude-code]
+    verified: true
+    sources: [https://code.claude.com/docs/en/setup#install-claude-code]
+    notes:
+      - claude-code tracks the stable channel (about a week behind); claude-code@latest tracks latest.
+      - Homebrew installs don't auto-update unless CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1.
+    install:
+      - description: Install the claude-code cask
+        argv: [brew, install, --cask, claude-code]
+        env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
+    update:
+      - description: Upgrade the claude-code cask
+        argv: [brew, upgrade, --cask, claude-code]
+    uninstall:
+      - description: Uninstall the claude-code cask
+        argv: [brew, uninstall, --cask, claude-code]
+
+  - id: npm
+    kind: npm
+    label: npm global package (@anthropic-ai/claude-code)
+    requires: [{ command: npm, tool: node }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    pathHints: [/node_modules/@anthropic-ai/claude-code]
+    verified: true
+    sources: [https://code.claude.com/docs/en/setup#install-with-npm]
+    notes:
+      - Needs Node.js 22+ at install time only; the package links a native binary.
+      - bizzi installs npm globals into ~/.local (NPM_CONFIG_PREFIX) so no sudo is needed.
+      - Upgrade with `npm install -g ...@latest`; the docs warn against `npm update -g`.
+    install:
+      - description: Install @anthropic-ai/claude-code into ~/.local
+        argv: [npm, install, -g, "@anthropic-ai/claude-code@{{version|latest}}"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+    uninstall:
+      - description: Uninstall @anthropic-ai/claude-code
+        argv: [npm, uninstall, -g, "@anthropic-ai/claude-code"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+
+login:
+  interactive:
+    argv: [claude, auth, login]
+    description: Browser sign-in to a Claude subscription (or --console for Console API billing).
+    pastesCode: true
+    verified: true
+    notes:
+      - If the browser can't redirect back, it shows a code to paste at "Paste code here if prompted".
+      - Flags - --console, --sso, --email <email>.
+  headless:
+    - kind: token-command
+      description: Generate a one-year OAuth token on any machine and set it as CLAUDE_CODE_OAUTH_TOKEN.
+      argv: [claude, setup-token]
+      env: CLAUDE_CODE_OAUTH_TOKEN
+      verified: true
+      notes: [Prints the token without saving it. Model requests only (no Remote Control / claude.ai connectors).]
+    - kind: api-key-env
+      description: Use a Claude Console API key.
+      env: ANTHROPIC_API_KEY
+      verified: true
+      notes: [Interactive sessions ask once to approve the key; -p mode always uses it.]
+    - kind: token-env
+      description: Bearer token for an LLM gateway or proxy.
+      env: ANTHROPIC_AUTH_TOKEN
+      verified: true
+  logout:
+    argv: [claude, auth, logout]
+    description: Log out of the Anthropic account.
+    verified: true
+
+auth:
+  command:
+    argv: [claude, auth, status, --json]
+    sideEffectFree: true
+    format: json
+    okExitCodes: [0]
+    missingExitCodes: [1]
+    loggedInField: loggedIn
+    accountField: email
+    methodField: authMethod
+    verified: true
+    notes: [authMethod is none | claude.ai | oauth_token | api_key | api_key_helper | third_party.]
+  rules:
+    - env: [CLAUDE_CODE_OAUTH_TOKEN]
+      account: oauth_token
+    - env: [ANTHROPIC_API_KEY]
+      account: api_key
+    - env: [ANTHROPIC_AUTH_TOKEN]
+      account: auth_token
+    - file: "~/.claude/.credentials.json"
+  absent: unknown
+  notes: [macOS keeps the login in the Keychain, so a missing credentials file proves nothing there.]

@@ -1,0 +1,135 @@
+# Antigravity CLI (agy). Checked 2026-11-05 against antigravity.google/docs (getting-started CLI
+# tab, install/authenticate page, cli/reference), the installer at antigravity.google/cli/install.sh
+# and the Homebrew cask API.
+schema: 1
+name: agy
+kind: agent
+displayName: Antigravity CLI
+homepage: https://antigravity.google/product/antigravity-cli
+docs:
+  - https://antigravity.google/docs/getting-started?tab=cli
+  - https://antigravity.google/docs/install/
+  - https://antigravity.google/docs/cli/reference/
+  - https://antigravity.google/cli/install.sh
+verified: false
+notes:
+  - No documented update, uninstall or auth-status commands. The binary self-updates in the background; updates re-run the installer after removing the binary, uninstall deletes the binary.
+  - The installer ends by running `agy install` (shell setup) whose effects aren't documented; the docs mention --skip-aliases / --skip-path flags that the current script doesn't accept.
+  - Google sign-in tokens live in the OS keyring (Keychain / Secret Service). Headless Linux containers usually have no Secret Service, so use a Gemini API key there.
+
+platforms:
+  darwin-arm64: { vars: { agyPlatform: darwin_arm64 } }
+  darwin-x64: { vars: { agyPlatform: darwin_amd64 } }
+  linux-x64: { vars: { agyPlatform: linux_amd64 } }
+  linux-arm64: { vars: { agyPlatform: linux_arm64 } }
+  linux-x64-musl: { vars: { agyPlatform: linux_amd64_musl } }
+  linux-arm64-musl: { vars: { agyPlatform: linux_arm64_musl } }
+
+detect:
+  binaries: [agy]
+  searchPaths: ["~/.local/bin"]
+  version:
+    args: [--version]
+    regex: '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)'
+
+latest:
+  - type: url
+    url: https://antigravity-cli-auto-updater-974169037036.us-central1.run.app/manifests/{{agyPlatform}}.json
+    format: json
+    jsonPath: version
+    verified: true
+    notes: [The per-platform manifest the installer reads.]
+
+methods:
+  - id: script
+    kind: script
+    label: Install script (antigravity.google/cli/install.sh)
+    requires: [{ command: curl }, { command: bash }]
+    targetDir: "~/.local/bin"
+    pinnable: false
+    selfUpdates: true
+    pathHints: [/.local/bin/agy]
+    verified: true
+    sources:
+      - https://antigravity.google/docs/getting-started?tab=cli
+      - https://antigravity.google/cli/install.sh
+    notes:
+      - Always installs the latest version (no version flag). Exits without changes if ~/.local/bin/agy exists.
+    install:
+      - description: Download and run the Antigravity CLI installer
+        run: curl -fsSL https://antigravity.google/cli/install.sh | bash
+    update:
+      - description: Remove the current binary (the installer skips existing installs)
+        run: rm -f "$HOME/.local/bin/agy"
+      - description: Re-run the installer to fetch the latest version
+        run: curl -fsSL https://antigravity.google/cli/install.sh | bash
+    uninstall:
+      - description: Remove ~/.local/bin/agy (keeps ~/.gemini/antigravity-cli settings)
+        run: rm -f "$HOME/.local/bin/agy"
+
+  - id: brew
+    kind: brew
+    label: Homebrew cask (antigravity-cli)
+    platforms: [darwin]
+    requires: [{ command: brew }]
+    targetDir: "{{brewBin}}"
+    pinnable: false
+    pathHints: [/Caskroom/antigravity-cli/]
+    verified: false
+    sources: [https://formulae.brew.sh/cask/antigravity-cli]
+    notes: [The cask exists in Homebrew (binary `antigravity` linked as `agy`) but the vendor docs don't mention it.]
+    install:
+      - description: Install the antigravity-cli cask
+        argv: [brew, install, --cask, antigravity-cli]
+        env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
+    update:
+      - description: Upgrade the antigravity-cli cask
+        argv: [brew, upgrade, --cask, antigravity-cli]
+    uninstall:
+      - description: Uninstall the antigravity-cli cask
+        argv: [brew, uninstall, --cask, antigravity-cli]
+
+login:
+  interactive:
+    argv: [agy]
+    description: Google sign-in from the TUI on first launch (after color scheme, rendering mode and workspace trust prompts).
+    pastesCode: true
+    verified: true
+    notes:
+      - Locally it opens the default browser. Over SSH it prints an authorization URL; the browser then shows a code to paste back into the terminal.
+      - bizzi's PTY isn't an SSH session, so the CLI may try to open a browser on the node instead; whether it falls back to the URL + code flow is unverified.
+  headless:
+    - kind: config
+      description: Gemini API key - set modelProvider to gemini in settings.json and export GEMINI_API_KEY.
+      settingsFile: "~/.gemini/antigravity-cli/settings.json"
+      settings: { modelProvider: gemini }
+      env: GEMINI_API_KEY
+      verified: true
+      notes:
+        - GEMINI_API_KEY alone has no effect; GOOGLE_API_KEY and .env files are not read.
+        - With modelProvider=gemini and no key the CLI won't start.
+    - kind: command
+      description: Application Default Credentials - run `gcloud auth application-default login --project <project>`, then set AGY_ADC_AUTH=true.
+      argv: [gcloud, auth, application-default, login]
+      env: AGY_ADC_AUTH
+      verified: true
+    - kind: command
+      description: Sign in for ACP/editor use from a terminal on the machine.
+      argv: [agy, acp, --login]
+      verified: false
+      notes: [Seen in Antigravity docs search results; not on the CLI reference page.]
+  logout:
+    description: Type /logout inside the agy TUI (no shell subcommand). Does nothing in API-key mode.
+    verified: true
+
+auth:
+  rules:
+    - file: "~/.gemini/antigravity-cli/settings.json"
+      jsonField: modelProvider
+      equals: gemini
+      env: [GEMINI_API_KEY]
+      account: Gemini API key
+    - env: [AGY_ADC_AUTH]
+      account: Application Default Credentials
+  absent: unknown
+  notes: [No auth status command; Google sign-in state lives in the OS keyring and isn't inspected.]

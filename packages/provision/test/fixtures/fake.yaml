@@ -1,0 +1,89 @@
+# Test-only recipe. Every step just echoes or writes inside {{toolsDir}} (a temp dir in tests).
+schema: 1
+name: fake
+kind: agent
+displayName: Fake Agent
+homepage: https://example.com/fake
+docs: [https://example.com/fake/docs]
+verified: true
+platforms:
+  darwin-arm64: { vars: { fakeTarget: mac-arm } }
+  darwin-x64: { vars: { fakeTarget: mac-intel } }
+  linux-x64: { vars: { fakeTarget: linux-amd64 } }
+  linux-arm64: { vars: { fakeTarget: linux-arm64 } }
+detect:
+  binaries: [fake-agent]
+  searchPaths: ["{{toolsDir}}/fake/bin"]
+  version:
+    args: [--version]
+    regex: 'fake-agent (\d+\.\d+\.\d+)'
+latest:
+  - type: url
+    url: https://example.com/fake/{{fakeTarget}}/latest.json
+    format: json
+    jsonPath: release.version
+    verified: true
+  - type: npm
+    package: "@example/fake-agent"
+    verified: true
+methods:
+  - id: echo
+    kind: script
+    label: Echo installer
+    targetDir: "{{toolsDir}}/fake/bin"
+    pinnable: true
+    verified: true
+    install:
+      - description: Say hello
+        run: echo "installing fake {{version|latest}} for {{fakeTarget}}"
+      - description: Show env and cwd
+        run: echo "FAKE_VAR=$FAKE_VAR cwd=$(pwd)"
+        env: { FAKE_VAR: "from-step" }
+        cwd: "{{home}}"
+      - description: Write the fake binary
+        run: |
+          mkdir -p {{toolsDir}}/fake/bin
+          printf '#!/bin/sh\necho "fake-agent %s"\n' {{version|9.9.9}} > {{toolsDir}}/fake/bin/fake-agent
+          chmod +x {{toolsDir}}/fake/bin/fake-agent
+      - description: Argv step
+        argv: [echo, "argv", "{{version|latest}}"]
+    uninstall:
+      - description: Remove the fake binary
+        run: rm -rf {{toolsDir}}/fake
+  - id: brew
+    kind: brew
+    label: Fake brew
+    platforms: [darwin]
+    targetDir: "{{brewBin}}"
+    pinnable: false
+    verified: true
+    install:
+      - description: Pretend to brew
+        argv: [echo, brew, install, fake]
+    uninstall:
+      - description: Pretend to unbrew
+        argv: [echo, brew, uninstall, fake]
+login:
+  interactive:
+    argv: [fake-agent, login]
+    description: Fake login
+    callbackPort: 4321
+    verified: true
+  headless:
+    - kind: api-key-env
+      description: Fake key
+      env: FAKE_API_KEY
+      verified: true
+auth:
+  command:
+    argv: [fake-agent, status]
+    sideEffectFree: true
+    format: json
+    okExitCodes: [0]
+    loggedInField: loggedIn
+    accountField: email
+    verified: true
+  rules:
+    - env: [FAKE_API_KEY]
+      account: api key
+  absent: missing

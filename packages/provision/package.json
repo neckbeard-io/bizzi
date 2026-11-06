@@ -1,0 +1,21 @@
+{
+  "name": "@bizzi/provision",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "recipes"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test test/*.test.ts"
+  },
+  "dependencies": {
+    "@bizzi/protocol": "*",
+    "yaml": "^2.9.1"
+  }
+}

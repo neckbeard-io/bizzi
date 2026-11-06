@@ -1,0 +1,200 @@
+# OpenAI Codex CLI. Verified 2026-11-05 against the openai/codex README, learn.chatgpt.com
+# (formerly developers.openai.com/codex) auth + CLI reference pages, the installer at
+# chatgpt.com/codex/install.sh (-> releases.openai.com/codex/install.sh) and the Homebrew cask API.
+schema: 1
+name: codex
+kind: agent
+displayName: Codex CLI
+homepage: https://github.com/openai/codex
+docs:
+  - https://github.com/openai/codex
+  - https://learn.chatgpt.com/docs/auth
+  - https://learn.chatgpt.com/docs/cli
+  - https://learn.chatgpt.com/docs/developer-commands?surface=cli
+  - https://releases.openai.com/codex/install.sh
+verified: false
+notes:
+  - Install, login and status commands are verified; the exact text of `codex --version` and `codex login status` is not (codex isn't installed on the verifying machine), so parsing is lenient.
+  - Credentials live in ~/.codex/auth.json (or the OS keyring when cli_auth_credentials_store = keyring/auto).
+
+platforms:
+  darwin-arm64: { vars: { target: aarch64-apple-darwin } }
+  darwin-x64: { vars: { target: x86_64-apple-darwin } }
+  # Linux builds are static musl binaries, so they also cover musl systems.
+  linux-x64: { vars: { target: x86_64-unknown-linux-musl } }
+  linux-arm64: { vars: { target: aarch64-unknown-linux-musl } }
+
+detect:
+  binaries: [codex]
+  searchPaths: ["~/.local/bin"]
+  version:
+    args: [--version]
+    # e.g. "codex-cli 0.167.0" (format unverified; any x.y.z is accepted)
+    regex: '(\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?)'
+
+latest:
+  - type: url
+    url: https://releases.openai.com/codex/channels/latest
+    format: json
+    jsonPath: tag_name
+    verified: true
+    notes: [What the standalone installer reads; tag_name is rust-vX.Y.Z.]
+  - type: github
+    repo: openai/codex
+    tagPrefix: rust-v
+    verified: true
+  - type: npm
+    package: "@openai/codex"
+    verified: true
+
+methods:
+  - id: script
+    kind: script
+    label: Standalone installer (chatgpt.com/codex/install.sh)
+    requires: [{ command: curl }, { command: tar }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    pathHints: [/.codex/packages/standalone/]
+    verified: true
+    sources:
+      - https://github.com/openai/codex#installing-and-running-codex-cli
+      - https://learn.chatgpt.com/docs/cli
+      - https://releases.openai.com/codex/install.sh
+    notes:
+      - Releases go to ~/.codex/packages/standalone/releases/, with ~/.local/bin/codex symlinked to current/bin/codex.
+      - The installer edits a shell profile when its install dir is not on PATH, with no opt-out. runPlan's augmented PATH already contains ~/.local/bin, which avoids that (it still edits a profile if it finds a conflicting brew/npm install).
+      - CODEX_NON_INTERACTIVE=1 answers its prompts (including "Start Codex now?") with no.
+      - Updating is re-running the installer (documented); `codex update` also exists for self-updating installs.
+    install:
+      - description: Download and run the Codex standalone installer
+        run: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+        env:
+          CODEX_NON_INTERACTIVE: "1"
+          CODEX_INSTALL_DIR: "~/.local/bin"
+          CODEX_RELEASE: "{{version|latest}}"
+    uninstall:
+      - description: Remove the codex command symlinks
+        run: rm -f "$HOME/.local/bin/codex" "$HOME/.local/bin/codex-code-mode-host"
+      - description: Remove standalone releases (keeps ~/.codex config and auth)
+        run: rm -rf "$HOME/.codex/packages/standalone"
+
+  - id: brew
+    kind: brew
+    label: Homebrew cask (codex)
+    platforms: [darwin]
+    requires: [{ command: brew }]
+    targetDir: "{{brewBin}}"
+    pinnable: false
+    pathHints: [/Caskroom/codex/]
+    verified: true
+    sources:
+      - https://github.com/openai/codex#installing-and-running-codex-cli
+      - https://formulae.brew.sh/cask/codex
+    install:
+      - description: Install the codex cask
+        argv: [brew, install, --cask, codex]
+        env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
+    update:
+      - description: Upgrade the codex cask
+        argv: [brew, upgrade, --cask, codex]
+    uninstall:
+      - description: Uninstall the codex cask
+        argv: [brew, uninstall, --cask, codex]
+
+  - id: npm
+    kind: npm
+    label: npm global package (@openai/codex)
+    requires: [{ command: npm, tool: node }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    pathHints: [/node_modules/@openai/codex/]
+    verified: true
+    sources: [https://github.com/openai/codex#installing-and-running-codex-cli]
+    notes: [bizzi installs npm globals into ~/.local (NPM_CONFIG_PREFIX) so no sudo is needed.]
+    install:
+      - description: Install @openai/codex into ~/.local
+        argv: [npm, install, -g, "@openai/codex@{{version|latest}}"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+    uninstall:
+      - description: Uninstall @openai/codex
+        argv: [npm, uninstall, -g, "@openai/codex"]
+        env: { NPM_CONFIG_PREFIX: "~/.local" }
+
+  - id: binary
+    kind: binary
+    label: GitHub release binary
+    requires: [{ command: curl }, { command: tar }]
+    targetDir: "~/.local/bin"
+    pinnable: true
+    verified: true
+    sources: [https://github.com/openai/codex#installing-and-running-codex-cli]
+    notes:
+      - Archives hold one file named codex-<target>; it is renamed to codex.
+      - No checksum check beyond HTTPS (the standalone installer verifies SHA256SUMS; prefer it).
+    install:
+      - description: Download the release archive and install ~/.local/bin/codex
+        run: |
+          set -eu
+          v={{version|latest}}
+          if [ "$v" = latest ]; then
+            url=https://github.com/openai/codex/releases/latest/download/codex-{{target}}.tar.gz
+          else
+            url=https://github.com/openai/codex/releases/download/rust-v$v/codex-{{target}}.tar.gz
+          fi
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+          curl -fsSL -o "$tmp/codex.tar.gz" "$url"
+          tar -xzf "$tmp/codex.tar.gz" -C "$tmp"
+          mkdir -p "$HOME/.local/bin"
+          install -m 0755 "$tmp/codex-{{target}}" "$HOME/.local/bin/codex"
+    uninstall:
+      - description: Remove ~/.local/bin/codex
+        run: rm -f "$HOME/.local/bin/codex"
+
+login:
+  interactive:
+    argv: [codex, login]
+    description: ChatGPT OAuth in the browser (Plus, Pro, Business, Edu, Enterprise plans).
+    callbackPort: 1455
+    verified: true
+    notes:
+      - The browser redirects to a local callback server on localhost:1455; on a remote machine that port must be forwarded (docs suggest ssh -L 1455:localhost:1455).
+  headless:
+    - kind: device-code
+      description: OAuth device-code flow - open the printed link anywhere and enter the one-time code.
+      argv: [codex, login, --device-auth]
+      verified: true
+      notes: [Beta. Device-code login must first be enabled in ChatGPT security settings (or by a workspace admin).]
+    - kind: stdin-secret
+      description: Log in with an OpenAI API key read from stdin.
+      argv: [codex, login, --with-api-key]
+      stdinFromEnv: OPENAI_API_KEY
+      verified: true
+    - kind: stdin-secret
+      description: Enterprise access token read from stdin.
+      argv: [codex, login, --with-access-token]
+      stdinFromEnv: CODEX_ACCESS_TOKEN
+      verified: true
+    - kind: copy-credentials
+      description: Copy the auth cache from a machine that is already logged in.
+      files: ["~/.codex/auth.json"]
+      verified: true
+  logout:
+    argv: [codex, logout]
+    description: Remove stored API key and ChatGPT credentials.
+    verified: true
+
+auth:
+  command:
+    argv: [codex, login, status]
+    sideEffectFree: true
+    format: text
+    okExitCodes: [0]
+    missingExitCodes: [1]
+    missingRegex: 'not logged in'
+    accountRegex: 'Logged in using (.+)'
+    verified: false
+    notes: [Exit code 0 when credentials are present is documented; the output wording is not.]
+  rules:
+    - file: "~/.codex/auth.json"
+  absent: unknown
