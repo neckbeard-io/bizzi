@@ -1,0 +1,147 @@
+// SQLite persistence for the node role: machine identity, workspaces, sessions and the event log.
+
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
+import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import type { ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+
+/** Core-private per-session state persisted next to the public SessionInfo. */
+export interface SessionState {
+  /** The turn in flight, if any (between turn.started and turn.completed). */
+  currentTurnId?: string;
+}
+
+export interface SessionRow {
+  info: SessionInfo;
+  state: SessionState;
+}
+
+const SCHEMA = `
+CREATE TABLE IF NOT EXISTS meta (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS workspaces (
+  id   TEXT PRIMARY KEY,
+  path TEXT NOT NULL UNIQUE,
+  data TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id           TEXT PRIMARY KEY,
+  workspace_id TEXT NOT NULL,
+  info         TEXT NOT NULL,
+  state        TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+  ch   TEXT NOT NULL,
+  seq  INTEGER NOT NULL,
+  ts   TEXT NOT NULL,
+  type TEXT NOT NULL,
+  data TEXT NOT NULL,
+  PRIMARY KEY (ch, seq)
+) WITHOUT ROWID;
+`;
+
+export class Store {
+  readonly path: string;
+  readonly #db: DatabaseSync;
+  readonly #insertEvent: StatementSync;
+  readonly #replay: StatementSync;
+  readonly #maxSeq: StatementSync;
+  readonly #upsertSession: StatementSync;
+
+  constructor(dataDir: string) {
+    mkdirSync(dataDir, { recursive: true });
+    this.path = join(dataDir, 'node.db');
+    this.#db = new DatabaseSync(this.path);
+    this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
+    this.#db.exec(SCHEMA);
+    this.#insertEvent = this.#db.prepare('INSERT INTO events (ch, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)');
+    this.#replay = this.#db.prepare(
+      'SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?',
+    );
+    this.#maxSeq = this.#db.prepare('SELECT MAX(seq) AS seq FROM events WHERE ch = ?');
+    this.#upsertSession = this.#db.prepare(
+      `INSERT INTO sessions (id, workspace_id, info, state) VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, info = excluded.info, state = excluded.state`,
+    );
+  }
+
+  close(): void {
+    if (this.#db.isOpen) this.#db.close();
+  }
+
+  get isOpen(): boolean {
+    return this.#db.isOpen;
+  }
+
+  // --- meta -------------------------------------------------------------------------------------
+
+  getMeta(key: string): string | undefined {
+    const row = this.#db.prepare('SELECT value FROM meta WHERE key = ?').get(key) as { value: string } | undefined;
+    return row?.value;
+  }
+
+  setMeta(key: string, value: string): void {
+    this.#db
+      .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run(key, value);
+  }
+
+  // --- events -----------------------------------------------------------------------------------
+
+  insertEvent(ev: ChannelEvent): void {
+    this.#insertEvent.run(ev.ch, ev.seq, ev.ts, ev.type, JSON.stringify(ev.data));
+  }
+
+  maxSeq(ch: string): number {
+    const row = this.#maxSeq.get(ch) as { seq: number | null } | undefined;
+    return row?.seq ?? 0;
+  }
+
+  /** Events with seq > since, oldest first, at most `limit`. */
+  replay(ch: string, since: number, limit: number): ChannelEvent[] {
+    const rows = this.#replay.all(ch, since, limit) as unknown as {
+      ch: string;
+      seq: number;
+      ts: string;
+      type: string;
+      data: string;
+    }[];
+    return rows.map((r) => ({ ch: r.ch, seq: r.seq, ts: r.ts, type: r.type, data: JSON.parse(r.data) }) as ChannelEvent);
+  }
+
+  // --- workspaces -------------------------------------------------------------------------------
+
+  listWorkspaces(): WorkspaceInfo[] {
+    const rows = this.#db.prepare('SELECT data FROM workspaces ORDER BY id').all() as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as WorkspaceInfo);
+  }
+
+  putWorkspace(ws: WorkspaceInfo): void {
+    this.#db
+      .prepare(
+        `INSERT INTO workspaces (id, path, data) VALUES (?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET path = excluded.path, data = excluded.data`,
+      )
+      .run(ws.id, ws.path, JSON.stringify(ws));
+  }
+
+  deleteWorkspace(id: string): void {
+    this.#db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+  }
+
+  // --- sessions ---------------------------------------------------------------------------------
+
+  listSessions(): SessionRow[] {
+    const rows = this.#db.prepare('SELECT info, state FROM sessions ORDER BY id').all() as {
+      info: string;
+      state: string;
+    }[];
+    return rows.map((r) => ({ info: JSON.parse(r.info) as SessionInfo, state: JSON.parse(r.state) as SessionState }));
+  }
+
+  putSession(row: SessionRow): void {
+    this.#upsertSession.run(row.info.id, row.info.workspaceId, JSON.stringify(row.info), JSON.stringify(row.state));
+  }
+}
