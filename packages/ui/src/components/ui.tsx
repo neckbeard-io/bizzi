@@ -1,0 +1,197 @@
+import { useState } from 'react';
+import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import type { SessionStatus } from '@bizzi/protocol';
+import { STATUS_LABEL, STATUS_TONE } from '../lib/format.ts';
+import type { Tone } from '../lib/format.ts';
+import { Icon } from './icons.tsx';
+import type { IconName } from './icons.tsx';
+
+export function cx(...parts: (string | false | null | undefined)[]): string {
+  return parts.filter(Boolean).join(' ');
+}
+
+type ButtonVariant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'ok';
+
+const VARIANT: Record<ButtonVariant, string> = {
+  primary: 'bg-accent text-accent-fg hover:opacity-90 border-transparent',
+  secondary: 'bg-panel text-fg border-border hover:bg-panel-2',
+  ghost: 'bg-transparent text-fg border-transparent hover:bg-panel-2',
+  danger: 'bg-err text-white border-transparent hover:opacity-90',
+  ok: 'bg-ok text-white border-transparent hover:opacity-90 dark:text-black',
+};
+
+export function Button(
+  props: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: ButtonVariant; size?: 'sm' | 'md'; icon?: IconName; busy?: boolean },
+): ReactNode {
+  const { variant = 'secondary', size = 'md', icon, busy, className, children, disabled, ...rest } = props;
+  return (
+    <button
+      type="button"
+      disabled={disabled || busy}
+      className={cx(
+        'inline-flex items-center justify-center gap-1.5 rounded-md border font-medium whitespace-nowrap transition-[opacity,background-color] disabled:cursor-not-allowed disabled:opacity-50',
+        size === 'sm' ? 'h-7 px-2 text-xs' : 'h-9 px-3 text-sm',
+        VARIANT[variant],
+        className,
+      )}
+      {...rest}
+    >
+      {busy ? <Spinner size={size === 'sm' ? 12 : 14} /> : icon ? <Icon name={icon} size={size === 'sm' ? 14 : 16} /> : null}
+      {children}
+    </button>
+  );
+}
+
+export function IconButton(props: ButtonHTMLAttributes<HTMLButtonElement> & { icon: IconName; label: string; size?: number }): ReactNode {
+  const { icon, label, size = 18, className, ...rest } = props;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={label}
+      className={cx('inline-flex h-8 w-8 items-center justify-center rounded-md text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-40', className)}
+      {...rest}
+    >
+      <Icon name={icon} size={size} />
+    </button>
+  );
+}
+
+const TONE: Record<Tone, string> = {
+  neutral: 'bg-panel-2 text-muted border-border',
+  accent: 'bg-accent-soft text-accent border-transparent',
+  ok: 'text-ok border-current/30 bg-transparent',
+  warn: 'text-warn border-current/30 bg-transparent',
+  err: 'text-err border-current/30 bg-transparent',
+  info: 'text-info border-current/30 bg-transparent',
+};
+
+export function Badge(props: { tone?: Tone; children: ReactNode; className?: string; title?: string }): ReactNode {
+  return (
+    <span
+      title={props.title}
+      className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-px text-[11px] leading-4 font-medium whitespace-nowrap', TONE[props.tone ?? 'neutral'], props.className)}
+    >
+      {props.children}
+    </span>
+  );
+}
+
+export function StatusBadge(props: { status: SessionStatus | null | undefined }): ReactNode {
+  if (!props.status) return null;
+  const tone = STATUS_TONE[props.status];
+  return (
+    <Badge tone={tone}>
+      {props.status === 'running' || props.status === 'starting' ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> : null}
+      {STATUS_LABEL[props.status]}
+    </Badge>
+  );
+}
+
+export function Spinner(props: { size?: number; className?: string }): ReactNode {
+  const s = props.size ?? 16;
+  return (
+    <svg width={s} height={s} viewBox="0 0 24 24" className={cx('animate-spin', props.className)} aria-hidden="true">
+      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" fill="none" />
+      <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" strokeWidth="3" fill="none" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+export function Card(props: { children: ReactNode; className?: string }): ReactNode {
+  return <div className={cx('rounded-lg border border-border bg-panel', props.className)}>{props.children}</div>;
+}
+
+export function Field(props: { label: string; hint?: string; children: ReactNode; className?: string }): ReactNode {
+  return (
+    <label className={cx('flex flex-col gap-1', props.className)}>
+      <span className="text-xs font-medium text-muted">{props.label}</span>
+      {props.children}
+      {props.hint ? <span className="text-xs text-muted">{props.hint}</span> : null}
+    </label>
+  );
+}
+
+const inputCls = 'h-9 w-full rounded-md border border-border bg-panel px-2.5 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none';
+
+export function Input(props: InputHTMLAttributes<HTMLInputElement>): ReactNode {
+  const { className, ...rest } = props;
+  return <input className={cx(inputCls, className)} {...rest} />;
+}
+
+export function Select(props: SelectHTMLAttributes<HTMLSelectElement>): ReactNode {
+  const { className, ...rest } = props;
+  return <select className={cx(inputCls, 'pr-7', className)} {...rest} />;
+}
+
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>): ReactNode {
+  const { className, ...rest } = props;
+  return <textarea className={cx('w-full rounded-md border border-border bg-panel px-2.5 py-2 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none', className)} {...rest} />;
+}
+
+export function Checkbox(props: { checked: boolean; onChange: (v: boolean) => void; label: string }): ReactNode {
+  return (
+    <label className="inline-flex cursor-pointer items-center gap-2 text-sm select-none">
+      <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={props.checked} onChange={(e) => props.onChange(e.target.checked)} />
+      {props.label}
+    </label>
+  );
+}
+
+export function Empty(props: { icon?: IconName; title: string; children?: ReactNode }): ReactNode {
+  return (
+    <div className="flex flex-col items-center justify-center gap-2 px-6 py-12 text-center text-muted">
+      {props.icon ? <Icon name={props.icon} size={28} className="opacity-60" /> : null}
+      <div className="text-sm font-medium text-fg">{props.title}</div>
+      {props.children ? <div className="max-w-sm text-sm">{props.children}</div> : null}
+    </div>
+  );
+}
+
+export function ErrorText(props: { error: unknown }): ReactNode {
+  if (!props.error) return null;
+  const msg = props.error instanceof Error ? props.error.message : String(props.error);
+  return <div className="rounded-md border border-err/30 bg-err/5 px-3 py-2 text-sm text-err">{msg}</div>;
+}
+
+export function Tabs<T extends string>(props: { value: T; onChange: (v: T) => void; items: { value: T; label: string; icon?: IconName; badge?: ReactNode }[]; className?: string }): ReactNode {
+  return (
+    <div role="tablist" className={cx('flex gap-1 overflow-x-auto', props.className)}>
+      {props.items.map((it) => (
+        <button
+          key={it.value}
+          role="tab"
+          type="button"
+          aria-selected={props.value === it.value}
+          onClick={() => props.onChange(it.value)}
+          className={cx(
+            'inline-flex h-8 items-center gap-1.5 rounded-md px-2.5 text-sm whitespace-nowrap',
+            props.value === it.value ? 'bg-panel-2 font-medium text-fg' : 'text-muted hover:text-fg',
+          )}
+        >
+          {it.icon ? <Icon name={it.icon} size={15} /> : null}
+          {it.label}
+          {it.badge}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** Collapsible section with a clickable header. */
+export function Disclosure(props: { header: ReactNode; children: () => ReactNode; defaultOpen?: boolean; className?: string }): ReactNode {
+  const [open, setOpen] = useState(props.defaultOpen ?? false);
+  return (
+    <div className={props.className}>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="flex w-full min-w-0 items-center gap-1.5 text-left" aria-expanded={open}>
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} className="shrink-0 text-muted" />
+        {props.header}
+      </button>
+      {open ? props.children() : null}
+    </div>
+  );
+}
+
+export function Kbd(props: { children: ReactNode }): ReactNode {
+  return <kbd className="rounded border border-border bg-panel-2 px-1 font-mono text-[10px] text-muted">{props.children}</kbd>;
+}
