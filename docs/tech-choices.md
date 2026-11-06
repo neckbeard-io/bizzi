@@ -92,7 +92,7 @@ The comparison that led here is kept below. The UI choice affects **presentation
 
 | Piece | Built with |
 |---|---|
-| Core | TypeScript on Node.js: one `bizzi` program with `serve` (node), `serve --hub`, `pair`, `status` |
+| Core | TypeScript on Node.js: one `bizzi` program: `serve [--connect <hub>]` (node), `hub serve` (hub), `hub code` (mint a pairing code on the hub host), `pair <hub> <code>` (pair this node), `status` |
 | Desktop app (mac/win/linux) | Electron. The core runs as a **separate process** started by the app using Electron's bundled Node (`ELECTRON_RUN_AS_NODE`), so there's one runtime in the install, and sessions survive UI crashes, updates and closed windows. Attaches to an already-running `bizzi serve` instead of starting a second one |
 | Phones (Android, iOS) | Capacitor around the same React app; client only |
 | Browser | the same React app served by the hub |

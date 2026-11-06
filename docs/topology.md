@@ -28,6 +28,18 @@ A remote machine never needs the desktop app. If you do open the desktop app on 
 
 Exactly one install in your fleet has the hub role. Everything else pairs with it.
 
+### 2.0 Commands (as built)
+
+| Command | What it does |
+|---|---|
+| `bizzi serve` | node role; local client endpoint on 127.0.0.1. Connects to a hub automatically when a saved credential exists (`<data-dir>/hub-credential.json`) |
+| `bizzi serve --connect <hub-ws-url>` | node role, linked to a hub (env `BIZZI_HUB_URL`); with `BIZZI_PAIR_CODE` it pairs itself on first start |
+| `bizzi pair <hub-url> <code>` | pair this machine's node with a hub using a one-time code |
+| `bizzi hub serve` | hub role: HTTP pairing/auth API, `/ws` for clients, `/ws/node` for nodes, the built UI at `/`; prints the setup code on first start |
+| `bizzi hub code [--kind node\|device]` | mint a pairing code directly on the hub host (headless/docker setups) |
+
+First run: start the hub → pair your first device (browser/phone/desktop) with the setup code → from that device create a node pairing code → start each node with `--connect` and `BIZZI_PAIR_CODE`. `npm run smoke:hub` exercises this whole path. Push notifications: set `BIZZI_NTFY_URL` on the hub (ntfy topic).
+
 ### 2.1 GUI-capable vs headless machines
 
 "Headful" means **the node runs where a display exists**, so agents it launches can open and look at windows. It doesn't mean a full desktop install.
