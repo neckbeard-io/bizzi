@@ -4,6 +4,8 @@ import type {
   ApprovalRequest,
   InputBlock,
   PlanItem,
+  QuestionAnswers,
+  QuestionItem as QuestionSpec,
   SessionEvent,
   SessionEventMap,
   SessionStatus,
@@ -23,6 +25,12 @@ interface ItemBase {
 
 export interface TurnItem extends ItemBase {
   kind: 'turn';
+  input: InputBlock[];
+}
+
+/** Input steered into the in-flight turn (`turn.steered`). */
+export interface SteerItem extends ItemBase {
+  kind: 'steer';
   input: InputBlock[];
 }
 
@@ -81,9 +89,13 @@ export interface ApprovalItem extends ItemBase {
 export interface QuestionItem extends ItemBase {
   kind: 'question';
   questionId: string;
+  /** Summary of the first question (simple clients). */
   text: string;
   options?: string[];
-  status: 'pending' | 'answered';
+  /** The full form, when the agent sent one. Use `questionSpecs()` to always get a form. */
+  questions?: QuestionSpec[];
+  status: 'pending' | 'answered' | 'cancelled';
+  answers?: QuestionAnswers;
 }
 
 export interface FileChangeItem extends ItemBase {
@@ -123,6 +135,7 @@ export interface RawItem extends ItemBase {
 
 export type TimelineItem =
   | TurnItem
+  | SteerItem
   | TurnEndItem
   | MessageItem
   | ReasoningItem
@@ -146,6 +159,17 @@ export interface FileChange {
 
 export type SessionInfoPatch = SessionEventMap['session.info'];
 
+export type SessionPrompt = NonNullable<SessionEventMap['session.status']['prompt']>;
+
+/** Login flow state of an `agent.login` session (from `login.prompt` / `login.completed`). */
+export interface LoginState {
+  urls: readonly string[];
+  codes: readonly string[];
+  callbackPort?: number;
+  awaitingCodeInput?: boolean;
+  result: { ok: boolean; account?: string; message?: string } | null;
+}
+
 /**
  * Per-session view model built from session events. Immutable: every reduction returns a new object,
  * and only the items that changed get new identities (so a delta re-renders one row).
@@ -159,6 +183,8 @@ export interface Timeline {
   /** Status derived from the session's own events (null until one is seen). */
   status: SessionStatus | null;
   statusReason?: string;
+  /** What the session waits on (approval / input / login), null when it doesn't wait. */
+  prompt: SessionPrompt | null;
   info: SessionInfoPatch;
   activeTurnId: string | null;
   plan: readonly PlanItem[] | null;
@@ -169,6 +195,7 @@ export interface Timeline {
   /** Latest change per path. */
   files: Readonly<Record<string, FileChange>>;
   terminalExit: { exitCode: number | null; signal?: string } | null;
+  login: LoginState | null;
 }
 
 export function emptyTimeline(sessionId: string): Timeline {
@@ -178,6 +205,7 @@ export function emptyTimeline(sessionId: string): Timeline {
     items: {},
     lastSeq: 0,
     status: null,
+    prompt: null,
     info: {},
     activeTurnId: null,
     plan: null,
@@ -186,7 +214,13 @@ export function emptyTimeline(sessionId: string): Timeline {
     pendingQuestions: [],
     files: {},
     terminalExit: null,
+    login: null,
   };
+}
+
+function union(a: readonly string[], b: readonly string[]): readonly string[] {
+  if (b.every((x) => a.includes(x))) return a;
+  return [...a, ...b.filter((x) => !a.includes(x))];
 }
 
 /** Copy-on-write draft used for one batch of events. */
@@ -277,6 +311,8 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
     case 'session.status': {
       tl.status = ev.data.status;
       tl.statusReason = ev.data.reason;
+      tl.prompt =
+        ev.data.prompt ?? (ev.data.status === 'waiting_approval' ? 'approval' : ev.data.status === 'waiting_input' ? 'input' : null);
       if (ev.data.status === 'failed' || ev.data.status === 'ended' || ev.data.status === 'paused') {
         const item: StatusItem = { ...base(d, `status:${ev.seq}`, ev), kind: 'status', status: ev.data.status };
         if (ev.data.reason !== undefined) item.reason = ev.data.reason;
@@ -291,14 +327,19 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
     case 'turn.started': {
       tl.activeTurnId = ev.data.turnId;
       tl.status = 'running';
+      tl.prompt = null;
       d.turnStarted(ev.data.turnId, ev.ts);
       d.put({ ...base(d, `turn:${ev.data.turnId}`, ev), turnId: ev.data.turnId, kind: 'turn', input: ev.data.input });
-      // A new turn answers any open question.
+      // A new turn answers any open question (agents without question.respond take answers as input).
       for (const qid of tl.pendingQuestions) {
         const q = d.get(`q:${qid}`);
         if (q && q.kind === 'question') d.put({ ...q, status: 'answered' });
       }
       tl.pendingQuestions = [];
+      return;
+    }
+    case 'turn.steered': {
+      d.put({ ...base(d, `steer:${ev.seq}`, ev), turnId: ev.data.turnId, kind: 'steer', input: ev.data.input });
       return;
     }
     case 'turn.completed': {
@@ -314,6 +355,7 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       finalizeTurn(d, turnId, stopReason);
       if (tl.activeTurnId === turnId) tl.activeTurnId = null;
       tl.status = 'idle';
+      tl.prompt = null;
       return;
     }
     case 'message.delta': {
@@ -415,6 +457,7 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       d.put({ ...base(d, id, ev), kind: 'approval', approvalId: ev.data.approvalId, request: ev.data, status: 'pending' });
       tl.pendingApprovals = withItem(tl.pendingApprovals, ev.data.approvalId);
       tl.status = 'waiting_approval';
+      tl.prompt = 'approval';
       if (ev.data.toolId) {
         const tool = d.get(`tool:${ev.data.toolId}`);
         if (tool && tool.kind === 'tool') d.put({ ...tool, approvalId: ev.data.approvalId });
@@ -438,14 +481,29 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
         }
       }
       tl.pendingApprovals = without(tl.pendingApprovals, ev.data.approvalId);
-      if (tl.pendingApprovals.length === 0 && tl.status === 'waiting_approval') tl.status = 'running';
+      if (tl.pendingApprovals.length === 0 && tl.status === 'waiting_approval') {
+        tl.status = 'running';
+        if (tl.prompt === 'approval') tl.prompt = null;
+      }
       return;
     }
     case 'question.asked': {
       const item: QuestionItem = { ...base(d, `q:${ev.data.questionId}`, ev), kind: 'question', questionId: ev.data.questionId, text: ev.data.text, status: 'pending' };
       if (ev.data.options) item.options = ev.data.options;
+      if (ev.data.questions?.length) item.questions = ev.data.questions;
       d.put(item);
       tl.pendingQuestions = withItem(tl.pendingQuestions, ev.data.questionId);
+      return;
+    }
+    case 'question.resolved': {
+      const prev = d.get(`q:${ev.data.questionId}`);
+      if (prev && prev.kind === 'question') {
+        const next: QuestionItem = { ...prev, status: ev.data.cancelled ? 'cancelled' : 'answered' };
+        if (ev.data.answers !== undefined) next.answers = ev.data.answers;
+        d.put(next);
+      }
+      tl.pendingQuestions = without(tl.pendingQuestions, ev.data.questionId);
+      if (tl.pendingQuestions.length === 0 && tl.prompt === 'input' && tl.status !== 'waiting_input') tl.prompt = null;
       return;
     }
     case 'usage.updated': {
@@ -482,12 +540,23 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       d.put(item);
       return;
     }
-    case 'turn.steered':
-    case 'question.resolved':
-    case 'login.prompt':
-    case 'login.completed':
-      // Protocol v1.1 events: rendered once the UI supports them.
+    case 'login.prompt': {
+      const prev = tl.login ?? { urls: [], codes: [], result: null };
+      const next: LoginState = { ...prev, urls: union(prev.urls, ev.data.urls), codes: union(prev.codes, ev.data.codes) };
+      if (ev.data.callbackPort !== undefined) next.callbackPort = ev.data.callbackPort;
+      if (ev.data.awaitingCodeInput !== undefined) next.awaitingCodeInput = ev.data.awaitingCodeInput;
+      tl.login = next;
+      if (tl.prompt === null) tl.prompt = 'login';
       return;
+    }
+    case 'login.completed': {
+      const result: LoginState['result'] = { ok: ev.data.ok };
+      if (ev.data.account !== undefined) result.account = ev.data.account;
+      if (ev.data.message !== undefined) result.message = ev.data.message;
+      tl.login = { ...(tl.login ?? { urls: [], codes: [] }), result, awaitingCodeInput: false };
+      if (tl.prompt === 'login') tl.prompt = null;
+      return;
+    }
     default: {
       const unknown: never = ev;
       void unknown;
@@ -516,6 +585,17 @@ function finalizeTurn(d: Draft, turnId: string, stopReason: StopReason): void {
       tl.pendingApprovals = without(tl.pendingApprovals, item.approvalId);
     }
   }
+}
+
+/**
+ * The question form of a question item: the agent's `questions[]`, or one synthesized from the summary
+ * (`text` + `options`, free text allowed) keyed by the questionId.
+ */
+export function questionSpecs(item: QuestionItem): QuestionSpec[] {
+  if (item.questions?.length) return item.questions;
+  const q: QuestionSpec = { id: item.questionId, text: item.text, allowText: true };
+  if (item.options?.length) q.options = item.options.map((label) => ({ label }));
+  return [q];
 }
 
 /** Items of the timeline in display order (allocates; prefer `order` + `items` in renderers). */

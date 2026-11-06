@@ -15,21 +15,41 @@ export const MACHINE: MachineInfo = {
   bizziVersion: '0.0.1-mock',
 };
 
-export const OTHER_MACHINES: MachineInfo[] = [
-  {
-    id: 'm_server',
-    name: 'server-a',
-    hostname: 'server-a.lan',
-    os: 'linux',
-    arch: 'x64',
-    headful: false,
-    alwaysOn: true,
-    tags: ['docker'],
-    online: true,
-    roles: ['node', 'hub'],
-    bizziVersion: '0.0.1',
-  },
-];
+/** server-a: offline in the demo (its data comes from the hub's replica). */
+export const SERVER: MachineInfo = {
+  id: 'm_server',
+  name: 'server-a',
+  hostname: 'server-a.lan',
+  os: 'linux',
+  arch: 'x64',
+  headful: false,
+  alwaysOn: true,
+  tags: ['docker'],
+  online: false,
+  roles: ['node'],
+  bizziVersion: '0.0.1',
+};
+
+export const OTHER_MACHINES: MachineInfo[] = [SERVER];
+
+/** The hub's own host (hello.machine in hub mode); not a node. */
+export const HUB_MACHINE: MachineInfo = {
+  id: 'm_hub',
+  name: 'home hub',
+  hostname: 'hub.example.com',
+  os: 'linux',
+  arch: 'x64',
+  headful: false,
+  alwaysOn: true,
+  tags: [],
+  online: true,
+  roles: ['hub'],
+  bizziVersion: '0.0.1-mock',
+};
+
+export const HUB_ORIGIN = 'https://hub.example.com';
+/** Setup code accepted by the mock hub's /api/pair. */
+export const MOCK_SETUP_CODE = 'DEMO-1234';
 
 const CLAUDE_CAPS: AgentCapabilities = {
   ...NO_CAPABILITIES,
@@ -56,6 +76,7 @@ const CLAUDE_CAPS: AgentCapabilities = {
   instructionInjection: 'system-append',
   usage: 'tokens+cost',
   terminal: true,
+  questions: true,
 };
 
 const CODEX_CAPS: AgentCapabilities = {
@@ -102,6 +123,15 @@ export const AGENTS: AgentListing[] = [
   { agent: 'shell', installed: true, path: '/bin/zsh', version: '5.9', auth: 'ok', capabilities: TERMINAL_CAPS },
 ];
 
+/** server-a's agents (shown from the cache while it is offline). */
+export const SERVER_AGENTS: AgentListing[] = [
+  { agent: 'claude', installed: true, path: '/home/dev/.local/bin/claude', version: '2.4.3', latestVersion: '2.4.3', auth: 'ok', account: 'dev@example.com (Max)', capabilities: CLAUDE_CAPS },
+  { agent: 'codex', installed: false, auth: 'missing' },
+  { agent: 'opencode', installed: false, auth: 'missing' },
+  { agent: 'agy', installed: false, auth: 'missing', notes: ['headless: needs a Gemini API key'] },
+  { agent: 'shell', installed: true, path: '/bin/bash', version: '5.2', auth: 'ok', capabilities: TERMINAL_CAPS },
+];
+
 export const CAPS_BY_AGENT: Record<string, AgentCapabilities> = {
   claude: CLAUDE_CAPS,
   codex: CODEX_CAPS,
@@ -114,9 +144,9 @@ const T0 = Date.parse('2026-11-05T09:00:00Z');
 export const iso = (offsetMin: number): string => new Date(T0 + offsetMin * 60_000).toISOString();
 
 export const WORKSPACES: WorkspaceInfo[] = [
-  { id: 'w_acme', machineId: MACHINE.id, name: 'acme-shop', path: '/Users/dev/src/acme-shop', kind: 'git', createdAt: iso(-60 * 24 * 7) },
+  { id: 'w_acme', machineId: MACHINE.id, name: 'acme-shop', path: '/Users/dev/src/acme-shop', kind: 'git', projectId: 'p_acme', createdAt: iso(-60 * 24 * 7) },
   { id: 'w_notes', machineId: MACHINE.id, name: 'research-notes', path: '/Users/dev/research/notes', kind: 'dir', createdAt: iso(-60 * 24 * 2) },
-  { id: 'w_infra', machineId: 'm_server', name: 'infra', path: '/srv/infra', kind: 'git', createdAt: iso(-60 * 24 * 30) },
+  { id: 'w_infra', machineId: SERVER.id, name: 'infra', path: '/srv/infra', kind: 'git', createdAt: iso(-60 * 24 * 30) },
 ];
 
 export const SESSIONS: SessionInfo[] = [
@@ -160,6 +190,33 @@ export const SESSIONS: SessionInfo[] = [
     title: 'zsh',
     createdAt: iso(-15),
     updatedAt: iso(-1),
+    lastSeq: 0,
+  },
+  {
+    id: 's_plan',
+    machineId: MACHINE.id,
+    workspaceId: 'w_acme',
+    agent: 'claude',
+    mode: 'structured',
+    status: 'waiting_input',
+    title: 'Plan the auth migration',
+    model: 'sonnet',
+    permissionMode: 'plan',
+    createdAt: iso(-12),
+    updatedAt: iso(-3),
+    lastSeq: 0,
+  },
+  {
+    id: 's_infra',
+    machineId: SERVER.id,
+    workspaceId: 'w_infra',
+    agent: 'claude',
+    mode: 'structured',
+    status: 'idle',
+    title: 'Upgrade Postgres to 17',
+    model: 'opus',
+    createdAt: iso(-60 * 5),
+    updatedAt: iso(-60 * 2.2),
     lastSeq: 0,
   },
   {

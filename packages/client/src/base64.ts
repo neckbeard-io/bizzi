@@ -26,3 +26,13 @@ const encoder = new TextEncoder();
 export function stringToBase64(s: string): string {
   return bytesToBase64(encoder.encode(s));
 }
+
+/** RFC 4648 §5 base64url without padding (JWK members, signatures). */
+export function bytesToBase64Url(bytes: Uint8Array): string {
+  return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+export function base64UrlToBytes(s: string): Uint8Array {
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
+  return base64ToBytes(b64 + '='.repeat((4 - (b64.length % 4)) % 4));
+}

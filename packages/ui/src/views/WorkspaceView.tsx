@@ -1,9 +1,12 @@
 import { useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { selectWorkspaceSessions, shallowEqual } from '@bizzi/client';
+import { selectAgents, selectWorkspaceSessions, shallowEqual } from '@bizzi/client';
 import type { AgentKind, AgentListing, SessionInfo, SessionMode } from '@bizzi/protocol';
+import { selectSessionPrompt } from '@bizzi/client';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
+import { useMachine, useMachineOnline } from '../app/machine.ts';
+import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Empty, ErrorText, Field, Input, Select, Spinner, StatusBadge } from '../components/ui.tsx';
@@ -16,6 +19,9 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
   const wsLoaded = useBizzi((s) => s.workspaces !== null);
   const sessions = useBizzi((s) => selectWorkspaceSessions(s, props.workspaceId), shallowEqual);
   const [creating, setCreating] = useState(false);
+  const online = useMachineOnline(ws?.machineId);
+  const machine = useMachine(ws?.machineId);
+  const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
   const remove = useAction(async () => {
     await store.removeWorkspace(props.workspaceId);
     navigate({ name: 'workspaces' }, { replace: true });
@@ -34,17 +40,23 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       header={
         <PageHeader
           title={ws.name}
-          subtitle={<span className="font-mono">{ws.path}</span>}
+          subtitle={
+            <span>
+              {multiMachine && machine ? <span>{machine.name} · </span> : null}
+              <span className="font-mono">{ws.path}</span>
+            </span>
+          }
           back={() => navigate({ name: 'workspaces' })}
           actions={
-            <Button variant="primary" size="sm" icon="plus" onClick={() => setCreating((c) => !c)}>
+            <Button variant="primary" size="sm" icon="plus" disabled={!online} onClick={() => setCreating((c) => !c)}>
               New session
             </Button>
           }
         />
       }
     >
-      {creating ? <NewSessionForm workspaceId={ws.id} onCancel={() => setCreating(false)} /> : null}
+      <OfflineMachineBanner machineId={ws.machineId} className="mb-3" />
+      {creating && online ? <NewSessionForm workspaceId={ws.id} onCancel={() => setCreating(false)} /> : null}
       {sessions.length === 0 ? (
         <Empty icon="chat" title="No sessions in this workspace">
           Start one with an installed agent.
@@ -63,6 +75,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
         <Button
           variant="ghost"
           size="sm"
+          disabled={!online}
           busy={remove.busy}
           onClick={() => {
             if (window.confirm(`Remove "${ws.name}" from bizzi? Files on disk are not touched.`)) void remove.run();
@@ -78,6 +91,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
 
 function SessionRow(props: { session: SessionInfo }): ReactNode {
   const s = props.session;
+  const prompt = useBizzi((st) => selectSessionPrompt(st, s.id));
   return (
     <a href={routeHref({ name: 'session', sessionId: s.id, tab: 'chat' })} className="block">
       <Card className="flex items-center gap-3 p-3 hover:bg-panel-2">
@@ -89,9 +103,10 @@ function SessionRow(props: { session: SessionInfo }): ReactNode {
           <div className="truncate text-xs text-muted">
             <span className="capitalize">{s.agent}</span>
             {s.model ? ` · ${s.model}` : ''} · {formatRelative(s.updatedAt)}
+            {s.forkedFrom ? ' · fork' : ''}
           </div>
         </div>
-        <StatusBadge status={s.status} />
+        <StatusBadge status={s.status} prompt={prompt} />
       </Card>
     </a>
   );
@@ -101,7 +116,7 @@ const FALLBACK_MODES: SessionMode[] = ['structured'];
 
 function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): ReactNode {
   const store = useStore();
-  const agents = useBizzi((s) => s.agents);
+  const agents = useBizzi((s) => selectAgents(s, s.workspaces?.[props.workspaceId]?.machineId ?? null));
   const installed = useMemo(() => (agents ?? []).filter((a) => a.installed), [agents]);
   const defaultAgent = installed.find((a) => a.auth === 'ok' && a.capabilities?.modes.includes('structured')) ?? installed[0];
   const [agent, setAgent] = useState<AgentKind | ''>(defaultAgent?.agent ?? '');
@@ -140,7 +155,7 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
   if (installed.length === 0) {
     return (
       <Card className="mb-4 p-4 text-sm text-muted">
-        No agents are installed on this machine. See <a href={routeHref({ name: 'machine' })} className="text-accent underline">Machine</a>.
+        No agents are installed on this machine. See <a href={routeHref({ name: 'machine' })} className="text-accent underline">Machine</a> to install one.
       </Card>
     );
   }

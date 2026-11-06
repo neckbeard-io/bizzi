@@ -75,7 +75,7 @@ export type Tone = 'neutral' | 'accent' | 'ok' | 'warn' | 'err' | 'info';
 export const STATUS_LABEL: Record<SessionStatus, string> = {
   starting: 'starting',
   running: 'running',
-  waiting_input: 'needs input',
+  waiting_input: 'waiting for input',
   waiting_approval: 'needs approval',
   idle: 'idle',
   paused: 'paused',
@@ -132,4 +132,24 @@ export function parentPath(p: string): string {
   const parts = p.split('/').filter(Boolean);
   parts.pop();
   return parts.join('/');
+}
+
+/** Message of any thrown value, and whether it means the target machine is offline. */
+export function errorInfo(e: unknown): { message: string; code: string | null; offline: boolean } {
+  const code = typeof e === 'object' && e !== null && typeof (e as { code?: unknown }).code === 'string' ? (e as { code: string }).code : null;
+  const message = e instanceof Error ? e.message : typeof e === 'object' && e !== null && typeof (e as { message?: unknown }).message === 'string' ? (e as { message: string }).message : String(e);
+  return { message, code, offline: code === 'machine_offline' };
+}
+
+/** "online", "last seen 5 min ago", or "offline". */
+export function machinePresence(m: { online: boolean; lastSeenAt?: string }, now: number = Date.now()): string {
+  if (m.online) return 'online';
+  return m.lastSeenAt ? `last seen ${formatRelative(m.lastSeenAt, now)}` : 'offline';
+}
+
+/** "m:ss" for countdowns (pairing code expiry). */
+export function formatCountdown(ms: number): string {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  const m = Math.floor(s / 60);
+  return `${m}:${String(s % 60).padStart(2, '0')}`;
 }

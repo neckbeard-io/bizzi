@@ -1,21 +1,27 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { selectInbox, shallowEqual } from '@bizzi/client';
+import { selectInbox, selectKnowledgeSuggestionCount, shallowEqual } from '@bizzi/client';
 import { useBizzi, useBizziContext } from '../app/context.tsx';
 import { navigate, useIsWide, useRoute, useTheme } from '../app/hooks.ts';
 import type { ThemePref } from '../app/hooks.ts';
+import { useTargetMachineId } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
+import { MachineSwitcher } from '../components/MachineSwitcher.tsx';
 import { Button, Spinner, cx } from '../components/ui.tsx';
 import { routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { Logo } from './ConnectScreen.tsx';
 import { InboxView } from './InboxView.tsx';
+import { MachinesView } from './MachinesView.tsx';
 import { MachineView } from './MachineView.tsx';
 import { WorkspaceView } from './WorkspaceView.tsx';
 import { WorkspacesView } from './WorkspacesView.tsx';
 
 const SessionView = lazy(() => import('./session/SessionView.tsx').then((m) => ({ default: m.SessionView })));
+const LoginView = lazy(() => import('./provision/LoginView.tsx').then((m) => ({ default: m.LoginView })));
+const KnowledgeView = lazy(() => import('./knowledge/KnowledgeView.tsx').then((m) => ({ default: m.KnowledgeView })));
+const SettingsView = lazy(() => import('./settings/SettingsView.tsx').then((m) => ({ default: m.SettingsView })));
 
 export function Shell(props: { onFatal: (message: string) => void }): ReactNode {
   const conn = useBizzi((s) => s.connection);
@@ -27,7 +33,7 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
     if (conn.state === 'closed' && conn.lastError) onFatal(conn.lastError.message);
   }, [conn.state, conn.lastError, onFatal]);
 
-  const inSession = route.name === 'session';
+  const fullScreen = route.name === 'session' || route.name === 'login';
 
   if (conn.state === 'connecting' && conn.sessions === 0) {
     return (
@@ -65,7 +71,7 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
     <div className="flex h-full flex-col">
       <ConnectionBanner />
       <div className="min-h-0 flex-1">{main}</div>
-      {inSession ? null : <BottomNav route={route} />}
+      {fullScreen ? null : <BottomNav route={route} />}
     </div>
   );
 }
@@ -73,16 +79,24 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
 function RouteView(props: { route: Route }): ReactNode {
   const r = props.route;
   switch (r.name) {
+    case 'machines':
+      return <MachinesView />;
     case 'machine':
-      return <MachineView />;
+      return <MachineView key={r.machineId ?? 'selected'} {...(r.machineId ? { machineId: r.machineId } : {})} />;
     case 'workspaces':
       return <WorkspacesView />;
     case 'workspace':
       return <WorkspaceView workspaceId={r.workspaceId} />;
     case 'session':
       return <SessionView key={r.sessionId} sessionId={r.sessionId} tab={r.tab} />;
+    case 'login':
+      return <LoginView key={r.sessionId} sessionId={r.sessionId} />;
     case 'inbox':
       return <InboxView />;
+    case 'knowledge':
+      return <KnowledgeView />;
+    case 'settings':
+      return <SettingsView section={r.section} />;
   }
 }
 
@@ -115,36 +129,48 @@ function ConnectionBanner(): ReactNode {
   );
 }
 
-const NAV: { route: Route; label: string; icon: IconName; match: Route['name'][] }[] = [
-  { route: { name: 'machine' }, label: 'Machine', icon: 'machine', match: ['machine'] },
-  { route: { name: 'workspaces' }, label: 'Workspaces', icon: 'folder', match: ['workspaces', 'workspace', 'session'] },
+const NAV: { route: Route; label: string; short?: string; icon: IconName; match: Route['name'][] }[] = [
+  { route: { name: 'machine' }, label: 'Machine', icon: 'machine', match: ['machine', 'machines', 'login'] },
+  { route: { name: 'workspaces' }, label: 'Workspaces', short: 'Work', icon: 'folder', match: ['workspaces', 'workspace', 'session'] },
   { route: { name: 'inbox' }, label: 'Inbox', icon: 'inbox', match: ['inbox'] },
+  { route: { name: 'knowledge' }, label: 'Knowledge', short: 'Memory', icon: 'book', match: ['knowledge'] },
+  { route: { name: 'settings', section: 'general' }, label: 'Settings', icon: 'settings', match: ['settings'] },
 ];
 
 function Sidebar(props: { route: Route }): ReactNode {
   const { disconnect, target } = useBizziContext();
-  const machine = useBizzi((s) => s.machine);
   const conn = useBizzi((s) => s.connection.state);
+  const role = useBizzi((s) => s.role);
+  const hubName = useBizzi((s) => (s.role === 'hub' ? (s.machine?.name ?? null) : null));
   const inbox = useInboxCount();
+  const suggestions = useBizzi(selectKnowledgeSuggestionCount);
+  const machineId = useTargetMachineId();
   const workspaces = useBizzi(
-    (s) => (s.workspaces ? Object.values(s.workspaces).filter((w) => !s.machine || w.machineId === s.machine.id) : []),
+    (s) =>
+      s.workspaces
+        ? Object.values(s.workspaces)
+            .filter((w) => !machineId || w.machineId === machineId)
+            .sort((a, b) => a.name.localeCompare(b.name))
+        : [],
     shallowEqual,
   );
   const activeWs = useBizzi((s) =>
     props.route.name === 'workspace' ? props.route.workspaceId : props.route.name === 'session' ? (s.sessions[props.route.sessionId]?.workspaceId ?? null) : null,
   );
+  const status = conn === 'open' ? (target.source === 'mock' ? `mock ${role ?? ''}` : role === 'hub' ? `hub${hubName ? ` · ${hubName}` : ''}` : 'connected') : conn;
   return (
     <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-panel lg:w-64">
-      <div className="flex items-center gap-2 px-3 py-3">
-        <Logo size={26} />
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <Logo size={24} />
         <div className="min-w-0 flex-1">
-          <div className="truncate text-sm font-semibold">{machine?.name ?? 'bizzi'}</div>
+          <div className="truncate text-sm font-semibold">bizzi</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted">
             <span className={cx('h-1.5 w-1.5 rounded-full', conn === 'open' ? 'bg-ok' : conn === 'reconnecting' ? 'bg-warn' : 'bg-muted')} />
-            {conn === 'open' ? (target.source === 'mock' ? 'mock server' : 'connected') : conn}
+            <span className="truncate">{status}</span>
           </div>
         </div>
       </div>
+      <MachineSwitcher className="mx-2 mb-2" />
       <nav className="flex flex-col gap-0.5 px-2">
         {NAV.map((n) => (
           <a
@@ -158,6 +184,11 @@ function Sidebar(props: { route: Route }): ReactNode {
             <Icon name={n.icon} />
             <span className="flex-1">{n.label}</span>
             {n.label === 'Inbox' && inbox > 0 ? <span className="rounded-full bg-warn px-1.5 text-[11px] font-semibold text-white dark:text-black">{inbox}</span> : null}
+            {n.label === 'Knowledge' && suggestions > 0 ? (
+              <span className="rounded-full bg-panel-2 px-1.5 text-[11px] font-semibold text-muted" title="suggestions to review">
+                {suggestions}
+              </span>
+            ) : null}
           </a>
         ))}
       </nav>
@@ -212,7 +243,7 @@ function BottomNav(props: { route: Route }): ReactNode {
             className={cx('relative flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]', active ? 'text-accent' : 'text-muted')}
           >
             <Icon name={n.icon} size={20} />
-            {n.label}
+            {n.short ?? n.label}
             {n.label === 'Inbox' && inbox > 0 ? (
               <span className="absolute top-1.5 left-1/2 ml-2 rounded-full bg-warn px-1.5 text-[10px] font-semibold text-white dark:text-black">{inbox}</span>
             ) : null}

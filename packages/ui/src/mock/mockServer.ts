@@ -1,42 +1,63 @@
 // In-memory scripted fake of the bizzi core, for `?mock=1` (dev/demo without a core) and UI tests.
 // It speaks the real wire protocol through a WebSocket-like object, so the client code path is the same.
-import { BizziError, GLOBAL_CHANNEL, PROTOCOL_VERSION, parseChannel, sessionChannel } from '@bizzi/protocol';
+// By default it plays a hub with two machines (this laptop online, server-a offline); `role: 'node'`
+// makes it a single node instead.
+import { BizziError, GLOBAL_CHANNEL, PROTOCOL_VERSION, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
 import type {
+  AgentKind,
   ApprovalDecisionKind,
   ChannelEvent,
+  DeviceInfo,
+  DeviceKind,
+  Ed25519PublicJwk,
   GlobalEventBody,
   InputBlock,
+  MachineInfo,
+  MachineRole,
   MethodName,
   PlanItem,
+  QuestionAnswers,
   RequestMsg,
   SessionEventBody,
   SessionInfo,
+  SessionMode,
   SessionStatus,
   Usage,
   WorkspaceInfo,
 } from '@bizzi/protocol';
-import { stringToBase64 } from '@bizzi/client';
-import type { SocketFactory, WebSocketLike } from '@bizzi/client';
+import { base64ToBytes, base64UrlToBytes, bytesToBase64, stringToBase64, verifySignature } from '@bizzi/client';
+import type { FetchLike, SocketFactory, WebSocketLike } from '@bizzi/client';
 import {
   AGENTS,
   ASSISTANT_REPLY,
   CAPS_BY_AGENT,
   CHECKOUT_DIFF,
   FILES,
+  HUB_MACHINE,
+  HUB_ORIGIN,
   MACHINE,
+  MOCK_SETUP_CODE,
   NOTES_DIFF,
-  OTHER_MACHINES,
   REVIEW_REPLY,
+  SERVER,
+  SERVER_AGENTS,
   SESSIONS,
   WORKSPACES,
   iso,
 } from './fixtures.ts';
+import type { MockHost, MockModule } from './host.ts';
+import { MockKnowledge } from './knowledge.ts';
+import { MockProvision } from './provision.ts';
 
 export interface MockOptions {
   /** Multiplier for every delay (0 = instant, for tests). */
   speed?: number;
   /** Start streaming a demo turn in s_demo shortly after it is first opened. */
   autoplay?: boolean;
+  /** 'hub' (default): two machines behind a hub, devices and pairing. 'node': a single node. */
+  role?: MachineRole;
+  /** Scripted demo switches, e.g. ['install', 'login']. */
+  demo?: Iterable<string>;
 }
 
 class Aborted extends Error {}
@@ -50,24 +71,106 @@ interface Run {
 let idCounter = 0;
 const id = (p: string): string => `${p}_mock${(++idCounter).toString(36)}${Date.now().toString(36).slice(-4)}`;
 
-export class MockCore {
+const PLAN_QUESTION_ID = 'q_plan1';
+
+export class MockCore implements MockHost {
   readonly speed: number;
   readonly autoplay: boolean;
+  readonly role: MachineRole;
+  readonly demo: ReadonlySet<string>;
   readonly sockets = new Set<MockSocket>();
   private readonly logs = new Map<string, ChannelEvent[]>();
-  private readonly workspaces = new Map<string, WorkspaceInfo>();
-  private readonly sessions = new Map<string, SessionInfo>();
+  private readonly machineMap = new Map<string, MachineInfo>();
+  private readonly workspaceMap = new Map<string, WorkspaceInfo>();
+  private readonly sessionMap = new Map<string, SessionInfo>();
   private readonly runs = new Map<string, Run>();
   private readonly termLine = new Map<string, string>();
+  private readonly termHandlers = new Map<string, (data: string) => void>();
   private readonly pendingStatic = new Map<string, string>();
+  private readonly modules: MockModule[];
   private autoplayed = false;
+  // hub: devices, pairing codes, tokens
+  readonly devices = new Map<string, DeviceInfo & { publicKey?: Ed25519PublicJwk }>();
+  private readonly pairingCodes = new Map<string, { kind: DeviceKind; name?: string; expiresAt: number }>();
+  private readonly nonces = new Map<string, string>();
+  private readonly tokens = new Map<string, string>();
 
   constructor(opts: MockOptions = {}) {
     this.speed = opts.speed ?? 1;
     this.autoplay = opts.autoplay ?? true;
-    for (const w of WORKSPACES) this.workspaces.set(w.id, { ...w });
-    for (const s of SESSIONS) this.sessions.set(s.id, { ...s });
+    this.role = opts.role ?? 'hub';
+    this.demo = new Set(opts.demo ?? []);
+    this.machineMap.set(MACHINE.id, { ...MACHINE });
+    this.machineMap.set(SERVER.id, { ...SERVER, lastSeenAt: new Date(Date.now() - 2 * 3600_000 - 14 * 60_000).toISOString() });
+    for (const w of WORKSPACES) this.workspaceMap.set(w.id, { ...w });
+    for (const s of SESSIONS) this.sessionMap.set(s.id, { ...s });
+    this.seedDevices();
     this.seedHistory();
+    this.modules = [new MockProvision(this), new MockKnowledge(this)];
+  }
+
+  // ---------------------------------------------------------------- MockHost
+
+  machines(): MachineInfo[] {
+    return [...this.machineMap.values()];
+  }
+
+  workspaces(): WorkspaceInfo[] {
+    return [...this.workspaceMap.values()];
+  }
+
+  sessions(): SessionInfo[] {
+    return [...this.sessionMap.values()];
+  }
+
+  /** The machine a MachineTarget call addresses. Hubs route by id; a node only answers for itself. */
+  requireOnline(machineId: unknown): MachineInfo {
+    const m = this.targetMachine(machineId);
+    if (!m.online) throw new BizziError('machine_offline', `${m.name} is offline`);
+    return m;
+  }
+
+  private targetMachine(machineId: unknown): MachineInfo {
+    const mid = typeof machineId === 'string' && machineId ? machineId : MACHINE.id;
+    if (this.role === 'node' && mid !== MACHINE.id) throw new BizziError('not_found', `this node is ${MACHINE.id}, not ${mid}`);
+    const m = this.machineMap.get(mid);
+    if (!m) throw new BizziError('not_found', `no such machine: ${mid}`);
+    return m;
+  }
+
+  createSession(init: { id?: string; machineId: string; workspaceId: string; agent: AgentKind; mode: SessionMode; title: string; status?: SessionStatus }): SessionInfo {
+    const now = new Date().toISOString();
+    const s: SessionInfo = {
+      id: init.id ?? id('s'),
+      machineId: init.machineId,
+      workspaceId: init.workspaceId,
+      agent: init.agent,
+      mode: init.mode,
+      status: init.status ?? (init.mode === 'terminal' ? 'running' : 'idle'),
+      title: init.title,
+      createdAt: now,
+      updatedAt: now,
+      lastSeq: 0,
+    };
+    this.sessionMap.set(s.id, s);
+    this.emit(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...s } } });
+    return s;
+  }
+
+  setSessionStatus(sessionId: string, status: SessionStatus): void {
+    this.setStatus(sessionId, status);
+  }
+
+  termWrite(sessionId: string, text: string): void {
+    this.emitS(sessionId, { type: 'term.output', data: { dataBase64: stringToBase64(text) } });
+  }
+
+  onTermInput(sessionId: string, handler: (data: string) => void): void {
+    this.termHandlers.set(sessionId, handler);
+  }
+
+  emitSession(sessionId: string, body: SessionEventBody): void {
+    this.emitS(sessionId, body);
   }
 
   // ---------------------------------------------------------------- event log
@@ -86,7 +189,7 @@ export class MockCore {
     for (const s of this.sockets) if (s.subs.has(ch)) s.deliver(text);
     const p = parseChannel(ch);
     if (p?.kind === 'session') {
-      const sess = this.sessions.get(p.sessionId);
+      const sess = this.sessionMap.get(p.sessionId);
       if (sess) sess.lastSeq = ev.seq;
     }
   }
@@ -96,14 +199,14 @@ export class MockCore {
   }
 
   private setStatus(sessionId: string, status: SessionStatus): void {
-    const s = this.sessions.get(sessionId);
+    const s = this.sessionMap.get(sessionId);
     if (!s || s.status === status) return;
     s.status = status;
     s.updatedAt = new Date().toISOString();
     this.emit(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...s } } });
   }
 
-  private sleep(ms: number, run?: Run): Promise<void> {
+  sleep(ms: number, run?: Run): Promise<void> {
     const d = ms * this.speed;
     return new Promise((resolve, reject) => {
       const done = (): void => (run?.aborted ? reject(new Aborted()) : resolve());
@@ -112,7 +215,29 @@ export class MockCore {
     });
   }
 
+  /** Flip a machine online/offline (demo + tests); emits machine.updated like a hub would. */
+  setMachineOnline(machineId: string, online: boolean): void {
+    const m = this.machineMap.get(machineId);
+    if (!m || m.online === online) return;
+    const next: MachineInfo = { ...m, online };
+    if (!online) next.lastSeenAt = new Date().toISOString();
+    this.machineMap.set(machineId, next);
+    this.emit(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...next } } });
+  }
+
   // ---------------------------------------------------------------- seeded history
+
+  private seedDevices(): void {
+    const ago = (min: number): string => new Date(Date.now() - min * 60_000).toISOString();
+    const list: DeviceInfo[] = [
+      { id: 'd_mac', name: 'MacBook Pro (desktop app)', kind: 'device', owner: true, createdAt: ago(60 * 24 * 21), lastSeenAt: ago(0) },
+      { id: 'd_pixel', name: 'Pixel 9', kind: 'device', createdAt: ago(60 * 24 * 9), lastSeenAt: ago(47) },
+      { id: 'd_node_laptop', name: 'this laptop', kind: 'node', machineId: MACHINE.id, createdAt: ago(60 * 24 * 21), lastSeenAt: ago(0) },
+      { id: 'd_node_server', name: 'server-a', kind: 'node', machineId: SERVER.id, createdAt: ago(60 * 24 * 20), lastSeenAt: ago(134) },
+      { id: 'd_ipad', name: 'Old iPad', kind: 'device', createdAt: ago(60 * 24 * 60), lastSeenAt: ago(60 * 24 * 30), revoked: true },
+    ];
+    for (const d of list) this.devices.set(d.id, d);
+  }
 
   private seedHistory(): void {
     // s_demo: one completed turn.
@@ -126,6 +251,7 @@ export class MockCore {
     this.emitS(s, { type: 'tool.started', data: { toolId: 'tc_seed1', kind: 'read', name: 'Read', title: 'src/checkout/checkout.spec.ts', input: { file_path: 'src/checkout/checkout.spec.ts' } } }, at());
     this.emitS(s, { type: 'tool.completed', data: { toolId: 'tc_seed1', status: 'ok', output: FILES['src/checkout/checkout.spec.ts'] ?? '' } }, at());
     this.emitS(s, { type: 'tool.started', data: { toolId: 'tc_seed2', kind: 'shell', name: 'Bash', title: 'for i in $(seq 50); do npx vitest run checkout || break; done', input: { command: 'for i in $(seq 50); do npx vitest run checkout || break; done' } } }, at());
+    this.emitS(s, { type: 'turn.steered', data: { turnId: 't_seed1', input: [{ type: 'text', text: 'Only run the checkout spec, not the whole suite.' }] } }, at());
     this.emitS(s, { type: 'tool.completed', data: { toolId: 'tc_seed2', status: 'error', output: ' ✓ checkout.spec.ts (1 test) 41ms\n ✓ checkout.spec.ts (1 test) 39ms\n ✗ checkout.spec.ts > marks the order paid\n   AssertionError: expected "pending" to be "paid"\n', error: 'exit code 1' } }, at());
     this.emitS(s, { type: 'message.completed', data: { messageId: 'msg_seed1', role: 'assistant', text: 'Reproduced on run 3: the assertion sees `pending`. The spec sleeps 50 ms instead of waiting for the payment mock to settle. Next I will look at how the mock resolves.' } }, at());
     this.emitS(s, { type: 'plan.updated', data: { items: [{ text: 'Reproduce the flake locally', status: 'completed' }, { text: 'Find the race', status: 'in_progress' }, { text: 'Fix and verify 100×', status: 'pending' }] } }, at());
@@ -145,12 +271,74 @@ export class MockCore {
     this.emitS(r, { type: 'approval.requested', data: { approvalId: 'ap_rev1', toolId: 'tc_rev2', kind: 'shell', title: 'Run: docker compose up -d payments-sandbox', description: 'Starts the local payment sandbox container needed by the integration suite.', input: { command: ['docker', 'compose', 'up', '-d', 'payments-sandbox'] }, editable: false, options: ['allow', 'allow_always', 'deny'] } }, at());
     this.pendingStatic.set('ap_rev1', 's_review');
 
-    // s_notes: a finished research turn.
+    // s_plan: Claude asks structured questions (AskUserQuestion).
+    const q = 's_plan';
+    m = -12;
+    this.emitS(q, { type: 'session.info', data: { model: 'sonnet', permissionMode: 'plan' } }, at());
+    this.emitS(q, { type: 'turn.started', data: { turnId: 't_plan1', input: [{ type: 'text', text: 'Plan how we move the shop from session cookies to OAuth. Ask me what you need to know.' }] } }, at());
+    this.emitS(q, { type: 'reasoning.completed', data: { messageId: 'rs_plan1', text: 'Before planning I need the identity provider, which flows matter, and how to treat existing sessions.' } }, at());
+    this.emitS(q, { type: 'message.completed', data: { messageId: 'msg_plan1', role: 'assistant', text: 'I read `src/auth/` and the session middleware. A few decisions shape the plan:' } }, at());
+    this.emitS(q, { type: 'tool.started', data: { toolId: 'tc_plan1', kind: 'other', name: 'AskUserQuestion', title: '3 questions' } }, at());
+    this.emitS(
+      q,
+      {
+        type: 'question.asked',
+        data: {
+          questionId: PLAN_QUESTION_ID,
+          text: 'Which identity provider should the shop use?',
+          options: ['Auth0', 'Keycloak', 'Google'],
+          questions: [
+            {
+              id: 'provider',
+              header: 'Provider',
+              text: 'Which identity provider should the shop use?',
+              options: [
+                { label: 'Auth0', description: 'Hosted, quickest to set up; per-user pricing.' },
+                { label: 'Keycloak', description: 'Self-hosted on server-a next to Postgres.' },
+                { label: 'Google', description: 'Only for staff accounts; customers keep passwords.' },
+              ],
+            },
+            {
+              id: 'flows',
+              header: 'Flows',
+              text: 'Which flows must work on day one?',
+              multiSelect: true,
+              options: [{ label: 'Web login' }, { label: 'Mobile app (PKCE)' }, { label: 'Admin SSO' }, { label: 'API tokens' }],
+            },
+            { id: 'sessions', header: 'Migration', text: 'Anything special about existing sessions?', allowText: true },
+          ],
+        },
+      },
+      at(),
+    );
+    this.emitS(q, { type: 'session.status', data: { status: 'waiting_input', prompt: 'input' } }, at());
+    this.pendingStatic.set(PLAN_QUESTION_ID, q);
+
+    // s_notes: a finished research turn, then a turn whose approval was cancelled by an interrupt.
     const n = 's_notes';
     m = -60 * 26;
     this.emitS(n, { type: 'turn.started', data: { turnId: 't_n1', input: [{ type: 'text', text: 'Summarize the three CRDT papers in this folder in a table.' }] } }, at());
     this.emitS(n, { type: 'message.completed', data: { messageId: 'msg_n1', role: 'assistant', text: '| Paper | Year | Key idea |\n|---|---|---|\n| Shapiro et al. | 2011 | Convergent and commutative replicated data types |\n| Kleppmann & Beresford | 2017 | A JSON CRDT |\n| Weidner et al. | 2023 | Fugue: minimal interleaving in text CRDTs |\n' } }, at());
     this.emitS(n, { type: 'turn.completed', data: { turnId: 't_n1', stopReason: 'end_turn', usage: { inputTokens: 52_000, outputTokens: 900, costUsd: 0.09 } } }, at());
+    this.emitS(n, { type: 'turn.started', data: { turnId: 't_n2', input: [{ type: 'text', text: 'Also download the newest Fugue follow-up from arXiv.' }] } }, at());
+    this.emitS(n, { type: 'tool.started', data: { toolId: 'tc_n2', kind: 'web', name: 'webfetch', title: 'https://arxiv.org/a/weidner_m_1' } }, at());
+    this.emitS(n, { type: 'approval.requested', data: { approvalId: 'ap_n2', toolId: 'tc_n2', kind: 'web', title: 'Fetch https://arxiv.org/a/weidner_m_1', editable: false, options: ['allow', 'deny'] } }, at());
+    this.emitS(n, { type: 'approval.resolved', data: { approvalId: 'ap_n2', decision: 'cancelled' } }, at());
+    this.emitS(n, { type: 'tool.completed', data: { toolId: 'tc_n2', status: 'cancelled' } }, at());
+    this.emitS(n, { type: 'turn.completed', data: { turnId: 't_n2', stopReason: 'interrupted' } }, at());
+
+    // s_infra (server-a, offline): history served from the hub replica.
+    const f = 's_infra';
+    m = -60 * 5;
+    this.emitS(f, { type: 'session.info', data: { model: 'opus' } }, at());
+    this.emitS(f, { type: 'turn.started', data: { turnId: 't_f1', input: [{ type: 'text', text: 'Upgrade the Postgres container from 16 to 17 and check the app still boots.' }] } }, at());
+    this.emitS(f, { type: 'tool.started', data: { toolId: 'tc_f1', kind: 'shell', name: 'Bash', title: 'docker compose exec db pg_dumpall > /data/backup/pre-17.sql' } }, at());
+    this.emitS(f, { type: 'tool.completed', data: { toolId: 'tc_f1', status: 'ok', output: '' } }, at());
+    this.emitS(f, { type: 'tool.started', data: { toolId: 'tc_f2', kind: 'edit', name: 'Edit', title: 'docker-compose.yml' } }, at());
+    this.emitS(f, { type: 'tool.completed', data: { toolId: 'tc_f2', status: 'ok' } }, at());
+    this.emitS(f, { type: 'file.changed', data: { path: 'docker-compose.yml', change: 'modified', diff: '@@ -3,3 +3,3 @@\n   db:\n-    image: postgres:16\n+    image: postgres:17\n     volumes:\n' } }, at());
+    this.emitS(f, { type: 'message.completed', data: { messageId: 'msg_f1', role: 'assistant', text: 'Backed up all databases, bumped the image to `postgres:17` and ran `pg_upgrade`. The app boots and the health check is green.' } }, at());
+    this.emitS(f, { type: 'turn.completed', data: { turnId: 't_f1', stopReason: 'end_turn', usage: { inputTokens: 33_000, outputTokens: 2_100, costUsd: 0.31 } } }, at());
 
     // s_term: a shell with some output.
     this.emitS('s_term', { type: 'term.output', data: { dataBase64: stringToBase64('\x1b[1;32mdev@mbp\x1b[0m:\x1b[1;34m~/src/acme-shop\x1b[0m$ git log --oneline -3\r\n\x1b[33mfd3be0d\x1b[0m Add checkout retries\r\n\x1b[33m9a01c2e\x1b[0m Bump vitest\r\n\x1b[33m2be44f1\x1b[0m Initial commit\r\n') } }, iso(-14));
@@ -167,11 +355,15 @@ export class MockCore {
     const p = req.params as Record<string, unknown>;
     const method = req.method as MethodName;
     if (method === 'hello') {
-      if (p.token === 'bad') throw new BizziError('unauthorized', 'invalid token');
+      this.checkToken(p.token);
       sock.authed = true;
-      return { protocol: PROTOCOL_VERSION, serverVersion: '0.0.1-mock', machine: MACHINE };
+      return this.role === 'hub'
+        ? { protocol: PROTOCOL_VERSION, serverVersion: '0.0.1-mock', machine: HUB_MACHINE, role: 'hub' }
+        : { protocol: PROTOCOL_VERSION, serverVersion: '0.0.1-mock', machine: this.machineMap.get(MACHINE.id), role: 'node' };
     }
     if (!sock.authed) throw new BizziError('unauthorized', 'hello first');
+    const mod = this.modules.find((x) => x.handles(method));
+    if (mod) return mod.handle(method, p);
     switch (method) {
       case 'subscribe': {
         const ch = String(p.ch);
@@ -190,29 +382,36 @@ export class MockCore {
         sock.subs.delete(String(p.ch));
         return {};
       case 'machines.list':
-        return { machines: [MACHINE, ...OTHER_MACHINES] };
-      case 'agents.list':
-        await this.sleep(p.refresh ? 600 : 50);
-        return { agents: AGENTS };
-      case 'workspaces.list':
-        return { workspaces: [...this.workspaces.values()] };
+        return { machines: this.machines().map((m) => ({ ...m })) };
+      case 'workspaces.list': {
+        // The hub answers from its replica, so offline machines still list their workspaces.
+        const m = this.targetMachine(p.machineId);
+        return { workspaces: this.workspaces().filter((w) => w.machineId === m.id) };
+      }
       case 'workspace.create': {
+        const m = this.requireOnline(p.machineId);
         const path = String(p.path ?? '').trim();
         if (!path.startsWith('/')) throw new BizziError('bad_request', 'path must be absolute');
         const name = (typeof p.name === 'string' && p.name) || path.split('/').filter(Boolean).pop() || path;
-        const w: WorkspaceInfo = { id: id('w'), machineId: MACHINE.id, name, path, kind: p.create ? 'dir' : 'git', createdAt: new Date().toISOString() };
-        this.workspaces.set(w.id, w);
+        const w: WorkspaceInfo = { id: id('w'), machineId: m.id, name, path, kind: p.create ? 'dir' : 'git', createdAt: new Date().toISOString() };
+        this.workspaceMap.set(w.id, w);
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.created', data: { workspace: w } });
         return { workspace: w };
       }
       case 'workspace.remove': {
         const wid = String(p.workspaceId);
-        if (!this.workspaces.delete(wid)) throw new BizziError('not_found', 'no such workspace');
+        const w = this.workspaceMap.get(wid);
+        if (!w) throw new BizziError('not_found', 'no such workspace');
+        this.requireOnline(w.machineId);
+        this.workspaceMap.delete(wid);
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: wid } });
         return {};
       }
       case 'sessions.list': {
-        const all = [...this.sessions.values()].map((s) => ({ ...s }));
+        const m = this.targetMachine(p.machineId);
+        const all = this.sessions()
+          .filter((s) => s.machineId === m.id)
+          .map((s) => ({ ...s }));
         return { sessions: p.workspaceId ? all.filter((s) => s.workspaceId === p.workspaceId) : all };
       }
       case 'session.get': {
@@ -220,20 +419,20 @@ export class MockCore {
         return { session: { ...s }, capabilities: CAPS_BY_AGENT[s.agent] };
       }
       case 'session.create': {
-        const ws = this.workspaces.get(String(p.workspaceId));
+        const ws = this.workspaceMap.get(String(p.workspaceId));
         if (!ws) throw new BizziError('not_found', 'no such workspace');
+        this.requireOnline(ws.machineId);
         const agent = String(p.agent) as SessionInfo['agent'];
-        const listing = AGENTS.find((a) => a.agent === agent);
+        const listing = (ws.machineId === SERVER.id ? SERVER_AGENTS : AGENTS).find((a) => a.agent === agent);
         if (!listing?.installed) throw new BizziError('agent_unavailable', `${agent} is not installed`);
         const mode = (p.mode as SessionInfo['mode'] | undefined) ?? 'structured';
+        const title = typeof p.title === 'string' && p.title ? p.title : mode === 'terminal' ? `${agent} terminal` : 'New session';
         const now = new Date().toISOString();
-        const s: SessionInfo = { id: id('s'), machineId: MACHINE.id, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', createdAt: now, updatedAt: now, lastSeq: 0 };
-        if (typeof p.title === 'string' && p.title) s.title = p.title;
-        else s.title = mode === 'terminal' ? `${agent} terminal` : 'New session';
+        const s: SessionInfo = { id: id('s'), machineId: ws.machineId, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', title, createdAt: now, updatedAt: now, lastSeq: 0 };
         if (typeof p.model === 'string' && p.model) s.model = p.model;
         if (typeof p.permissionMode === 'string' && p.permissionMode) s.permissionMode = p.permissionMode;
         if (typeof p.effort === 'string' && p.effort) s.effort = p.effort;
-        this.sessions.set(s.id, s);
+        this.sessionMap.set(s.id, s);
         this.emit(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...s } } });
         if (mode === 'terminal') {
           this.emitS(s.id, { type: 'term.output', data: { dataBase64: stringToBase64(`bizzi mock terminal (${agent}) in ${ws.path}\r\n`) } });
@@ -241,22 +440,49 @@ export class MockCore {
         }
         return { session: { ...s } };
       }
+      case 'session.fork': {
+        const src = this.liveSession(p.sessionId);
+        if (!CAPS_BY_AGENT[src.agent]?.fork) throw new BizziError('unsupported', `${src.agent} cannot fork sessions`);
+        const now = new Date().toISOString();
+        const title = typeof p.title === 'string' && p.title ? p.title : `${src.title ?? 'Session'} (fork)`;
+        const s: SessionInfo = { ...src, id: id('s'), status: 'idle', title, forkedFrom: src.id, createdAt: now, updatedAt: now, lastSeq: 0 };
+        delete s.agentSessionRef;
+        this.sessionMap.set(s.id, s);
+        // The fork continues the conversation: copy the finished part of the source's history.
+        for (const ev of this.log(sessionChannel(src.id))) {
+          if (ev.type === 'approval.requested' || ev.type === 'question.asked' || ev.type === 'session.status') continue;
+          const { ch: _ch, seq: _seq, ts, ...body } = ev;
+          this.emitS(s.id, body as SessionEventBody, ts);
+        }
+        this.emit(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...s } } });
+        return { session: { ...s } };
+      }
+      case 'session.delete': {
+        const s = this.liveSession(p.sessionId);
+        const run = this.runs.get(s.id);
+        if (run) run.aborted = true;
+        this.sessionMap.delete(s.id);
+        this.logs.delete(sessionChannel(s.id));
+        this.emit(GLOBAL_CHANNEL, { type: 'session.removed', data: { sessionId: s.id, workspaceId: s.workspaceId } });
+        return {};
+      }
       case 'session.send': {
-        const s = this.session(p.sessionId);
+        const s = this.liveSession(p.sessionId);
         if (s.mode === 'terminal') throw new BizziError('unsupported', 'terminal sessions take term.input');
         if (this.runs.has(s.id)) throw new BizziError('conflict', 'a turn is already running; steer or interrupt');
         const turnId = this.startTurn(s.id, p.input as InputBlock[]);
         return { turnId };
       }
       case 'session.steer': {
-        const s = this.session(p.sessionId);
+        const s = this.liveSession(p.sessionId);
         if (!CAPS_BY_AGENT[s.agent]?.steer) throw new BizziError('unsupported', 'steer not supported');
-        const input = p.input as InputBlock[];
-        const text = input.map((b) => (b.type === 'text' ? b.text : '')).join(' ');
-        this.emitS(s.id, { type: 'message.completed', data: { messageId: id('msg'), role: 'user', text } });
+        const run = this.runs.get(s.id);
+        if (!run) throw new BizziError('conflict', 'no turn is running');
+        this.emitS(s.id, { type: 'turn.steered', data: { turnId: run.turnId, input: p.input as InputBlock[] } });
         return {};
       }
       case 'session.interrupt': {
+        this.liveSession(p.sessionId);
         const run = this.runs.get(String(p.sessionId));
         if (run) {
           run.aborted = true;
@@ -265,7 +491,7 @@ export class MockCore {
         return {};
       }
       case 'session.stop': {
-        const s = this.session(p.sessionId);
+        const s = this.liveSession(p.sessionId);
         const run = this.runs.get(s.id);
         if (run) run.aborted = true;
         this.emitS(s.id, { type: 'session.status', data: { status: 'ended', reason: 'stopped by user' } });
@@ -273,7 +499,7 @@ export class MockCore {
         return {};
       }
       case 'session.set': {
-        const s = this.session(p.sessionId);
+        const s = this.liveSession(p.sessionId);
         const patch: { model?: string; permissionMode?: string; effort?: string } = {};
         if (typeof p.model === 'string') s.model = patch.model = p.model;
         if (typeof p.permissionMode === 'string') s.permissionMode = patch.permissionMode = p.permissionMode;
@@ -285,6 +511,7 @@ export class MockCore {
       }
       case 'approval.respond': {
         const sid = String(p.sessionId);
+        this.liveSession(sid);
         const aid = String(p.approvalId);
         const decision = p.decision as ApprovalDecisionKind;
         const run = this.runs.get(sid);
@@ -300,23 +527,52 @@ export class MockCore {
         }
         throw new BizziError('not_found', 'no such pending approval');
       }
+      case 'question.respond': {
+        const s = this.liveSession(p.sessionId);
+        const qid = String(p.questionId);
+        if (this.pendingStatic.get(qid) !== s.id) throw new BizziError('not_found', 'no such pending question');
+        this.pendingStatic.delete(qid);
+        void this.finishPlan(s.id, qid, p.cancel === true ? null : ((p.answers as QuestionAnswers | undefined) ?? {}));
+        return {};
+      }
       case 'term.input': {
-        this.termInput(String(p.sessionId), String(p.dataBase64));
+        const s = this.liveSession(p.sessionId);
+        const handler = this.termHandlers.get(s.id);
+        if (handler) handler(new TextDecoder().decode(base64ToBytes(String(p.dataBase64))));
+        else this.termInput(s.id, String(p.dataBase64));
         return {};
       }
       case 'term.resize':
+        this.liveSession(p.sessionId);
         return {};
+      case 'term.snapshot': {
+        const s = this.session(p.sessionId);
+        if (s.mode !== 'terminal') throw new BizziError('bad_request', 'not a terminal session');
+        const log = this.log(sessionChannel(s.id));
+        const chunks: Uint8Array[] = [];
+        for (const ev of log) if (ev.type === 'term.output') chunks.push(base64ToBytes(ev.data.dataBase64));
+        const total = chunks.reduce((n, c) => n + c.byteLength, 0);
+        const all = new Uint8Array(total);
+        let o = 0;
+        for (const c of chunks) {
+          all.set(c, o);
+          o += c.byteLength;
+        }
+        return { dataBase64: bytesToBase64(all.subarray(Math.max(0, total - 256 * 1024))), seq: log.length };
+      }
       case 'fs.list':
+        this.workspaceOnline(p.workspaceId);
         return { entries: this.fsList(String(p.path ?? '')) };
       case 'fs.read': {
+        this.workspaceOnline(p.workspaceId);
         const path = String(p.path).replace(/^\/+/, '');
         const content = FILES[path];
         if (content === undefined) throw new BizziError('not_found', `no such file: ${path}`);
         return { content, encoding: 'utf8', truncated: false };
       }
       case 'git.status': {
-        const ws = this.workspaces.get(String(p.workspaceId));
-        if (!ws || ws.kind !== 'git') return { isRepo: false, files: [] };
+        const ws = this.workspaceOnline(p.workspaceId);
+        if (ws.kind !== 'git') return { isRepo: false, files: [] };
         return {
           isRepo: true,
           branch: 'fix/flaky-checkout',
@@ -329,20 +585,62 @@ export class MockCore {
         };
       }
       case 'git.diff': {
+        this.workspaceOnline(p.workspaceId);
         if (p.path === 'src/checkout/checkout.spec.ts') return { diff: CHECKOUT_DIFF };
         if (p.path === 'notes.txt') return { diff: NOTES_DIFF };
         if (p.path) return { diff: '' };
         return { diff: CHECKOUT_DIFF + NOTES_DIFF };
+      }
+      case 'pairing.create': {
+        this.requireHub();
+        const kind = p.kind === 'node' ? 'node' : 'device';
+        const code = randomCode();
+        const expiresAt = Date.now() + 10 * 60_000;
+        const entry: { kind: DeviceKind; name?: string; expiresAt: number } = { kind, expiresAt };
+        if (typeof p.name === 'string' && p.name) entry.name = p.name;
+        this.pairingCodes.set(code, entry);
+        return { code: `${code.slice(0, 4)}-${code.slice(4)}`, expiresAt: new Date(expiresAt).toISOString(), pairUrl: `${HUB_ORIGIN}/#/pair?code=${code}` };
+      }
+      case 'devices.list':
+        this.requireHub();
+        return { devices: [...this.devices.values()].map(publicDevice) };
+      case 'device.revoke': {
+        this.requireHub();
+        const d = this.devices.get(String(p.deviceId));
+        if (!d) throw new BizziError('not_found', 'no such device');
+        d.revoked = true;
+        for (const [tok, dev] of this.tokens) if (dev === d.id) this.tokens.delete(tok);
+        this.emit(GLOBAL_CHANNEL, { type: 'device.updated', data: { device: publicDevice(d) } });
+        return {};
       }
       default:
         throw new BizziError('unsupported', `mock does not implement ${method}`);
     }
   }
 
+  private requireHub(): void {
+    if (this.role !== 'hub') throw new BizziError('unsupported', 'only a hub manages devices');
+  }
+
   private session(sessionId: unknown): SessionInfo {
-    const s = this.sessions.get(String(sessionId));
+    const s = this.sessionMap.get(String(sessionId));
     if (!s) throw new BizziError('not_found', 'no such session');
     return s;
+  }
+
+  /** A session whose machine is reachable (mutating calls); offline machines fail fast. */
+  private liveSession(sessionId: unknown): SessionInfo {
+    const s = this.session(sessionId);
+    const m = this.machineMap.get(s.machineId);
+    if (m && !m.online) throw new BizziError('machine_offline', `${m.name} is offline; this session is read-only until it reconnects`);
+    return s;
+  }
+
+  private workspaceOnline(workspaceId: unknown): WorkspaceInfo {
+    const ws = this.workspaceMap.get(String(workspaceId));
+    if (!ws) throw new BizziError('not_found', 'no such workspace');
+    this.requireOnline(ws.machineId);
+    return ws;
   }
 
   private fsList(dir: string): { name: string; type: 'file' | 'dir'; size?: number }[] {
@@ -359,11 +657,61 @@ export class MockCore {
     return [...seen.values()].sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
   }
 
+  // ---------------------------------------------------------------- hub auth (used by createMockHubFetch)
+
+  private checkToken(token: unknown): void {
+    if (token === 'bad') throw new BizziError('unauthorized', 'invalid token');
+    if (typeof token === 'string' && token.startsWith('mt_') && !this.tokens.has(token)) throw new BizziError('unauthorized', 'unknown or revoked token');
+  }
+
+  pair(body: { code?: string; kind?: DeviceKind; name?: string; publicKey?: Ed25519PublicJwk; machineId?: string }): { deviceId: string; kind: DeviceKind; owner: boolean; clientUrl: string; nodeUrl: string } {
+    const code = normalizePairingCode(String(body.code ?? ''));
+    const pk = body.publicKey;
+    if (!pk || pk.kty !== 'OKP' || pk.crv !== 'Ed25519' || typeof pk.x !== 'string') throw new BizziError('bad_request', 'publicKey must be an Ed25519 JWK');
+    const issued = this.pairingCodes.get(code);
+    const setup = code === normalizePairingCode(MOCK_SETUP_CODE);
+    if (!setup && (!issued || issued.expiresAt < Date.now())) throw new BizziError('unauthorized', 'unknown or expired pairing code');
+    if (issued) this.pairingCodes.delete(code);
+    const kind = body.kind === 'node' ? 'node' : 'device';
+    const d: DeviceInfo & { publicKey?: Ed25519PublicJwk } = {
+      id: id('d'),
+      name: (body.name ?? '').trim() || issued?.name || 'new device',
+      kind,
+      createdAt: new Date().toISOString(),
+      lastSeenAt: new Date().toISOString(),
+      publicKey: pk,
+    };
+    if (body.machineId) d.machineId = body.machineId;
+    this.devices.set(d.id, d);
+    this.emit(GLOBAL_CHANNEL, { type: 'device.updated', data: { device: publicDevice(d) } });
+    return { deviceId: d.id, kind, owner: false, clientUrl: 'mock://hub/ws', nodeUrl: 'mock://hub/ws/node' };
+  }
+
+  challenge(deviceId: string): { nonce: string; expiresAt: string } {
+    const d = this.devices.get(deviceId);
+    if (!d || d.revoked) throw new BizziError('unauthorized', 'unknown or revoked device');
+    const nonce = randomCode() + randomCode();
+    this.nonces.set(deviceId, nonce);
+    return { nonce, expiresAt: new Date(Date.now() + 60_000).toISOString() };
+  }
+
+  async token(body: { deviceId?: string; nonce?: string; signature?: string }): Promise<{ token: string; expiresAt: string }> {
+    const deviceId = String(body.deviceId ?? '');
+    const d = this.devices.get(deviceId);
+    const nonce = this.nonces.get(deviceId);
+    if (!d?.publicKey || d.revoked || !nonce || nonce !== body.nonce) throw new BizziError('unauthorized', 'bad challenge');
+    this.nonces.delete(deviceId);
+    const ok = await verifySignature(d.publicKey, `bizzi-auth:v1:${deviceId}:${nonce}`, base64UrlToBytes(String(body.signature ?? '')) as Uint8Array<ArrayBuffer>);
+    if (!ok) throw new BizziError('unauthorized', 'bad signature');
+    const token = `mt_${randomCode()}${randomCode()}`;
+    this.tokens.set(token, deviceId);
+    return { token, expiresAt: new Date(Date.now() + 15 * 60_000).toISOString() };
+  }
+
   // ---------------------------------------------------------------- terminal echo
 
   private termInput(sessionId: string, b64: string): void {
-    const bin = atob(b64);
-    const data = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    const data = new TextDecoder().decode(base64ToBytes(b64));
     let line = this.termLine.get(sessionId) ?? '';
     let out = '';
     for (const ch of data) {
@@ -410,7 +758,7 @@ export class MockCore {
     return turnId;
   }
 
-  private async stream(sessionId: string, run: Run, type: 'message.delta' | 'reasoning.delta', messageId: string, text: string): Promise<void> {
+  private async stream(sessionId: string, run: Run | undefined, type: 'message.delta' | 'reasoning.delta', messageId: string, text: string): Promise<void> {
     let i = 0;
     while (i < text.length) {
       const n = 2 + Math.floor(Math.random() * 6);
@@ -455,8 +803,11 @@ export class MockCore {
         this.setStatus(S, 'waiting_approval');
       });
       run.approvals.delete(ap);
+      if (run.aborted) {
+        this.emitS(S, { type: 'approval.resolved', data: { approvalId: ap, decision: 'cancelled' } });
+        throw new Aborted();
+      }
       this.emitS(S, { type: 'approval.resolved', data: { approvalId: ap, decision, by: 'you' } });
-      if (run.aborted) throw new Aborted();
       this.setStatus(S, 'running');
       if (decision === 'deny') {
         this.emitS(S, { type: 'tool.completed', data: { toolId: edit, status: 'denied' } });
@@ -516,6 +867,48 @@ export class MockCore {
     this.emitS(S, { type: 'turn.completed', data: { turnId: 't_rev1', stopReason: 'end_turn', usage: { inputTokens: 40_100, outputTokens: 3_200 } } });
     this.setStatus(S, 'idle');
   }
+
+  /** s_plan: the questions were answered (or declined with null). */
+  private async finishPlan(sessionId: string, questionId: string, answers: QuestionAnswers | null): Promise<void> {
+    const S = sessionId;
+    this.emitS(S, { type: 'question.resolved', data: answers ? { questionId, answers } : { questionId, cancelled: true } });
+    this.emitS(S, { type: 'tool.completed', data: { toolId: 'tc_plan1', status: answers ? 'ok' : 'cancelled' } });
+    this.emitS(S, { type: 'session.status', data: { status: 'running' } });
+    this.setStatus(S, 'running');
+    await this.sleep(400);
+    const fmt = (v: string | string[] | undefined): string => (Array.isArray(v) ? v.join(', ') : (v ?? '')) || 'no preference';
+    const text = answers
+      ? `Thanks. The plan:\n\n1. Stand up **${fmt(answers.provider)}** and register the shop as a client.\n2. Ship these flows first: ${fmt(answers.flows)}.\n3. Existing sessions: ${fmt(answers.sessions)}.\n4. Remove the cookie middleware once traffic has moved.`
+      : 'No problem, I will draft the plan with sensible defaults (Auth0, web login first) and mark the open decisions.';
+    const msg = id('msg');
+    await this.stream(S, undefined, 'message.delta', msg, text);
+    this.emitS(S, { type: 'message.completed', data: { messageId: msg, role: 'assistant', text } });
+    this.emitS(S, { type: 'turn.completed', data: { turnId: 't_plan1', stopReason: 'end_turn', usage: { inputTokens: 9_800, outputTokens: 640 } } });
+    this.setStatus(S, 'idle');
+  }
+
+  /** Re-arm the scripted question in s_plan (tests). */
+  get questionPending(): boolean {
+    return this.pendingStatic.has(PLAN_QUESTION_ID);
+  }
+
+  armStaticQuestions(): void {
+    this.pendingStatic.set(PLAN_QUESTION_ID, 's_plan');
+  }
+}
+
+function publicDevice(d: DeviceInfo & { publicKey?: Ed25519PublicJwk }): DeviceInfo {
+  const { publicKey: _pk, ...rest } = d;
+  return { ...rest };
+}
+
+function randomCode(): string {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = new Uint8Array(4);
+  globalThis.crypto.getRandomValues(bytes);
+  let out = '';
+  for (const b of bytes) out += (alphabet[b % alphabet.length] ?? 'A') + (alphabet[(b >> 3) % alphabet.length] ?? 'Z');
+  return out;
 }
 
 /** A WebSocket-like endpoint connected to a MockCore. */
@@ -574,4 +967,23 @@ export class MockSocket implements WebSocketLike {
 
 export function createMockSocketFactory(core: MockCore = new MockCore()): SocketFactory {
   return () => new MockSocket(core);
+}
+
+/** The hub's HTTP pairing/auth API (protocol hub.ts) on top of a MockCore, as a `fetch` replacement. */
+export function createMockHubFetch(core: MockCore): FetchLike {
+  return async (url, init) => {
+    const path = url.replace(/^[a-z]+:\/\/[^/]+/i, '');
+    const body = init.body ? (JSON.parse(init.body) as Record<string, unknown>) : {};
+    const reply = (status: number, json: unknown): { ok: boolean; status: number; json(): Promise<unknown> } => ({ ok: status < 400, status, json: async () => json });
+    try {
+      await core.sleep(120);
+      if (path === '/api/pair') return reply(200, core.pair(body));
+      if (path === '/api/auth/challenge') return reply(200, core.challenge(String(body.deviceId ?? '')));
+      if (path === '/api/auth/token') return reply(200, await core.token(body));
+      return reply(404, { error: { code: 'not_found', message: `no route ${path}` } });
+    } catch (e) {
+      const err = e instanceof BizziError ? e.toObject() : { code: 'internal', message: String(e) };
+      return reply(err.code === 'unauthorized' ? 401 : 400, { error: err });
+    }
+  };
 }

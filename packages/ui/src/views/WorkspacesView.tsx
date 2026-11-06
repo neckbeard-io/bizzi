@@ -3,14 +3,21 @@ import type { FormEvent, ReactNode } from 'react';
 import { shallowEqual } from '@bizzi/client';
 import type { WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
-import { navigate, useAction } from '../app/hooks.ts';
+import { navigate, useAction, useIsWide } from '../app/hooks.ts';
+import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
+import { MachineSwitcher } from '../components/MachineSwitcher.tsx';
+import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Checkbox, Empty, ErrorText, Field, Input, Spinner } from '../components/ui.tsx';
 import { routeHref } from '../lib/router.ts';
 
 export function WorkspacesView(): ReactNode {
-  const machineId = useBizzi((s) => s.machine?.id ?? null);
+  const machineId = useTargetMachineId();
+  const machine = useMachine(machineId);
+  const online = useMachineOnline(machineId);
+  const wide = useIsWide();
+  const hub = useBizzi((s) => s.role === 'hub');
   const loaded = useBizzi((s) => s.workspaces !== null);
   const [showAll, setShowAll] = useState(false);
   const workspaces = useBizzi(
@@ -28,16 +35,18 @@ export function WorkspacesView(): ReactNode {
       header={
         <PageHeader
           title="Workspaces"
-          subtitle="Directories on this machine where agents work"
+          subtitle={machine ? `Directories on ${machine.name} where agents work` : 'Directories where agents work'}
           actions={
-            <Button variant="primary" icon="plus" size="sm" onClick={() => setAdding((a) => !a)}>
+            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => setAdding((a) => !a)}>
               Add workspace
             </Button>
           }
         />
       }
     >
-      {adding ? <AddWorkspaceForm onDone={() => setAdding(false)} /> : null}
+      {!wide && hub ? <MachineSwitcher className="mb-3" /> : null}
+      <OfflineMachineBanner machineId={machineId} className="mb-3" />
+      {adding && online ? <AddWorkspaceForm machineId={machineId} onDone={() => setAdding(false)} /> : null}
       {!loaded ? (
         <div className="flex justify-center py-10 text-muted">
           <Spinner />
@@ -97,13 +106,14 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): Re
   );
 }
 
-function AddWorkspaceForm(props: { onDone: () => void }): ReactNode {
+function AddWorkspaceForm(props: { machineId: string | null; onDone: () => void }): ReactNode {
   const store = useStore();
   const [path, setPath] = useState('');
   const [name, setName] = useState('');
   const [create, setCreate] = useState(false);
   const action = useAction(async () => {
-    const params: { path: string; name?: string; create?: boolean } = { path: path.trim() };
+    const params: { machineId?: string; path: string; name?: string; create?: boolean } = { path: path.trim() };
+    if (props.machineId) params.machineId = props.machineId;
     if (name.trim()) params.name = name.trim();
     if (create) params.create = true;
     return store.createWorkspace(params);

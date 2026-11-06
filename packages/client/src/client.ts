@@ -4,6 +4,7 @@ import type {
   ErrorObject,
   Logger,
   MachineInfo,
+  MachineRole,
   MethodName,
   MethodParams,
   MethodResult,
@@ -11,6 +12,7 @@ import type {
 } from '@bizzi/protocol';
 import { DEFAULT_BACKOFF, backoffDelay } from './backoff.ts';
 import type { BackoffOptions } from './backoff.ts';
+import type { TokenProvider } from './hub.ts';
 
 /** The subset of the WebSocket API the client needs. Browsers, Node ≥ 22 and the UI mock all provide it. */
 export interface WebSocketLike {
@@ -37,6 +39,8 @@ export interface ConnectionInfo {
   lastError: ErrorObject | null;
   serverVersion: string | null;
   machine: MachineInfo | null;
+  /** 'hub' when connected to a hub (multi-machine), 'node' for a single node; null until the handshake. */
+  role: MachineRole | null;
   /** Epoch ms of the last successful handshake. */
   connectedAt: number | null;
   /** Number of successful handshakes (1 = first connect; >1 = reconnected). */
@@ -134,7 +138,12 @@ export class BizziClient {
   /** Bumped whenever a socket is abandoned, so stale callbacks are ignored. */
   private gen = 0;
   private url: string | null = null;
+  private auth: string | TokenProvider | undefined;
   private token: string | undefined;
+  /** Next token fetch must bypass the provider's cache (after an `unauthorized` hello). */
+  private forceRefresh = false;
+  /** One forced token refresh per connect cycle before `unauthorized` becomes fatal. */
+  private authRetried = false;
   private userClosed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private nextId = 0;
@@ -148,6 +157,7 @@ export class BizziClient {
     lastError: null,
     serverVersion: null,
     machine: null,
+    role: null,
     connectedAt: null,
     sessions: 0,
   };
@@ -179,12 +189,18 @@ export class BizziClient {
   /**
    * Connect and keep the connection alive. Resolves after the first successful `hello`; rejects only on
    * fatal errors (unauthorized, protocol mismatch) or `close()`. Transient failures keep retrying.
+   *
+   * `auth` is a static token (local mode) or a TokenProvider (hub mode), asked for a token before every
+   * (re)connect. An `unauthorized` hello with a provider is retried once with a forced refresh.
    */
-  connect(url: string, token?: string): Promise<HelloResult> {
+  connect(url: string, auth?: string | TokenProvider): Promise<HelloResult> {
     this.close();
     this.userClosed = false;
     this.url = url;
-    this.token = token;
+    this.auth = auth;
+    this.token = typeof auth === 'string' ? auth : undefined;
+    this.forceRefresh = false;
+    this.authRetried = false;
     this.setConn({ state: 'connecting', url, attempt: 0, nextRetryAt: null, lastError: null, sessions: 0 });
     const p = new Promise<HelloResult>((resolve, reject) => this.connectWaiters.push({ resolve, reject }));
     this.openSocket();
@@ -362,6 +378,30 @@ export class BizziClient {
   private openSocket(): void {
     if (!this.url || this.userClosed) return;
     const gen = ++this.gen;
+    const auth = this.auth;
+    if (auth !== undefined && typeof auth !== 'string') {
+      const force = this.forceRefresh;
+      this.forceRefresh = false;
+      auth.getToken(force ? { forceRefresh: true } : {}).then(
+        (token) => {
+          if (gen !== this.gen || this.userClosed) return;
+          this.token = token;
+          this.wireSocket(gen);
+        },
+        (e: unknown) => {
+          if (gen !== this.gen || this.userClosed) return;
+          const err = toBizziError(e);
+          if (err.code === 'unauthorized') this.fatal(err);
+          else this.socketDown(gen, err.toObject());
+        },
+      );
+      return;
+    }
+    this.wireSocket(gen);
+  }
+
+  private wireSocket(gen: number): void {
+    if (!this.url) return;
     let ws: WebSocketLike;
     try {
       ws = this.createSocket(this.url);
@@ -396,6 +436,7 @@ export class BizziClient {
       (raw) => {
         if (gen !== this.gen) return;
         const res = raw as HelloResult;
+        this.authRetried = false;
         if (res.protocol !== PROTOCOL_VERSION) {
           this.fatal(new BizziError('unsupported', `server speaks ${res.protocol}, client needs ${PROTOCOL_VERSION}`));
           return;
@@ -407,6 +448,7 @@ export class BizziClient {
           lastError: null,
           serverVersion: res.serverVersion,
           machine: res.machine,
+          role: res.role ?? (res.machine.roles.includes('hub') && !res.machine.roles.includes('node') ? 'hub' : 'node'),
           connectedAt: Date.now(),
           sessions: this.conn.sessions + 1,
         });
@@ -423,6 +465,14 @@ export class BizziClient {
       (e: unknown) => {
         if (gen !== this.gen) return;
         const err = toBizziError(e);
+        if (err.code === 'unauthorized' && this.auth !== undefined && typeof this.auth !== 'string' && !this.authRetried) {
+          // The cached token may have expired or been revoked server-side: fetch a fresh one once.
+          this.authRetried = true;
+          this.forceRefresh = true;
+          this.dropSocket();
+          this.openSocket();
+          return;
+        }
         if (err.code === 'unauthorized' || err.code === 'unsupported' || err.code === 'bad_request') {
           this.fatal(err);
         } else {
