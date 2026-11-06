@@ -6,3 +6,4 @@ out/
 .DS_Store
 .bizzi-dev/
 coverage/
+.claude/worktrees/
