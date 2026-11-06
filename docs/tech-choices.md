@@ -12,7 +12,7 @@ Companion to [spec.md](spec.md), [topology.md](topology.md), [knowledge.md](know
 |---|---|---|
 | **Core language (node + hub + adapters)** | **decided (D0a)** | **TypeScript on Node.js** |
 | **UI toolkit (all clients)** | **decided (D0b)** | **React web UI** in Electron (desktop), Capacitor (phones), and the browser, with performance guardrails |
-| Protocol | settled | JSON envelopes, per-session `seq`, cursor replay; TypeBox schemas → TS types + JSON Schema |
+| Protocol | settled | JSON envelopes, per-session `seq`, cursor replay; plain TS types in `@bizzi/protocol` (JSON Schema generated from them later) |
 | Transport | settled | WebSocket (client↔hub, node↔hub); local socket between the desktop UI and its node |
 | Storage | settled | SQLite (`node:sqlite` / better-sqlite3) + Drizzle on every install; Postgres optional for a team hub |
 | Replication | settled | single-writer event logs, HLC last-writer-wins config, append-only knowledge |
@@ -116,7 +116,7 @@ Why: resumability is the hard part; seq + cursor replay make disconnects a non-e
 
 ## D2. Protocol package
 
-`@bizzi/protocol`: TypeBox schemas → static TS types + JSON Schema. The JSON Schema is the contract for any non-TS client (Dart types via `quicktype` if the UI is Flutter).
+`@bizzi/protocol`: plain, erasable TypeScript types (run directly by Node, no build step) plus small helpers (ids, envelope guards, `BizziError`). It also holds the internal adapter contract (`adapter.ts`). JSON Schema for non-TS clients will be generated from the types (e.g. `ts-json-schema-generator`); runtime validation at the server boundary can move to schemas then. TypeBox was the original plan; deferred to keep M0 simple.
 
 ## D3. Storage
 
@@ -183,25 +183,30 @@ On Linux through the compose `dind` sidecar, never the host socket; Docker Deskt
 - Remote Mac: `bizzi serve` + launchd, signed with a stable identity (macOS privacy grants depend on the signature).
 - Linux: container images + compose file.
 - Phones: Capacitor builds (Android from any OS; iOS from the Mac: Simulator now, TestFlight once there's a developer account).
-- Monorepo: pnpm workspaces.
+- Monorepo: npm workspaces (no extra tooling; Node 26 runs the TypeScript packages directly).
 
 ## Repo layout
+
+Authoritative list: [AGENTS.md](../AGENTS.md).
 
 ```
 bizzi/
   packages/
-    protocol/     # TypeBox schemas, envelope, events, capabilities (+ JSON Schema export)
-    core/         # node + hub roles: sessions, event log, outbox, replication, provisioning
-    adapters/     # claude/ codex/ opencode/ pty/ acp/
-    knowledge/    # rules + memory store, resolver, policy engine, MCP server, projection
-    client/       # protocol client + normalized store (no UI deps)
-    ui/           # React app shared by every client
+    protocol/          # wire types (envelope, methods, events, model, capabilities) + adapter contract
+    core/              # node role (hub role later): sessions, event store, client-protocol server
+    adapter-claude/    # Claude Agent SDK
+    adapter-codex/     # codex app-server
+    adapter-opencode/  # opencode serve
+    pty/               # node-pty terminal host + terminal-mode adapters (agy, shell, any TUI)
+    knowledge/         # rules + memory store, resolver, policy engine, MCP server, projection
+    provision/         # ADE detection, install/login recipes (recipes/ inside)
+    client/            # protocol client + normalized store (no UI deps)
+    ui/                # React app shared by every client
   apps/
-    cli/          # `bizzi`: serve [--hub], pair, status, attach
-    desktop/      # Electron shell; supervises the core process
-    mobile/       # Capacitor shell
-  recipes/        # ADE install/login recipes (data)
-  deploy/         # Dockerfiles, docker-compose.yml, SWAG/Caddy examples
+    cli/               # `bizzi`: serve, status (pair, attach later)
+    desktop/           # Electron shell; supervises the core process
+    mobile/            # Capacitor shell (later)
+  deploy/              # Dockerfiles, docker-compose.yml, SWAG/Caddy examples
   docs/
 ```
 
