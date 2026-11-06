@@ -62,6 +62,8 @@ describe('discovery and capabilities', () => {
     assert.equal(OPENCODE_CAPABILITIES.approvals, 'per-tool');
     assert.equal(OPENCODE_CAPABILITIES.mcpInjection, 'launch');
     assert.equal(OPENCODE_CAPABILITIES.instructionInjection, 'system-append');
+    assert.equal(OPENCODE_CAPABILITIES.fork, true);
+    assert.equal(OPENCODE_CAPABILITIES.questions, true);
   });
 });
 
@@ -84,7 +86,6 @@ describe('session start', () => {
       agent: 'plan',
       model: { providerID: 'fake', id: 'fake-model', variant: 'high' },
       metadata: { bizziSessionId: 's_test' },
-      permissions: [{ action: 'question', resource: '*', effect: 'deny' }],
     });
     const ref = s.agentSessionRef()!;
     assert.match(ref, /^ses_/);

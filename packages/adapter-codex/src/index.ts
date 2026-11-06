@@ -15,4 +15,5 @@ export {
   type PermissionModeName,
 } from './permissions.ts';
 export { codexVersion, findCodex } from './locate.ts';
+export { elicitationQuestions, elicitationResponse, userInputQuestions, userInputResponse } from './questions.ts';
 export { JsonRpcConnection, RpcClosedError, RpcError, type RpcHandlers, type RpcId } from './rpc.ts';

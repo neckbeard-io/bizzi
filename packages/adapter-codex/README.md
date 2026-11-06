@@ -50,6 +50,8 @@ On `set()`, the sandbox is sent as a full `SandboxPolicy`, because `turn/start` 
 | handshake | `initialize` (`clientInfo.name = "bizzi"`), then `initialized` |
 | new session | `thread/start {cwd, model, approvalPolicy, sandbox, config, developerInstructions}`. The thread id becomes `agentSessionRef` and is reported via `session.info`. |
 | resume | `thread/resume {threadId: resumeRef, …same overrides, excludeTurns: true}`. An unknown thread fails with `not_found`. |
+| fork | `StartSessionOptions.fork` with `resumeRef`: `thread/fork {threadId: resumeRef, …same overrides, excludeTurns: true}`. The new thread id becomes `agentSessionRef`. An unknown thread fails with `not_found`. `lastTurnId` (fork at a turn) isn't exposed. |
+| dispose | `AgentAdapter.dispose()` stops every session the adapter started. |
 | turns | `turn/start` per bizzi turn. Notifications that arrive before the `turn/start` response (and so before the turn id is known) are buffered, then replayed. |
 | steer | `turn/steer {expectedTurnId}` |
 | interrupt | `turn/interrupt`. If it's called before the turn id is known, it is sent once the id arrives. If Codex never confirms, the adapter falls back locally. |
@@ -72,8 +74,8 @@ On `set()`, the sandbox is sent as a full `SandboxPolicy`, because `turn/start` 
 | `mcpToolCall` | `tool` kind `mcp`. `item/mcpToolCall/progress` becomes `tool.updated {progress}`. |
 | `webSearch`, `imageView`, `dynamicToolCall`, `collabAgentToolCall` | `tool` with kind `web`, `read`, `other`, `task` respectively |
 | `turn/plan/updated` | `plan.updated` |
-| `thread/tokenUsage/updated` | `usage.updated` (thread total, with `contextWindow`) |
-| `turn/completed` | `turn.completed {stopReason, usage, error}`. Status maps completed to `end_turn`, interrupted to `interrupted`, failed to `error`. `usage` is the change in the thread total during the turn. |
+| `thread/tokenUsage/updated` | `usage.updated` (cumulative thread total, with `contextWindow`) |
+| `turn/completed` | `turn.completed {stopReason, usage, error}`. Status maps completed to `end_turn`, interrupted to `interrupted`, failed to `error`. `usage` is per turn: the change in the thread total during the turn. On the first turn after a resume or fork the total before the turn is unknown (it includes inherited history), so `usage` is the sum of the per-request `last` usage reported during the turn. |
 | `error` notification | `error {message, code: codexErrorInfo, fatal: false}` |
 | `thread/name/updated`, `model/rerouted` | `session.info {title}`, `session.info {model}` |
 | anything else (e.g. `mcpServer/startupStatus/updated`, `warning`) | `agent.raw` |
@@ -89,7 +91,22 @@ Usage is normalized so that `inputTokens` excludes cached tokens and `cacheReadT
 | `item/permissions/requestApproval` | `other` | allow grants the requested profile for the turn, allow_always grants it for the session, deny grants nothing |
 | legacy `execCommandApproval` / `applyPatchApproval` | `shell` / `edit` | `approved` / `approved_for_session` / `denied {rejection: message}` |
 
-Approvals are not editable. If Codex withdraws a request (`serverRequest/resolved` before bizzi answers), the adapter emits `approval.resolved {decision: 'deny', by: 'agent'}`. Approvals still pending when a turn ends or the session stops are answered `cancel`. `mcpServer/elicitation/request` is declined automatically. Other server requests (`item/tool/requestUserInput`, `item/tool/call`, auth refresh, attestation) get a JSON-RPC error and are surfaced as `agent.raw`.
+Approvals are not editable. If Codex withdraws a request (`serverRequest/resolved` before bizzi answers), the adapter emits `approval.resolved {decision: 'cancelled', by: 'agent'}`. Approvals still pending when a turn is interrupted or ends, the session stops, or the process dies are answered `cancel` (when the process is still alive) and reported as `approval.resolved {decision: 'cancelled', by: 'bizzi'}`. Other server requests (`item/tool/call`, auth refresh, attestation) get a JSON-RPC error and are surfaced as `agent.raw`.
+
+### Questions (`capabilities.questions = true`)
+
+Both question-shaped server requests become `question.asked {questionId, text, options, questions}`, followed by `session.status {status: 'waiting_input', prompt: 'input'}`. `respondQuestion` replies to the request and emits `question.resolved {questionId, answers}`, or `{questionId, cancelled: true}` when `answers` is undefined (declined). When the last pending question resolves, `session.status` becomes `waiting_approval` if approvals are pending, else `running` during a turn or `idle` between turns (a question can arrive between turns, e.g. an MCP elicitation). Nothing is emitted once the session is stopping, stopped or dead.
+
+**`experimentalApi` stays `false`.** Both requests are part of Codex's stable app-server API: `codex app-server generate-ts` emits them without `--experimental` (checked against 0.167.0). The "EXPERIMENTAL" note on the `requestUserInput` types describes the feature, not a capability gate. Opting in would only add things the adapter doesn't handle (the `currentTime/read` server request, an `openai/userVerification` elicitation mode, and extra experimental fields), so the adapter doesn't. Whether a given Codex model or collaboration mode actually calls `request_user_input` hasn't been verified live (no Codex login here). Elicitation modes other than form and URL fall back to an Accept / Decline confirmation.
+
+| server request | questions | reply |
+|---|---|---|
+| `item/tool/requestUserInput` | one `QuestionItem` per Codex question: `id`, `question` → `text`, `header`, `options` (label + description); `allowText` when `isOther` or there are no options | `{answers: {[id]: {answers: string[]}}}`; declined → `{answers: {}}` |
+| `mcpServer/elicitation/request`, form mode | `text` is the server's message; one `QuestionItem` per schema property (`id` = property name, text = description / title, "(optional)" when not required). Enums (`enum`, `enumNames`, `oneOf` titles) → options; arrays of enums → `multiSelect`; booleans → Yes / No; strings and numbers → `allowText` | `{action: 'accept', content}` with values converted back (option label → enum value, Yes/No → boolean, number parsed; bad numbers reject with `bad_request`; empty answers omitted). Declined → `decline` |
+| same, form with no properties | one question with Accept / Decline | `accept {content: {}}` / `decline` |
+| same, URL mode | one question with the message + URL and Done / Cancel | Done → `accept`, Cancel → `decline` |
+
+Questions pending when a turn is interrupted or ends, the session stops, or the process dies are answered (empty answers / elicitation `cancel`) and reported as `question.resolved {cancelled: true}`. A request Codex withdraws (`serverRequest/resolved`, e.g. a non-blocking question that auto-resolved) resolves as cancelled. `isSecret` isn't signalled to clients (the protocol has no field for it).
 
 ### Process lifecycle
 
@@ -103,10 +120,9 @@ If the process exits unexpectedly, the adapter emits these events in order:
 
 ## Not supported (yet)
 
-- fork (`thread/fork` exists, but the adapter contract has no fork operation)
+- fork at a given turn (`thread/fork lastTurnId`)
 - plan mode (`collaborationMode` is experimental)
 - slash commands / skills listing
-- answering `requestUserInput` questions (the contract has no answer path)
 - editable approvals
 - subagent threads (their notifications are ignored, and collab tool calls appear as `task` tools)
 - a live model list (`model/list` exists, but `models` is `'dynamic'`)
@@ -115,6 +131,6 @@ If the process exits unexpectedly, the adapter emits these events in order:
 
 `npm test -w @bizzi/adapter-codex` runs offline:
 
-- `test/fake-app-server.ts` is a scripted JSON-RPC server. It covers handshake, streaming, early notifications, approvals, interrupt, steer, `set()`, crash, and resume.
+- `test/fake-app-server.ts` is a scripted JSON-RPC server. It covers handshake, streaming, early notifications, approvals, interrupt, steer, `set()`, crash, resume and fork, `requestUserInput` and elicitation questions (answered, declined, withdrawn, cancelled by interrupt / stop / crash), per-turn vs cumulative usage, and `dispose()` (`test/adapter.test.ts`, `test/v1-1.test.ts`).
 - `test/rpc.test.ts` covers framing.
 - `test/real-binary.test.ts` runs a handshake against the real devDependency binary with a temporary `CODEX_HOME`. It needs no login, and it skips if the binary is unavailable.

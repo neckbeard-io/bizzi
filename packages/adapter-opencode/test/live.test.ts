@@ -112,4 +112,62 @@ describe('live opencode', { skip: !LIVE && 'set BIZZI_LIVE=1' }, () => {
     await s.stop();
     console.log('event types:', [...new Set(rec.types())].join(', '));
   });
+
+  test('question round-trip via the question tool', { timeout: 300_000 }, async (t) => {
+    if (!canPrompt) return t.skip('no provider configured');
+    // Models don't always reach for the tool; two tries, then skip rather than fail.
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      const rec = new Recorder();
+      const s = (await adapter.start({ sessionId: `s_live_q${attempt}`, mode: 'structured', cwd: root, ...(model ? { model } : {}) }, rec.emit, ctx)) as OpenCodeSession;
+      try {
+        await s.send('tq', [{ type: 'text', text: 'Use your question tool to ask me: tea or coffee? Then reply with just my answer.' }]);
+        const first = await Promise.race([
+          rec.waitFor('question.asked', undefined, 120_000).then((q) => ({ q })),
+          rec.waitFor('turn.completed', undefined, 120_000).then(() => ({ q: undefined })),
+        ]);
+        if (!first.q) {
+          console.log(`attempt ${attempt}: model answered without the question tool`);
+          continue;
+        }
+        const q = first.q;
+        console.log('question:', JSON.stringify(q));
+        const item = q.questions?.[0];
+        assert.ok(item, 'questions[] carried');
+        const pick = item.options?.find((o) => /coffee/i.test(o.label))?.label ?? 'Coffee';
+        await s.respondQuestion!(q.questionId, { [item.id]: pick });
+        const done = await rec.waitFor('turn.completed', undefined, 120_000);
+        assert.equal(done.stopReason, 'end_turn');
+        assert.deepEqual(rec.of('question.resolved'), [{ questionId: q.questionId, answers: { [item.id]: pick } }]);
+        const reply = rec.of('message.completed').map((m) => m.text).join(' ');
+        console.log('reply:', reply.trim());
+        assert.match(reply, /coffee/i);
+        return;
+      } finally {
+        await s.stop();
+      }
+    }
+    t.skip('model did not use the question tool in 2 attempts');
+  });
+
+  test('fork carries the conversation into a new session', { timeout: 300_000 }, async (t) => {
+    if (!canPrompt) return t.skip('no provider configured');
+    const rec = new Recorder();
+    const a = await adapter.start({ sessionId: 's_live_f', mode: 'structured', cwd: root, ...(model ? { model } : {}) }, rec.emit, ctx);
+    await a.send('t1', [{ type: 'text', text: 'Remember the code word: pelican. Reply with the single word ok.' }]);
+    assert.equal((await rec.waitFor('turn.completed', undefined, 120_000)).stopReason, 'end_turn');
+    const src = a.agentSessionRef()!;
+    await a.stop();
+    const rec2 = new Recorder();
+    const f = await adapter.start({ sessionId: 's_live_f2', mode: 'structured', cwd: root, resumeRef: src, fork: true }, rec2.emit, ctx);
+    assert.notEqual(f.agentSessionRef(), src);
+    await f.send('t2', [{ type: 'text', text: 'What was the code word? Reply with that single word.' }]);
+    const done = await rec2.waitFor('turn.completed', undefined, 120_000);
+    assert.equal(done.stopReason, 'end_turn');
+    const reply = rec2.of('message.completed').map((m) => m.text).join(' ');
+    console.log('fork:', JSON.stringify({ source: src, fork: f.agentSessionRef(), reply: reply.trim() }));
+    assert.match(reply, /pelican/i);
+    const forkInfo = await adapter.server.client!.getSession(f.agentSessionRef()!);
+    assert.equal(forkInfo.fork?.sessionID, src);
+    await f.stop();
+  });
 });

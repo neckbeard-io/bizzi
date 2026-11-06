@@ -44,6 +44,8 @@ test('createAdapters returns the claude adapter with structured-only capabilitie
   assert.equal(caps.editableApprovals, true);
   assert.equal(caps.steer, true);
   assert.equal(caps.usage, 'tokens+cost');
+  assert.equal(caps.questions, true);
+  assert.equal(caps.fork, true);
   assert.deepEqual(caps.permissionModes, ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk', 'auto']);
   assert.deepEqual(a.capabilities('terminal').modes, []);
 });
@@ -90,7 +92,7 @@ test('launch options: preset system prompt + append, MCP, settings, resume/fork,
   assert.equal(resumed.fq.options.sessionId, undefined);
   assert.equal(resumed.session.agentSessionRef(), 'abc');
 
-  const forked = await setup(() => {}, { resumeRef: 'abc', fork: true } as Partial<StartSessionOptions>);
+  const forked = await setup(() => {}, { resumeRef: 'abc', fork: true });
   assert.equal(forked.fq.options.forkSession, true);
   assert.notEqual(forked.session.agentSessionRef(), 'abc');
   assert.equal(forked.fq.options.sessionId, forked.session.agentSessionRef());
@@ -295,25 +297,6 @@ test('approval allow_always applies SDK suggestions; deny marks the tool denied'
   await session.stop();
 });
 
-test('AskUserQuestion: answer via message fills answers', async () => {
-  let decision: unknown;
-  const input = { questions: [{ question: 'Which DB?', header: 'DB', multiSelect: false, options: [{ label: 'pg', description: '' }, { label: 'sqlite', description: '' }] }] };
-  const { session, c } = await setup(async (fq, u) => {
-    decision = await fq.ask('AskUserQuestion', input, { toolUseID: 'q1' });
-    fq.emit(result([u.uuid!], 0));
-  });
-  await session.send('t', [{ type: 'text', text: 'x' }]);
-  await waitFor(() => c.of('approval.requested').length === 1);
-  const req = c.of('approval.requested')[0]!;
-  assert.equal(req.title, 'Which DB?');
-  assert.equal(req.description, 'Which DB? [pg / sqlite]');
-  assert.deepEqual(req.options, ['allow', 'deny']);
-  await session.respondApproval(req.approvalId, { decision: 'allow', message: 'sqlite' });
-  await waitFor(() => c.of('turn.completed').length === 1);
-  assert.deepEqual(decision, { behavior: 'allow', updatedInput: { ...input, answers: { 'Which DB?': 'sqlite' } } });
-  await session.stop();
-});
-
 test('interrupt: pending approval denied, turn completes as interrupted', async () => {
   let decision: unknown;
   const { session, c, fq } = await setup(async (fq) => {
@@ -333,8 +316,8 @@ test('interrupt: pending approval denied, turn completes as interrupted', async 
   await session.interrupt();
   await waitFor(() => c.of('turn.completed').length === 1);
   assert.deepEqual(decision, { behavior: 'deny', message: 'Interrupted by the user.', interrupt: true });
-  assert.deepEqual(c.of('approval.resolved').map((r) => [r.decision, r.by]), [['deny', 'bizzi']]);
-  assert.deepEqual(c.of('tool.completed'), [{ toolId: 'b1', status: 'denied', error: 'The user doesn\'t want to proceed' }]);
+  assert.deepEqual(c.of('approval.resolved').map((r) => [r.decision, r.by]), [['cancelled', 'bizzi']]);
+  assert.deepEqual(c.of('tool.completed'), [{ toolId: 'b1', status: 'cancelled', error: 'The user doesn\'t want to proceed' }]);
   const done = c.of('turn.completed')[0]!;
   assert.equal(done.turnId, 't');
   assert.equal(done.stopReason, 'interrupted');

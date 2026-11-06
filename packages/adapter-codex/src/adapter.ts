@@ -57,7 +57,7 @@ export const CODEX_STRUCTURED_CAPABILITIES: AgentCapabilities = {
   streaming: 'token',
   steer: true,
   interrupt: true,
-  fork: false,
+  fork: true,
   resume: true,
   resumeAfterNodeRestart: true,
   approvals: 'per-command',
@@ -76,12 +76,14 @@ export const CODEX_STRUCTURED_CAPABILITIES: AgentCapabilities = {
   instructionInjection: 'system-append',
   usage: 'tokens',
   terminal: false,
+  questions: true,
 };
 
 export class CodexAdapter implements AgentAdapter {
   readonly agent = 'codex' as const;
   readonly #opts: CodexAdapterOptions;
   #resolvedPath: string | undefined;
+  readonly #sessions = new Set<CodexSession>();
 
   constructor(opts: CodexAdapterOptions = {}) {
     this.#opts = opts;
@@ -181,7 +183,7 @@ export class CodexAdapter implements AgentAdapter {
     const path = await this.#codexPath();
     if (!path) throw new BizziError('agent_unavailable', 'codex executable not found');
     const logger = ctx.logger.child({ agent: 'codex', sessionId: opts.sessionId });
-    return CodexSession.start(
+    const session = await CodexSession.start(
       {
         spawn: {
           command: path,
@@ -197,6 +199,16 @@ export class CodexAdapter implements AgentAdapter {
       emit,
       logger,
     );
+    this.#sessions.add(session);
+    void session.exited.then(() => this.#sessions.delete(session));
+    return session;
+  }
+
+  /** Stop every session this adapter started (node shutdown). Idempotent. */
+  async dispose(): Promise<void> {
+    const sessions = [...this.#sessions];
+    this.#sessions.clear();
+    await Promise.allSettled(sessions.map((s) => s.stop()));
   }
 }
 

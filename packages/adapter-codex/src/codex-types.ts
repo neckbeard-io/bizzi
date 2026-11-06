@@ -32,6 +32,11 @@ export type { FileChangeApprovalDecision } from './generated/v2/FileChangeApprov
 export type { PermissionsRequestApprovalParams } from './generated/v2/PermissionsRequestApprovalParams.ts';
 export type { PermissionsRequestApprovalResponse } from './generated/v2/PermissionsRequestApprovalResponse.ts';
 export type { McpServerElicitationRequestResponse } from './generated/v2/McpServerElicitationRequestResponse.ts';
+export type { McpServerElicitationRequestParams } from './generated/v2/McpServerElicitationRequestParams.ts';
+export type { ToolRequestUserInputParams } from './generated/v2/ToolRequestUserInputParams.ts';
+export type { ToolRequestUserInputResponse } from './generated/v2/ToolRequestUserInputResponse.ts';
+export type { ThreadForkParams } from './generated/v2/ThreadForkParams.ts';
+export type { ThreadForkResponse } from './generated/v2/ThreadForkResponse.ts';
 
 import type { ServerNotification } from './generated/ServerNotification.ts';
 import type { ServerRequest } from './generated/ServerRequest.ts';

@@ -14,7 +14,7 @@ import {
   type StartSessionOptions,
 } from '@bizzi/protocol';
 import { OpenCodeHttpError, type OpenCodeClient } from './client.ts';
-import { formatModel, parseModel } from './mapping.ts';
+import { formatModel, parseModel, usageOf } from './mapping.ts';
 import { probeOpenCode } from './probe.ts';
 import { OpenCodeServer } from './server.ts';
 import { OpenCodeSession } from './session.ts';
@@ -40,8 +40,8 @@ export interface OpenCodeAdapterOptions {
   /** Extra permission rules attached to every session created by bizzi (evaluated after config). */
   permissions?: PermissionRule[];
   /**
-   * Let the agent call OpenCode's `question` tool. bizzi can display but not answer questions
-   * (no protocol method), so it is denied by default to avoid turns blocking forever.
+   * Let the agent call OpenCode's `question` tool (default true). Questions surface as
+   * `question.asked` and are answered through `respondQuestion`. `false` adds a deny rule.
    */
   allowQuestions?: boolean;
   /** Stop the private server this long after the last session stops (default 10 min; 0 = never). */
@@ -77,7 +77,7 @@ export const OPENCODE_CAPABILITIES: AgentCapabilities = {
   streaming: 'token',
   steer: true,
   interrupt: true,
-  fork: false,
+  fork: true,
   resume: true,
   resumeAfterNodeRestart: true,
   approvals: 'per-tool',
@@ -96,6 +96,7 @@ export const OPENCODE_CAPABILITIES: AgentCapabilities = {
   instructionInjection: 'system-append',
   usage: 'tokens+cost',
   terminal: false,
+  questions: true,
 };
 
 /** Runtime MCP registrations, shared per (directory, name) between sessions. */
@@ -211,21 +212,32 @@ export class OpenCodeAdapter implements AgentAdapter {
       throw new BizziError('bad_request', String(err instanceof Error ? err.message : err));
     }
 
+    const permissions = [...(this.options.permissions ?? [])];
+    if (this.options.allowQuestions === false) permissions.push({ action: 'question', resource: '*', effect: 'deny' });
+
     let info: SessionInfo;
     if (opts.resumeRef) {
-      try {
-        info = await client.getSession(opts.resumeRef);
-      } catch (err) {
+      const notFound = (err: unknown): never => {
         if (err instanceof OpenCodeHttpError && (err.status === 404 || err.status === 400)) {
           throw new BizziError('not_found', `OpenCode session ${opts.resumeRef} not found`);
         }
         throw err;
+      };
+      info = await client.getSession(opts.resumeRef).catch(notFound);
+      if (opts.fork) {
+        // A new OpenCode session with a copy of the conversation. The fork keeps location and
+        // model but not the agent or the session's permission rules, so carry those over.
+        const source = info;
+        info = await client.forkSession(source.id).catch(notFound);
+        if (permissions.length) await client.updateSession(info.id, { permissions });
+        const agent = opts.permissionMode ?? source.agent;
+        if (agent && agent !== info.agent) await client.switchAgent(info.id, agent);
+        info = { ...info, agent, model: info.model ?? source.model };
+      } else if (opts.permissionMode && opts.permissionMode !== info.agent) {
+        await client.switchAgent(info.id, opts.permissionMode);
       }
-      if (opts.permissionMode && opts.permissionMode !== info.agent) await client.switchAgent(info.id, opts.permissionMode);
       if (model) await client.switchModel(info.id, model);
     } else {
-      const permissions = [...(this.options.permissions ?? [])];
-      if (!this.options.allowQuestions) permissions.push({ action: 'question', resource: '*', effect: 'deny' });
       info = await client.createSession({
         location: { directory },
         agent: opts.permissionMode ?? this.options.defaultAgent,
@@ -267,6 +279,7 @@ export class OpenCodeAdapter implements AgentAdapter {
       contextWindow,
       reapply,
       onStop,
+      initialUsage: info.cost || info.tokens?.input || info.tokens?.output ? usageOf(info.tokens, info.cost) : undefined,
       interruptFallbackMs: this.options.interruptFallbackMs ?? 5_000,
     });
     this.#sessions.add(session);
@@ -295,7 +308,12 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (agent) sessionInfo.permissionMode = agent;
     if (info.title) sessionInfo.title = info.title;
     emit({ type: 'session.info', data: sessionInfo });
-    log.log('info', 'opencode session started', { ref, directory, resumed: Boolean(opts.resumeRef) });
+    if (info.cost || info.tokens?.input || info.tokens?.output) {
+      const usage = usageOf(info.tokens, info.cost);
+      if (contextWindow) usage.contextWindow = contextWindow;
+      emit({ type: 'usage.updated', data: usage });
+    }
+    log.log('info', 'opencode session started', { ref, directory, resumed: Boolean(opts.resumeRef), forkedFrom: opts.fork ? opts.resumeRef : undefined });
     return session;
   }
 

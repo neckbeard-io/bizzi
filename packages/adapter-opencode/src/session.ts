@@ -9,6 +9,7 @@ import {
   type EmitFn,
   type InputBlock,
   type Logger,
+  type QuestionAnswers,
   type StopReason,
   type ToolKind,
   type Usage,
@@ -18,17 +19,30 @@ import {
   addTokens,
   approvalKind,
   decisionToReply,
+  formQuestion,
   formatModel,
+  fromFormAnswer,
   isTodoTool,
   parseModel,
   replyToDecision,
+  sumUsage,
+  toFormAnswer,
   todoItems,
   toolKind,
   toolOutput,
   toolTitle,
+  usageOf,
 } from './mapping.ts';
 import type { OpenCodeServer, ServerListener } from './server.ts';
-import { dataOf, eventSessionId, type MessageInfo, type ModelRef, type OcEvent, type PromptFileAttachment } from './types.ts';
+import {
+  dataOf,
+  eventSessionId,
+  type FormInfo,
+  type MessageInfo,
+  type ModelRef,
+  type OcEvent,
+  type PromptFileAttachment,
+} from './types.ts';
 
 interface TurnState {
   id: string;
@@ -59,6 +73,12 @@ interface ToolState {
   files?: { file: string; patch?: string; status?: string }[];
 }
 
+/** Cancelled requests to settle on the server: [sessionID, id]. */
+interface Pending {
+  approvals: [string, string][];
+  questions: [string, string][];
+}
+
 interface ChildState {
   parentToolId?: string;
   agent?: string;
@@ -76,6 +96,8 @@ export interface SessionInit {
   model?: ModelRef;
   agent?: string;
   contextWindow?: number;
+  /** Session-cumulative usage when the session was opened (resume). */
+  initialUsage?: Usage;
   /** Re-applied after a server crash/restart (runtime state is lost with the process). */
   reapply: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -84,7 +106,6 @@ export interface SessionInit {
 
 const IGNORED = new Set([
   'session.created',
-  'session.usage.updated',
   'session.step.streamed',
   'session.tool.input.delta',
   'session.tool.input.ended',
@@ -100,8 +121,6 @@ const IGNORED = new Set([
   'shell.created',
   'shell.exited',
   'shell.deleted',
-  'form.replied',
-  'form.cancelled',
 ]);
 
 export class OpenCodeSession implements AdapterSession, ServerListener {
@@ -122,6 +141,11 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
   #tools = new Map<string, ToolState>();
   #children = new Map<string, ChildState>();
   #approvals = new Map<string, { sessionID: string; resolved: boolean }>();
+  /** Pending forms (question tool, elicitation), keyed by form id = bizzi questionId. */
+  #questions = new Map<string, { sessionID: string; form: FormInfo; resolved: boolean }>();
+  /** Session-cumulative usage: this session plus every subagent session seen. */
+  #ownUsage: Usage = {};
+  #childUsage = new Map<string, Usage>();
   #needsReconcile = false;
   #crashed = false;
   #stopped = false;
@@ -136,6 +160,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     this.#model = init.model;
     this.#agent = init.agent;
     this.#contextWindow = init.contextWindow;
+    if (init.initialUsage) this.#ownUsage = init.initialUsage;
     this.#reapply = init.reapply;
     this.#onStop = init.onStop;
     this.#interruptFallbackMs = init.interruptFallbackMs;
@@ -185,7 +210,12 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
 
   async interrupt(): Promise<void> {
     const turn = this.#turn;
-    if (!turn) return;
+    // Pending approvals/questions end as cancelled now; the server cancels them too.
+    const pending = this.#cancelPending();
+    if (!turn) {
+      await this.#rejectOnServer(pending);
+      return;
+    }
     turn.interruptRequested = true;
     let interrupted = false;
     try {
@@ -194,6 +224,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     } catch (err) {
       this.#log.log('warn', 'opencode interrupt failed', { err: String(err) });
     }
+    await this.#rejectOnServer(pending);
     if (this.#turn !== turn) return;
     if (!interrupted && !turn.executing) {
       // Nothing running server-side (yet / any more): close the turn ourselves.
@@ -226,6 +257,28 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
       ap.resolved = true;
       this.#emit({ type: 'approval.resolved', data: { approvalId, decision: decision.decision } });
     }
+  }
+
+  async respondQuestion(questionId: string, answers: QuestionAnswers | undefined): Promise<void> {
+    const q = this.#questions.get(questionId);
+    if (!q) throw new BizziError('not_found', `unknown question ${questionId}`);
+    if (q.resolved) return;
+    const answer = answers === undefined ? undefined : toFormAnswer(q.form, answers);
+    const client = await this.#client();
+    try {
+      if (answer) await client.replyForm(q.sessionID, questionId, answer);
+      else await client.cancelForm(q.sessionID, questionId, 'The user declined to answer.');
+    } catch (err) {
+      if (err instanceof OpenCodeHttpError && (err.status === 404 || err.status === 409)) {
+        throw new BizziError('not_found', `question ${questionId} is no longer pending`);
+      }
+      if (err instanceof OpenCodeHttpError && err.status === 400) {
+        throw new BizziError('bad_request', `OpenCode rejected the answer: ${err.message}`);
+      }
+      throw err;
+    }
+    // The server's form.replied / form.cancelled may already have resolved it.
+    this.#resolveQuestion(questionId, answers === undefined ? { cancelled: true } : { answers });
   }
 
   async set(opts: { model?: string; permissionMode?: string; effort?: string }): Promise<void> {
@@ -269,11 +322,13 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
   async stop(): Promise<void> {
     if (this.#stopped) return;
     this.#stopped = true;
+    const pending = this.#cancelPending();
     if (this.#turn) {
       const client = this.#server.client;
       if (client) await client.interrupt(this.#ref).catch(() => undefined);
       this.#completeTurn('interrupted');
     }
+    await this.#rejectOnServer(pending);
     this.#unsubscribe();
     await this.#onStop();
   }
@@ -284,6 +339,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     if (this.#stopped) return;
     if (info.crashed) {
       this.#crashed = true;
+      this.#cancelPending(); // the process is gone, and with it every pending request
       if (this.#turn) {
         this.#emit({ type: 'error', data: { message: info.reason, code: 'server_exited' } });
         this.#completeTurn('error', info.reason);
@@ -301,6 +357,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     }
     if (this.#needsReconcile) {
       this.#needsReconcile = false;
+      void this.#syncForms().catch((err: unknown) => this.#log.log('warn', 'opencode form sync failed', { err: String(err) }));
       void this.#reconcile().catch((err: unknown) => this.#log.log('warn', 'opencode reconcile failed', { err: String(err) }));
     }
   }
@@ -397,15 +454,10 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
       case 'session.renamed':
         this.#emit({ type: 'session.info', data: { title: dataOf(ev, 'session.renamed').title } });
         return;
-      case 'form.created': {
-        const form = dataOf(ev, 'form.created').form;
-        const options = form.fields.flatMap((f) => f.options?.map((o) => o.label) ?? []);
-        const text = [form.title, ...form.fields.map((f) => f.title ?? f.description).filter(Boolean)].join('\n');
-        this.#emit({
-          type: 'question.asked',
-          data: options.length ? { questionId: form.id, text, options } : { questionId: form.id, text },
-        });
-        this.#emit({ type: 'agent.raw', data: { agent: 'opencode', payload: ev } });
+      case 'session.usage.updated': {
+        const d = dataOf(ev, 'session.usage.updated');
+        this.#ownUsage = usageOf(d.tokens, d.cost);
+        this.#emitUsage();
         return;
       }
       default:
@@ -431,6 +483,12 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
       case 'session.step.ended': {
         const d = dataOf(ev, 'session.step.ended');
         if (this.#turn) addTokens(this.#turn.usage, d.tokens, d.cost);
+        return;
+      }
+      case 'session.usage.updated': {
+        const d = dataOf(ev, 'session.usage.updated');
+        this.#childUsage.set(sid, usageOf(d.tokens, d.cost));
+        this.#emitUsage();
         return;
       }
       default:
@@ -523,6 +581,18 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
         });
         return true;
       }
+      case 'form.created':
+        this.#onForm(dataOf(ev, 'form.created').form);
+        return true;
+      case 'form.replied': {
+        const d = dataOf(ev, 'form.replied');
+        const q = this.#questions.get(d.id);
+        if (q) this.#resolveQuestion(d.id, d.answer ? { answers: fromFormAnswer(q.form, d.answer) } : {});
+        return true;
+      }
+      case 'form.cancelled':
+        this.#resolveQuestion(dataOf(ev, 'form.cancelled').id, { cancelled: true });
+        return true;
       case 'permission.replied': {
         const d = dataOf(ev, 'permission.replied');
         const ap = this.#approvals.get(d.requestID);
@@ -534,6 +604,76 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
       }
       default:
         return false;
+    }
+  }
+
+  // --- questions, cancellation, usage ---------------------------------------------------------
+
+  #onForm(form: FormInfo): void {
+    if (this.#questions.has(form.id)) return;
+    this.#questions.set(form.id, { sessionID: form.sessionID, form, resolved: false });
+    this.#emit({ type: 'question.asked', data: formQuestion(form) });
+    this.#emit({ type: 'session.status', data: { status: 'waiting_input', prompt: 'input' } });
+  }
+
+  #resolveQuestion(id: string, how: { answers?: QuestionAnswers; cancelled?: boolean }): void {
+    const q = this.#questions.get(id);
+    if (!q || q.resolved) return;
+    q.resolved = true;
+    this.#emit({ type: 'question.resolved', data: { questionId: id, ...how } });
+    // The last open question resolved: report what the session is back to.
+    if (this.#stopped || this.#crashed || [...this.#questions.values()].some((x) => !x.resolved)) return;
+    const approvals = [...this.#approvals.values()].some((a) => !a.resolved);
+    this.#emit({ type: 'session.status', data: { status: approvals ? 'waiting_approval' : this.#turn ? 'running' : 'idle' } });
+  }
+
+  /** Every unresolved approval / question ends as cancelled (turn ended, session stopped, server died). */
+  #cancelPending(): Pending {
+    const out: Pending = { approvals: [], questions: [] };
+    for (const [id, ap] of this.#approvals) {
+      if (ap.resolved) continue;
+      ap.resolved = true;
+      out.approvals.push([ap.sessionID, id]);
+      this.#emit({ type: 'approval.resolved', data: { approvalId: id, decision: 'cancelled', by: 'bizzi' } });
+    }
+    for (const [id, q] of this.#questions) {
+      if (q.resolved) continue;
+      q.resolved = true;
+      out.questions.push([q.sessionID, id]);
+      this.#emit({ type: 'question.resolved', data: { questionId: id, cancelled: true } });
+    }
+    return out;
+  }
+
+  /** Best effort: settle cancelled requests on the server too (an interrupt usually did already). */
+  async #rejectOnServer(p: Pending): Promise<void> {
+    if (!p.approvals.length && !p.questions.length) return;
+    const client = this.#server.client;
+    if (!client) return;
+    await Promise.all([
+      ...p.approvals.map(([sid, id]) => client.replyPermission(sid, id, 'reject', 'Cancelled.').catch(() => undefined)),
+      ...p.questions.map(([sid, id]) => client.cancelForm(sid, id, 'Cancelled.').catch(() => undefined)),
+    ]);
+  }
+
+  #emitUsage(): void {
+    const total = sumUsage([this.#ownUsage, ...this.#childUsage.values()]);
+    if (this.#contextWindow) total.contextWindow = this.#contextWindow;
+    this.#emit({ type: 'usage.updated', data: total });
+  }
+
+  /** After a stream gap: pick up forms created meanwhile and settle the ones answered elsewhere. */
+  async #syncForms(): Promise<void> {
+    const client = await this.#client();
+    const pending = await client.forms(this.#ref);
+    if (this.#stopped) return;
+    const live = new Set(pending.map((f) => f.id));
+    for (const form of pending) this.#onForm(form);
+    for (const [id, q] of this.#questions) {
+      if (q.resolved || live.has(id) || q.sessionID !== this.#ref) continue;
+      const detail = await client.form(q.sessionID, id).catch(() => undefined);
+      if (detail?.state.status === 'answered') this.#resolveQuestion(id, { answers: fromFormAnswer(q.form, detail.state.answer) });
+      else if (detail?.state.status !== 'pending') this.#resolveQuestion(id, { cancelled: true });
     }
   }
 
@@ -647,12 +787,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     for (const t of this.#tools.values()) {
       if (t.started && !t.completed) this.#finishTool(t, stopReason === 'interrupted' ? 'cancelled' : 'error', undefined, error);
     }
-    for (const [id, ap] of this.#approvals) {
-      if (!ap.resolved) {
-        ap.resolved = true;
-        this.#emit({ type: 'approval.resolved', data: { approvalId: id, decision: 'deny', by: 'opencode' } });
-      }
-    }
+    this.#cancelPending();
     for (const [id, child] of this.#children) {
       if (child.announced && !child.completed) {
         child.completed = true;
@@ -663,6 +798,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     this.#reasoning.clear();
     this.#tools.clear();
     this.#approvals.clear();
+    this.#questions.clear();
     this.#children.clear();
     const usage = turn.usage;
     if (this.#contextWindow) usage.contextWindow = this.#contextWindow;

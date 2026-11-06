@@ -3,7 +3,7 @@
 //
 // The official `@opencode-ai/sdk` (1.19.x) ships a `./v2` entry, but it was generated from an older
 // v2 snapshot: it still calls removed routes (`/api/health`, `/api/session/{id}/event`,
-// `/api/session/{id}/question/...`, `/api/session/{id}/wait`) and lacks newer ones (forms,
+// `/api/session/{id}/question/...`, `/api/session/{id}/wait`; 2.0.25 routes questions through forms) and lacks newer ones (forms,
 // instruction entries, runtime MCP). A hand-written client against the live spec is smaller and
 // fails loudly on drift instead of silently.
 
@@ -11,6 +11,9 @@ import { readSse } from './sse.ts';
 import type {
   AgentInfo,
   CreateSessionBody,
+  FormAnswer,
+  FormInfo,
+  FormState,
   InboxUser,
   LocationRef,
   McpConfig,
@@ -117,6 +120,12 @@ export class OpenCodeClient {
     return (await this.request<{ data: SessionInfo }>('GET', `/api/session/${encodeURIComponent(id)}`)).data;
   }
 
+  /** Copy a session's conversation into a new session (`before` = fork before that message). */
+  async forkSession(id: string, before?: string): Promise<SessionInfo> {
+    const body = before ? { before } : {};
+    return (await this.request<{ data: SessionInfo }>('POST', `/api/session/${encodeURIComponent(id)}/fork`, { body })).data;
+  }
+
   updateSession(id: string, body: { title?: string; permissions?: PermissionRule[] }): Promise<void> {
     return this.request('PATCH', `/api/session/${encodeURIComponent(id)}`, { body });
   }
@@ -154,6 +163,33 @@ export class OpenCodeClient {
       `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
       { body: message ? { decision, message } : { decision } },
     );
+  }
+
+  /** Pending forms of a session (question tool, MCP elicitation, …). */
+  async forms(sessionId: string): Promise<FormInfo[]> {
+    return (await this.request<{ data: FormInfo[] }>('GET', `/api/session/${encodeURIComponent(sessionId)}/form`)).data;
+  }
+
+  async form(sessionId: string, formId: string): Promise<FormInfo & { state: FormState }> {
+    return (
+      await this.request<{ data: FormInfo & { state: FormState } }>(
+        'GET',
+        `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}`,
+      )
+    ).data;
+  }
+
+  replyForm(sessionId: string, formId: string, answer: FormAnswer): Promise<void> {
+    return this.request('POST', `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}/reply`, {
+      body: { answer },
+    });
+  }
+
+  /** Cancel a pending form; `message` tells the asker why it wasn't answered. */
+  cancelForm(sessionId: string, formId: string, message?: string): Promise<void> {
+    return this.request('DELETE', `/api/session/${encodeURIComponent(sessionId)}/form/${encodeURIComponent(formId)}`, {
+      query: { message },
+    });
   }
 
   /** Experimental: API-managed instruction entries appended to the session's system context. */
