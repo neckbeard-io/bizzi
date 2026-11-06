@@ -44,6 +44,8 @@ The target was `node-pty@1.1.0`. It loads on Node 26 / macOS arm64, but it doesn
 
 Options that can't be mapped are logged and ignored.
 
+**`StartSessionOptions.command`:** when set (e.g. a login command from `agent.login`), the adapter runs that argv instead of the agent's TUI, with the same cwd, env and terminal size. `argv[0]` is looked up on the session env's `PATH` (then the usual bin dirs); a relative path containing `/` resolves against the cwd. The agent binary isn't needed, agent launch flags don't apply, and no native session id is assigned (with the supervisor the ref is `pty:<id>`). `probe()` is unaffected.
+
 **probe():** looks for the binary on `PATH`, then in `~/.local/bin`, `/opt/homebrew/bin` and `/usr/local/bin` (plus `~/.claude/local` for claude), and runs `--version` with a 5 s timeout. Auth is always `'unknown'`. If `--version` exits with 127, the binary is reported as not installed: that is how wrapper shims (e.g. cmux's `codex`/`agy`) behave when the real binary is missing. probe never throws.
 
 **send(turnId, input)** is best effort. It types the text blocks (file blocks become the path, or `@path` for claude), then presses Enter (`\r`) after `submitDelayMs` (80 ms). When the app has enabled bracketed paste (`ESC[?2004h`, which Claude's TUI does), the text is sent as a paste, so newlines don't submit early. The turn completes with `stopReason: 'end_turn'` once output goes idle. If the process exits first, it completes as `error`, or as `end_turn` when the exit code is 0. bizzi can't really know whether the agent has finished; "quiet for N seconds" is the proxy.
