@@ -90,3 +90,12 @@ test('inbox: consume clears only the link that was handled', () => {
   inbox.consume(c!);
   assert.equal(inbox.take(), null);
 });
+
+test('parsePairLink accepts the hub pairing URL from pairing.create', () => {
+  const link = parsePairLink('https://bizzi.example.com/#/pair?code=AB12-CD34');
+  assert.deepEqual(link, { url: 'https://bizzi.example.com/#/pair?code=AB12-CD34', hub: 'https://bizzi.example.com', code: 'AB12-CD34' });
+  assert.equal(parsePairLink('https://h.example/bizzi/index.html#/pair?code=X1')?.hub, 'https://h.example/bizzi');
+  assert.equal(parsePairLink('https://h.example/#/s/s_1'), null);
+  assert.equal(parsePairLink('https://h.example/#/pair'), null);
+  assert.equal(parsePairLink('https://u:p@h.example/#/pair?code=X1'), null);
+});

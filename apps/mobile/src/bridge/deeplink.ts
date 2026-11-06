@@ -1,4 +1,5 @@
-// Deep links: `bizzi://pair?hub=<hub URL>&code=<pairing code>`.
+// Pairing links: the app's deep link `bizzi://pair?hub=<hub URL>&code=<pairing code>`, and the hub's own
+// pairing URL `https://<hub>/#/pair?code=<pairing code>` (what the desktop's "Pair new device" QR encodes).
 //
 // Pure logic (no Capacitor imports) so it can be unit-tested under Node.
 
@@ -39,6 +40,7 @@ export function parsePairLink(input: string): PairLink | null {
   } catch {
     return null;
   }
+  if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parseHubPairUrl(url, parsed);
   if (parsed.protocol.toLowerCase() !== `${DEEP_LINK_SCHEME}:`) return null;
 
   // Non-special schemes: `bizzi://pair?x` → host "pair", pathname "";
@@ -53,6 +55,22 @@ export function parsePairLink(input: string): PairLink | null {
   if (!code || code.length > MAX_CODE_LENGTH || !/^[\w\s-]+$/.test(code)) return null;
 
   return { url, hub, code };
+}
+
+/**
+ * The hub's own pairing URL (`pairing.create` → `pairUrl`, also shown as a QR code on the desktop):
+ * `https://bizzi.example.com[/base]/#/pair?code=XXXX-XXXX`. The hub is the URL's origin + path.
+ */
+function parseHubPairUrl(url: string, parsed: URL): PairLink | null {
+  const hash = parsed.hash.replace(/^#\/?/, '');
+  const q = hash.indexOf('?');
+  const route = (q === -1 ? hash : hash.slice(0, q)).replace(/\/+$/, '').toLowerCase();
+  if (route !== 'pair' || q === -1) return null;
+  if (parsed.username || parsed.password) return null;
+  const code = (new URLSearchParams(hash.slice(q + 1)).get('code') ?? '').trim();
+  if (!code || code.length > MAX_CODE_LENGTH || !/^[\w\s-]+$/.test(code)) return null;
+  const path = parsed.pathname.replace(/\/index\.html$/, '').replace(/\/+$/, '');
+  return { url, hub: `${parsed.origin}${path}`, code };
 }
 
 function parseHubUrl(raw: string | null): string | null {
