@@ -1,0 +1,17 @@
+{
+  "name": "@bizzi/pty",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p .",
+    "test": "node --test --test-concurrency=1 test/*.test.ts"
+  },
+  "dependencies": {
+    "@bizzi/protocol": "*",
+    "@lydell/node-pty": "1.1.0"
+  }
+}
