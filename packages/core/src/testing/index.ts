@@ -12,7 +12,12 @@ export {
   type FakeTurnContext,
 } from './fake-adapter.ts';
 
-/** Same shape as real adapter packages: a structured fake Claude plus a terminal-mode fake shell. */
+/**
+ * Same shape as real adapter packages: a structured fake Claude plus a terminal-mode fake shell.
+ * They report `support: 'ok'` so the supported-version check (spec §7) doesn't judge their
+ * `0.0.0-fake` version against Claude's real ranges and refuse fake structured sessions.
+ */
 export function createAdapters(): AgentAdapter[] {
-  return [new FakeAdapter({ agent: 'claude' }), new FakeAdapter({ agent: 'shell', modes: ['terminal'] })];
+  const probe = { support: 'ok' } as const;
+  return [new FakeAdapter({ agent: 'claude', probe }), new FakeAdapter({ agent: 'shell', modes: ['terminal'], probe })];
 }

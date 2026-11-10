@@ -41,11 +41,18 @@ jobs:
 
       - run: npm run typecheck
 
+      # docs/protocol.schema.json must match packages/protocol (regenerate with `npm run schema`).
+      - run: npm run schema:check
+
       # No test spawns Electron or needs a display (desktop tests use a stub core over node:test),
       # so Linux runs without xvfb. The UI package's test also does a `vite build`.
       - run: npm test
 
       - run: npm run build:ui
+
+      # Offline end-to-end: a real hub and node (fake adapters) over the wire, a few seconds each.
+      - run: npm run smoke:hub
+      - run: npm run smoke:v12
 
   docker:
     name: docker (node image)

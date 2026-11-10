@@ -188,3 +188,12 @@ test('missing adapter packages are skipped', async () => {
   assert.deepEqual(adapters.map((a) => a.agent), ['claude', 'shell']);
   assert.ok(lines.some((l) => l.includes('adapter package not installed') && l.includes('"debug"')));
 });
+
+test('adapter packages get the data dir (e.g. @bizzi/pty reads <dataDir>/detectors.json)', async () => {
+  const logger = createJsonLogger({ level: 'error', write: () => {} });
+  const g = globalThis as { __bizziAdapterOptions?: unknown };
+  const recorder = 'export function createAdapters(o) { globalThis.__bizziAdapterOptions = o; return []; }';
+  await loadAdapters(logger, [`data:text/javascript,${encodeURIComponent(recorder)}`], { dataDir: '/srv/bizzi' });
+  assert.deepEqual(g.__bizziAdapterOptions, { dataDir: '/srv/bizzi' });
+  delete g.__bizziAdapterOptions;
+});

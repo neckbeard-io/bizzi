@@ -24,6 +24,7 @@ apps/
   desktop/           @bizzi/desktop       Electron shell
   mobile/            @bizzi/mobile        Capacitor shell (phones, client only)
 deploy/                                   Dockerfiles, docker-compose.yml, proxy examples
+scripts/                                  dev-desktop, smoke tests (smoke:hub, smoke:v12, smoke:live), gen-schema
 ```
 
 ## Conventions (Node packages)
@@ -41,7 +42,7 @@ deploy/                                   Dockerfiles, docker-compose.yml, proxy
 
 ## Contracts
 
-- **Wire protocol:** `packages/protocol/src/{envelope,methods,events,model,capabilities}.ts`. Changing it affects every package; keep changes additive.
+- **Wire protocol:** `packages/protocol/src/{envelope,methods,events,model,capabilities}.ts`. Changing it affects every package; keep changes additive. After a change run `npm run schema` and commit `docs/protocol.schema.json` (the published JSON Schema; `npm run check` fails when it is stale).
 - **Adapter contract:** `packages/protocol/src/adapter.ts`. The core owns `seq`/`ts` and turn bookkeeping; adapters only emit `SessionEventBody` values.
 - **Hub contract:** `packages/protocol/src/hub.ts` (HTTP pairing/auth, node link). The node link reuses the client protocol with roles flipped: the node dials out, the hub acts as a client.
 - **Node extensions:** `NodeExtension` in `@bizzi/core` lets packages such as `@bizzi/services` own groups of methods (`agent.*`, `knowledge.*`).
@@ -50,7 +51,7 @@ deploy/                                   Dockerfiles, docker-compose.yml, proxy
 ## Tooling notes
 
 - Don't drive the Playwright MCP tools in this environment (extension mode blocks). For UI screenshots use the desktop smoke mode: `BIZZI_UI_URL=… BIZZI_SMOKE_MS=8000 npm run dev -w @bizzi/desktop` writes `<data dir>/smoke.png`.
-- Fresh clone: `npm run setup` (strict install + fetches the Electron binary, which Electron 45 otherwise downloads on first use). `npm run check` = typecheck + tests + UI build. Install scripts are allow-listed in the root `package.json` (`allowScripts`); CI fails on unreviewed ones. See CONTRIBUTING.md.
+- Fresh clone: `npm run setup` (strict install + fetches the Electron binary, which Electron 45 otherwise downloads on first use). `npm run check` = typecheck + schema check + tests + UI build. `npm run smoke:hub` and `npm run smoke:v12` run a real hub and node offline (fake adapters) in a few seconds. Install scripts are allow-listed in the root `package.json` (`allowScripts`); CI fails on unreviewed ones. See CONTRIBUTING.md.
 
 ## Commits
 

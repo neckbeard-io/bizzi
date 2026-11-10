@@ -262,3 +262,27 @@ test('bizzi-agents: no tools for terminal sessions; tokens are re-minted on rest
   assert.equal((await call(client, 'sessions_list')).structuredContent!.helpers instanceof Array, true);
   await assert.rejects(connect(first));
 });
+
+test('bizzi-agents: the fake agent calls the tools itself with its own token (/mcp, as in smoke:v12)', async (t) => {
+  const h = await harness(t);
+  const { workspace } = await h.node.call('workspace.create', { path: h.repo });
+  const { session } = await h.node.call('session.create', { workspaceId: workspace.id, agent: 'claude' });
+  const events: { type: string; data: any }[] = [];
+  const off = h.node.bus.on(`session:${session.id}`, (ev) => events.push(ev));
+  t.after(off);
+  const run = async (text: string) => {
+    const before = events.length;
+    await h.node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text }] });
+    await waitFor(() => events.slice(before).some((e) => e.type === 'turn.completed'), text);
+    return events.slice(before).find((e) => e.type === 'tool.completed')!.data;
+  };
+  const started = await run('/mcp bizzi-agents session_start {"agent":"codex","prompt":"hi"}');
+  assert.equal(started.status, 'ok', started.error);
+  const helperId = JSON.parse(started.output).structuredContent.sessionId as string;
+  assert.equal(h.node.sessions.get(helperId).session.spawnedBy, session.id);
+  const listed = await run('/mcp bizzi-agents sessions_list');
+  assert.deepEqual(JSON.parse(listed.output).structuredContent.helpers.map((x: { sessionId: string }) => x.sessionId), [helperId]);
+  const missing = await run('/mcp nope sessions_list');
+  assert.equal(missing.status, 'error');
+  assert.match(missing.error, /no such MCP server/);
+});

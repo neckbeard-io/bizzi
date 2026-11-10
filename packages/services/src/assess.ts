@@ -82,11 +82,17 @@ export class InstallAssessor {
     if (!listing.installed) return out;
     if (a.realPath) out.realPath = a.realPath;
     if (a.method) out.method = a.method;
-    if (a.support) out.support = a.support;
-    if (a.supportReason) out.supportReason = a.supportReason;
-    if (a.remedies?.length) {
+    // An adapter that reports `support` itself knows its install better than the recipe's ranges
+    // (e.g. the scripted fakes behind `bizzi serve --fake`, whose version is not a real release).
+    if (listing.support === undefined) {
+      if (a.support) out.support = a.support;
+      if (a.supportReason) out.supportReason = a.supportReason;
+    }
+    // Version upgrades follow the recipe's verdict, so they go when the adapter's own verdict wins.
+    const remedies = (a.remedies ?? []).filter((r) => listing.support === undefined || r.kind !== 'upgrade');
+    if (remedies.length) {
       const seen = new Set((listing.remedies ?? []).map((r) => `${r.kind}\0${r.title}`));
-      out.remedies = [...(listing.remedies ?? []), ...a.remedies.filter((r) => !seen.has(`${r.kind}\0${r.title}`))];
+      out.remedies = [...(listing.remedies ?? []), ...remedies.filter((r) => !seen.has(`${r.kind}\0${r.title}`))];
     }
     if (a.notes.length) {
       const notes = [...(listing.notes ?? [])];

@@ -6,70 +6,18 @@
 //   node scripts/smoke-hub.ts            # fake adapter, free
 //   node scripts/smoke-hub.ts claude haiku   # real Claude session through the hub (a fraction of a cent)
 
-import { spawn, type ChildProcess } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
 import { pairWithHub, requestToken } from '@bizzi/hub';
+import { Client, Procs, step, validateTraffic } from './smoke-lib.ts';
 
 const agent = process.argv[2] ?? 'fake';
 const model = process.argv[3];
 const root = mkdtempSync(join(tmpdir(), 'bizzi-hubsmoke-'));
-const procs: ChildProcess[] = [];
+const procs = new Procs();
+const start = (args: string[], env?: Record<string, string>) => procs.start(args, env);
 
-function start(args: string[], env: Record<string, string> = {}): Promise<{ proc: ChildProcess; ready: any }> {
-  const proc = spawn(process.execPath, ['apps/cli/src/main.ts', ...args], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, BIZZI_LOG_LEVEL: 'warn', ...env },
-  });
-  procs.push(proc);
-  proc.stderr!.on('data', (d) => {
-    const s = String(d);
-    if (/"level":"(error|warn)"/.test(s)) process.stderr.write(`  [${args[0]}] ${s}`);
-  });
-  return new Promise((resolve, reject) => {
-    createInterface({ input: proc.stdout! }).once('line', (l) => resolve({ proc, ready: JSON.parse(l) }));
-    proc.once('exit', (c) => reject(new Error(`${args.join(' ')} exited ${c}`)));
-  });
-}
-
-class Client {
-  #ws: WebSocket;
-  #id = 0;
-  #pending = new Map<string, (m: any) => void>();
-  listeners: ((e: any) => void)[] = [];
-  constructor(ws: WebSocket) {
-    this.#ws = ws;
-    ws.onmessage = (m) => {
-      const msg = JSON.parse(String(m.data));
-      if (msg.id && this.#pending.has(msg.id)) {
-        this.#pending.get(msg.id)!(msg);
-        this.#pending.delete(msg.id);
-      } else if (msg.ch) for (const l of this.listeners) l(msg);
-    };
-  }
-  static async open(url: string): Promise<Client> {
-    const ws = new WebSocket(url);
-    await new Promise((r, j) => {
-      ws.onopen = r;
-      ws.onerror = j;
-    });
-    return new Client(ws);
-  }
-  call(method: string, params: unknown): Promise<any> {
-    const id = `r_${++this.#id}`;
-    this.#ws.send(JSON.stringify({ id, method, params }));
-    return new Promise((resolve, reject) =>
-      this.#pending.set(id, (m) => (m.error ? reject(Object.assign(new Error(`${method}: ${m.error.message}`), { code: m.error.code })) : resolve(m.result))),
-    );
-  }
-  close() {
-    this.#ws.close();
-  }
-}
-
-const step = (s: string) => console.log(`• ${s}`);
 let ok = false;
 try {
   const hub = await start(['hub', 'serve', '--host', '127.0.0.1', '--port', '0', '--data-dir', join(root, 'hub')]);
@@ -139,12 +87,17 @@ try {
   late.close();
   client.close();
 
-  ok = (turn as any).stopReason === 'end_turn' && offlineCode === 'machine_offline' && replayed.includes('turn.completed');
+  // Everything the device sent and received matches the published schema.
+  const schema = JSON.parse(readFileSync(new URL('../docs/protocol.schema.json', import.meta.url), 'utf8'));
+  const problems = validateTraffic(schema, [...client.traffic, ...late.traffic]);
+  for (const p of problems) console.error(`  schema: ${p}`);
+  step(`traffic vs docs/protocol.schema.json: ${problems.length ? `${problems.length} problem(s)` : 'ok'}`);
+
+  ok = problems.length === 0 && (turn as any).stopReason === 'end_turn' && offlineCode === 'machine_offline' && replayed.includes('turn.completed');
 } catch (err) {
   console.error(err);
 } finally {
-  for (const p of procs) if (p.exitCode === null) p.kill('SIGTERM');
-  await new Promise((r) => setTimeout(r, 500));
+  await procs.stopAll();
   rmSync(root, { recursive: true, force: true });
 }
 console.log(ok ? 'HUB SMOKE OK' : 'HUB SMOKE FAILED');

@@ -1,0 +1,7007 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:bizzi:protocol",
+  "title": "bizzi wire protocol",
+  "description": "Generated from packages/protocol/src by scripts/gen-schema.ts; do not edit. The root schema validates one WebSocket text frame (ClientMsg or ServerMsg). x-methods and x-events index the per-method and per-event $defs.",
+  "x-protocolVersion": "bizzi/1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/ClientMsg"
+    },
+    {
+      "$ref": "#/$defs/ServerMsg"
+    }
+  ],
+  "x-methods": {
+    "hello": {
+      "params": {
+        "$ref": "#/$defs/params:hello"
+      },
+      "result": {
+        "$ref": "#/$defs/result:hello"
+      }
+    },
+    "subscribe": {
+      "description": "Replays events with seq > since (default 0), then streams live ones.",
+      "params": {
+        "$ref": "#/$defs/params:subscribe"
+      },
+      "result": {
+        "$ref": "#/$defs/result:subscribe"
+      }
+    },
+    "unsubscribe": {
+      "params": {
+        "$ref": "#/$defs/params:unsubscribe"
+      },
+      "result": {
+        "$ref": "#/$defs/result:unsubscribe"
+      }
+    },
+    "machines.list": {
+      "params": {
+        "$ref": "#/$defs/params:machines.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:machines.list"
+      }
+    },
+    "agents.list": {
+      "params": {
+        "$ref": "#/$defs/params:agents.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agents.list"
+      }
+    },
+    "workspaces.list": {
+      "params": {
+        "$ref": "#/$defs/params:workspaces.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:workspaces.list"
+      }
+    },
+    "workspace.create": {
+      "description": "Adopt an existing directory, or create it when `create` is true.",
+      "params": {
+        "$ref": "#/$defs/params:workspace.create"
+      },
+      "result": {
+        "$ref": "#/$defs/result:workspace.create"
+      }
+    },
+    "workspace.remove": {
+      "description": "Removes the workspace from bizzi's registry only; files are untouched.",
+      "params": {
+        "$ref": "#/$defs/params:workspace.remove"
+      },
+      "result": {
+        "$ref": "#/$defs/result:workspace.remove"
+      }
+    },
+    "worktree.create": {
+      "description": "`git worktree add` + a new workspace (kind 'worktree') grouped under the repo workspace. Creates `branch` from `base` (default HEAD) unless it already exists.",
+      "params": {
+        "$ref": "#/$defs/params:worktree.create"
+      },
+      "result": {
+        "$ref": "#/$defs/result:worktree.create"
+      }
+    },
+    "worktree.remove": {
+      "description": "Removes the worktree and its workspace. Never deletes the branch; refuses on uncommitted changes unless `force`.",
+      "params": {
+        "$ref": "#/$defs/params:worktree.remove"
+      },
+      "result": {
+        "$ref": "#/$defs/result:worktree.remove"
+      }
+    },
+    "sessions.list": {
+      "description": "`spawnedBy`: only that parent's helpers.",
+      "params": {
+        "$ref": "#/$defs/params:sessions.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:sessions.list"
+      }
+    },
+    "session.get": {
+      "params": {
+        "$ref": "#/$defs/params:session.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.get"
+      }
+    },
+    "session.create": {
+      "params": {
+        "$ref": "#/$defs/params:session.create"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.create"
+      }
+    },
+    "session.fork": {
+      "description": "New session continuing from the source session's conversation (agent-native fork when supported).",
+      "params": {
+        "$ref": "#/$defs/params:session.fork"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.fork"
+      }
+    },
+    "session.delete": {
+      "description": "Stop the session if needed and remove it and its events.",
+      "params": {
+        "$ref": "#/$defs/params:session.delete"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.delete"
+      }
+    },
+    "session.send": {
+      "params": {
+        "$ref": "#/$defs/params:session.send"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.send"
+      }
+    },
+    "session.steer": {
+      "params": {
+        "$ref": "#/$defs/params:session.steer"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.steer"
+      }
+    },
+    "session.interrupt": {
+      "params": {
+        "$ref": "#/$defs/params:session.interrupt"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.interrupt"
+      }
+    },
+    "session.markSeen": {
+      "description": "Record that the user has seen the session through `seq` (spec §4 `seen_through`). Never moves backwards.",
+      "params": {
+        "$ref": "#/$defs/params:session.markSeen"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.markSeen"
+      }
+    },
+    "session.restart": {
+      "description": "Restart the agent process on the installed version at the next safe point and resume (updates.md §5).",
+      "params": {
+        "$ref": "#/$defs/params:session.restart"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.restart"
+      }
+    },
+    "session.stop": {
+      "params": {
+        "$ref": "#/$defs/params:session.stop"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.stop"
+      }
+    },
+    "session.set": {
+      "params": {
+        "$ref": "#/$defs/params:session.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.set"
+      }
+    },
+    "approval.respond": {
+      "params": {
+        "$ref": "#/$defs/params:approval.respond"
+      },
+      "result": {
+        "$ref": "#/$defs/result:approval.respond"
+      }
+    },
+    "question.respond": {
+      "description": "Answer a `question.asked`; `cancel` declines it.",
+      "params": {
+        "$ref": "#/$defs/params:question.respond"
+      },
+      "result": {
+        "$ref": "#/$defs/result:question.respond"
+      }
+    },
+    "term.input": {
+      "description": "Terminal-mode sessions only.",
+      "params": {
+        "$ref": "#/$defs/params:term.input"
+      },
+      "result": {
+        "$ref": "#/$defs/result:term.input"
+      }
+    },
+    "term.resize": {
+      "params": {
+        "$ref": "#/$defs/params:term.resize"
+      },
+      "result": {
+        "$ref": "#/$defs/result:term.resize"
+      }
+    },
+    "term.snapshot": {
+      "description": "Recent terminal output (scrollback) as of `seq`; subscribe with `since: seq` to continue live.",
+      "params": {
+        "$ref": "#/$defs/params:term.snapshot"
+      },
+      "result": {
+        "$ref": "#/$defs/result:term.snapshot"
+      }
+    },
+    "fs.list": {
+      "params": {
+        "$ref": "#/$defs/params:fs.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fs.list"
+      }
+    },
+    "fs.read": {
+      "params": {
+        "$ref": "#/$defs/params:fs.read"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fs.read"
+      }
+    },
+    "git.status": {
+      "params": {
+        "$ref": "#/$defs/params:git.status"
+      },
+      "result": {
+        "$ref": "#/$defs/result:git.status"
+      }
+    },
+    "git.diff": {
+      "params": {
+        "$ref": "#/$defs/params:git.diff"
+      },
+      "result": {
+        "$ref": "#/$defs/result:git.diff"
+      }
+    },
+    "agent.plan": {
+      "description": "Preview the steps for installing / updating / uninstalling an agent.",
+      "params": {
+        "$ref": "#/$defs/params:agent.plan"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.plan"
+      }
+    },
+    "agent.install": {
+      "description": "Run a plan; progress streams as `install.progress` (global channel) with this jobId.",
+      "params": {
+        "$ref": "#/$defs/params:agent.install"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.install"
+      }
+    },
+    "agent.login": {
+      "description": "Start a login flow as a terminal-mode session; it emits `login.prompt` / `login.completed`.",
+      "params": {
+        "$ref": "#/$defs/params:agent.login"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.login"
+      }
+    },
+    "agent.setSecret": {
+      "description": "Store a secret (e.g. an API key) on the machine; injected into that agent's environment.",
+      "params": {
+        "$ref": "#/$defs/params:agent.setSecret"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.setSecret"
+      }
+    },
+    "agent.deleteSecret": {
+      "params": {
+        "$ref": "#/$defs/params:agent.deleteSecret"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.deleteSecret"
+      }
+    },
+    "agent.secrets": {
+      "params": {
+        "$ref": "#/$defs/params:agent.secrets"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.secrets"
+      }
+    },
+    "agent.migrate": {
+      "description": "Switch an adopted install to the recipe's preferred method (spec §7): install with the preferred method, check PATH order, re-probe login, remove the old install once no session uses it.",
+      "params": {
+        "$ref": "#/$defs/params:agent.migrate"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.migrate"
+      }
+    },
+    "agent.policy.set": {
+      "params": {
+        "$ref": "#/$defs/params:agent.policy.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agent.policy.set"
+      }
+    },
+    "usage.list": {
+      "description": "Per-login usage; on a hub, merged across machines per account.",
+      "params": {
+        "$ref": "#/$defs/params:usage.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:usage.list"
+      }
+    },
+    "widgets.list": {
+      "description": "On a hub without machineId: every online machine's widgets.",
+      "params": {
+        "$ref": "#/$defs/params:widgets.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:widgets.list"
+      }
+    },
+    "widget.refresh": {
+      "params": {
+        "$ref": "#/$defs/params:widget.refresh"
+      },
+      "result": {
+        "$ref": "#/$defs/result:widget.refresh"
+      }
+    },
+    "orchestration.settings.get": {
+      "params": {
+        "$ref": "#/$defs/params:orchestration.settings.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:orchestration.settings.get"
+      }
+    },
+    "orchestration.settings.set": {
+      "params": {
+        "$ref": "#/$defs/params:orchestration.settings.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:orchestration.settings.set"
+      }
+    },
+    "knowledge.list": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.list"
+      }
+    },
+    "knowledge.add": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.add"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.add"
+      }
+    },
+    "knowledge.update": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.update"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.update"
+      }
+    },
+    "knowledge.forget": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.forget"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.forget"
+      }
+    },
+    "knowledge.inbox": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.inbox"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.inbox"
+      }
+    },
+    "knowledge.accept": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.accept"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.accept"
+      }
+    },
+    "knowledge.reject": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.reject"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.reject"
+      }
+    },
+    "knowledge.settings.get": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.settings.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.settings.get"
+      }
+    },
+    "knowledge.settings.set": {
+      "params": {
+        "$ref": "#/$defs/params:knowledge.settings.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.settings.set"
+      }
+    },
+    "pairing.create": {
+      "description": "Create a one-time pairing code for a new device or node.",
+      "params": {
+        "$ref": "#/$defs/params:pairing.create"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pairing.create"
+      }
+    },
+    "devices.list": {
+      "params": {
+        "$ref": "#/$defs/params:devices.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:devices.list"
+      }
+    },
+    "device.revoke": {
+      "params": {
+        "$ref": "#/$defs/params:device.revoke"
+      },
+      "result": {
+        "$ref": "#/$defs/result:device.revoke"
+      }
+    },
+    "themes.list": {
+      "description": "Custom themes (theming.md §5). Hub-stored so every device sees them; a node stores them locally.",
+      "params": {
+        "$ref": "#/$defs/params:themes.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:themes.list"
+      }
+    },
+    "theme.save": {
+      "params": {
+        "$ref": "#/$defs/params:theme.save"
+      },
+      "result": {
+        "$ref": "#/$defs/result:theme.save"
+      }
+    },
+    "theme.delete": {
+      "params": {
+        "$ref": "#/$defs/params:theme.delete"
+      },
+      "result": {
+        "$ref": "#/$defs/result:theme.delete"
+      }
+    }
+  },
+  "x-events": {
+    "session": {
+      "session.status": {
+        "data": {
+          "$ref": "#/$defs/session:session.status"
+        }
+      },
+      "session.info": {
+        "description": "Adapter-reported metadata changes (agent session id assigned, model switched, …).",
+        "data": {
+          "$ref": "#/$defs/session:session.info"
+        }
+      },
+      "turn.started": {
+        "description": "Emitted by the core when a turn starts; echoes the user input.",
+        "data": {
+          "$ref": "#/$defs/session:turn.started"
+        }
+      },
+      "turn.steered": {
+        "description": "Emitted by the core when input is steered into the in-flight turn.",
+        "data": {
+          "$ref": "#/$defs/session:turn.steered"
+        }
+      },
+      "turn.completed": {
+        "description": "Emitted by the adapter when the turn finishes, with the same turnId.",
+        "data": {
+          "$ref": "#/$defs/session:turn.completed"
+        }
+      },
+      "message.delta": {
+        "description": "`parentToolId` set when the text comes from a subagent started by that tool call.",
+        "data": {
+          "$ref": "#/$defs/session:message.delta"
+        }
+      },
+      "message.completed": {
+        "data": {
+          "$ref": "#/$defs/session:message.completed"
+        }
+      },
+      "reasoning.delta": {
+        "data": {
+          "$ref": "#/$defs/session:reasoning.delta"
+        }
+      },
+      "reasoning.completed": {
+        "data": {
+          "$ref": "#/$defs/session:reasoning.completed"
+        }
+      },
+      "tool.started": {
+        "data": {
+          "$ref": "#/$defs/session:tool.started"
+        }
+      },
+      "tool.updated": {
+        "data": {
+          "$ref": "#/$defs/session:tool.updated"
+        }
+      },
+      "tool.completed": {
+        "data": {
+          "$ref": "#/$defs/session:tool.completed"
+        }
+      },
+      "file.changed": {
+        "data": {
+          "$ref": "#/$defs/session:file.changed"
+        }
+      },
+      "plan.updated": {
+        "data": {
+          "$ref": "#/$defs/session:plan.updated"
+        }
+      },
+      "approval.requested": {
+        "data": {
+          "$ref": "#/$defs/session:approval.requested"
+        }
+      },
+      "approval.resolved": {
+        "data": {
+          "$ref": "#/$defs/session:approval.resolved"
+        }
+      },
+      "question.asked": {
+        "description": "The agent asks the user something (Claude AskUserQuestion, Codex requestUserInput, MCP elicitation…). `text`/`options` summarize the first question for simple clients; `questions` carries the full form. Answer with `question.respond`.",
+        "data": {
+          "$ref": "#/$defs/session:question.asked"
+        }
+      },
+      "question.resolved": {
+        "data": {
+          "$ref": "#/$defs/session:question.resolved"
+        }
+      },
+      "usage.updated": {
+        "data": {
+          "$ref": "#/$defs/session:usage.updated"
+        }
+      },
+      "context.updated": {
+        "description": "Current context-window occupancy (usage.md §1.2). Agents without data never emit it.",
+        "data": {
+          "$ref": "#/$defs/session:context.updated"
+        }
+      },
+      "context.compacted": {
+        "data": {
+          "$ref": "#/$defs/session:context.compacted"
+        }
+      },
+      "account.usage": {
+        "description": "Per-login usage observed during this session (rate-limit events etc.); the core republishes it globally.",
+        "data": {
+          "$ref": "#/$defs/session:account.usage"
+        }
+      },
+      "session.restarting": {
+        "description": "The agent process is being replaced at a safe point (updates.md §5). The bizzi session carries on.",
+        "data": {
+          "$ref": "#/$defs/session:session.restarting"
+        }
+      },
+      "session.restarted": {
+        "data": {
+          "$ref": "#/$defs/session:session.restarted"
+        }
+      },
+      "subagent.started": {
+        "data": {
+          "$ref": "#/$defs/session:subagent.started"
+        }
+      },
+      "subagent.completed": {
+        "data": {
+          "$ref": "#/$defs/session:subagent.completed"
+        }
+      },
+      "term.output": {
+        "description": "Terminal-mode output.",
+        "data": {
+          "$ref": "#/$defs/session:term.output"
+        }
+      },
+      "term.exited": {
+        "data": {
+          "$ref": "#/$defs/session:term.exited"
+        }
+      },
+      "login.prompt": {
+        "description": "Login sessions (`agent.login`): URLs / one-time codes detected in the terminal output.",
+        "data": {
+          "$ref": "#/$defs/session:login.prompt"
+        }
+      },
+      "login.completed": {
+        "data": {
+          "$ref": "#/$defs/session:login.completed"
+        }
+      },
+      "agent.raw": {
+        "description": "Untranslated native event, always allowed; UIs render it generically.",
+        "data": {
+          "$ref": "#/$defs/session:agent.raw"
+        }
+      },
+      "error": {
+        "data": {
+          "$ref": "#/$defs/session:error"
+        }
+      }
+    },
+    "global": {
+      "machine.updated": {
+        "data": {
+          "$ref": "#/$defs/global:machine.updated"
+        }
+      },
+      "workspace.created": {
+        "data": {
+          "$ref": "#/$defs/global:workspace.created"
+        }
+      },
+      "workspace.removed": {
+        "data": {
+          "$ref": "#/$defs/global:workspace.removed"
+        }
+      },
+      "session.created": {
+        "data": {
+          "$ref": "#/$defs/global:session.created"
+        }
+      },
+      "session.updated": {
+        "data": {
+          "$ref": "#/$defs/global:session.updated"
+        }
+      },
+      "session.removed": {
+        "data": {
+          "$ref": "#/$defs/global:session.removed"
+        }
+      },
+      "install.progress": {
+        "data": {
+          "$ref": "#/$defs/global:install.progress"
+        }
+      },
+      "knowledge.changed": {
+        "data": {
+          "$ref": "#/$defs/global:knowledge.changed"
+        }
+      },
+      "account.usage": {
+        "description": "Latest snapshot for one login (usage.md §3).",
+        "data": {
+          "$ref": "#/$defs/global:account.usage"
+        }
+      },
+      "widget.updated": {
+        "data": {
+          "$ref": "#/$defs/global:widget.updated"
+        }
+      },
+      "widget.removed": {
+        "data": {
+          "$ref": "#/$defs/global:widget.removed"
+        }
+      },
+      "device.updated": {
+        "description": "Hub only.",
+        "data": {
+          "$ref": "#/$defs/global:device.updated"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "AccountUsage": {
+      "description": "Per-login usage snapshot (usage.md §3.3). Merged per (agent, accountId) across machines; newest wins.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "accountId": {
+          "description": "Stable account identity: email / account id, or an API-key fingerprint.",
+          "type": "string"
+        },
+        "label": {
+          "description": "e.g. \"claude · max · mc@…\"",
+          "type": "string"
+        },
+        "billing": {
+          "$ref": "#/$defs/BillingClass"
+        },
+        "machines": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "windows": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UsageWindow"
+          }
+        },
+        "spend": {
+          "type": "object",
+          "properties": {
+            "usd": {
+              "type": "number"
+            },
+            "capUsd": {
+              "type": "number"
+            },
+            "period": {
+              "type": "string"
+            },
+            "resetsAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "usd"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "warning",
+            "limited",
+            "unknown"
+          ]
+        },
+        "observedAt": {
+          "description": "ISO; the UI shows the age.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "accountId",
+        "label",
+        "billing",
+        "machines",
+        "status",
+        "observedAt"
+      ]
+    },
+    "AgentAuthState": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "missing",
+        "expired",
+        "unknown"
+      ]
+    },
+    "AgentCapabilities": {
+      "description": "What an agent adapter supports. UIs gate controls on this, never on the agent name.",
+      "type": "object",
+      "properties": {
+        "modes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionMode"
+          }
+        },
+        "streaming": {
+          "type": "string",
+          "enum": [
+            "token",
+            "message",
+            "none"
+          ]
+        },
+        "steer": {
+          "type": "boolean"
+        },
+        "interrupt": {
+          "type": "boolean"
+        },
+        "fork": {
+          "type": "boolean"
+        },
+        "resume": {
+          "type": "boolean"
+        },
+        "resumeAfterNodeRestart": {
+          "type": "boolean"
+        },
+        "approvals": {
+          "type": "string",
+          "enum": [
+            "per-tool",
+            "per-command",
+            "mode-only",
+            "none"
+          ]
+        },
+        "editableApprovals": {
+          "type": "boolean"
+        },
+        "permissionModes": {
+          "description": "Native permission mode names, e.g. ['default', 'acceptEdits', 'plan', 'bypassPermissions'].",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "models": {
+          "anyOf": [
+            {
+              "const": "dynamic"
+            },
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          ]
+        },
+        "setModelMidSession": {
+          "type": "boolean"
+        },
+        "effort": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "planMode": {
+          "type": "boolean"
+        },
+        "todos": {
+          "type": "boolean"
+        },
+        "subagents": {
+          "type": "boolean"
+        },
+        "slashCommands": {
+          "type": "boolean"
+        },
+        "skills": {
+          "type": "boolean"
+        },
+        "images": {
+          "type": "boolean"
+        },
+        "mcpInjection": {
+          "type": "string",
+          "enum": [
+            "launch",
+            "config-file",
+            "none"
+          ]
+        },
+        "instructionInjection": {
+          "type": "string",
+          "enum": [
+            "system-append",
+            "config",
+            "file",
+            "none"
+          ]
+        },
+        "usage": {
+          "type": "string",
+          "enum": [
+            "tokens",
+            "tokens+cost",
+            "none"
+          ]
+        },
+        "terminal": {
+          "description": "Terminal mode: raw PTY in/out is available.",
+          "type": "boolean"
+        },
+        "questions": {
+          "description": "The agent can ask the user structured questions (`question.asked` / `question.respond`).",
+          "type": "boolean"
+        },
+        "context": {
+          "description": "The adapter emits `context.updated` (usage.md §1).",
+          "type": "boolean"
+        },
+        "accountUsage": {
+          "description": "The adapter emits `account.usage` snapshots (usage.md §3).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "modes",
+        "streaming",
+        "steer",
+        "interrupt",
+        "fork",
+        "resume",
+        "resumeAfterNodeRestart",
+        "approvals",
+        "editableApprovals",
+        "permissionModes",
+        "models",
+        "setModelMidSession",
+        "effort",
+        "planMode",
+        "todos",
+        "subagents",
+        "slashCommands",
+        "skills",
+        "images",
+        "mcpInjection",
+        "instructionInjection",
+        "usage",
+        "terminal"
+      ]
+    },
+    "AgentKind": {
+      "type": "string",
+      "enum": [
+        "claude",
+        "codex",
+        "opencode",
+        "agy",
+        "shell"
+      ]
+    },
+    "AgentListing": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/AgentProbe"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "capabilities": {
+              "$ref": "#/$defs/AgentCapabilities"
+            }
+          }
+        }
+      ]
+    },
+    "AgentProbe": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string"
+        },
+        "latestVersion": {
+          "type": "string"
+        },
+        "auth": {
+          "$ref": "#/$defs/AgentAuthState"
+        },
+        "account": {
+          "description": "e.g. account email or plan, when the agent reports it",
+          "type": "string"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "method": {
+          "description": "How the binary appears to have been installed (recipe method name, e.g. 'installer', 'brew', 'npm').",
+          "type": "string"
+        },
+        "updateAvailable": {
+          "type": "boolean"
+        },
+        "onPath": {
+          "description": "Whether the binary is on the PATH of non-interactive shells (launchd/systemd/containers).",
+          "type": "boolean"
+        },
+        "support": {
+          "description": "Whether bizzi supports this installed version (spec §7 \"Supported versions\"). Absent = not checked.",
+          "$ref": "#/$defs/AgentSupport"
+        },
+        "supportReason": {
+          "description": "Why `support` isn't 'ok', e.g. \"OpenCode v1 is not supported; bizzi drives v2 only\".",
+          "type": "string"
+        },
+        "remedies": {
+          "description": "Confirmable fixes for `support` or for a non-preferred install method. Never run automatically.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentRemedy"
+          }
+        },
+        "preferredMethod": {
+          "description": "The recipe's preferred method on this OS (first in its method order).",
+          "type": "string"
+        },
+        "realPath": {
+          "description": "Real path of the executable after resolving symlinks and wrapper shims.",
+          "type": "string"
+        },
+        "updatePolicy": {
+          "$ref": "#/$defs/UpdatePolicy"
+        },
+        "restartPolicy": {
+          "$ref": "#/$defs/RestartPolicy"
+        },
+        "billing": {
+          "description": "Billing class of the logged-in account (spec §12.3), when known.",
+          "$ref": "#/$defs/BillingClass"
+        },
+        "staleSessions": {
+          "description": "Sessions on this machine whose agent process runs an older version than the installed one.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "agent",
+        "installed",
+        "auth"
+      ]
+    },
+    "AgentRemedy": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "upgrade: move to a supported version · migrate: switch to the preferred install method · restart-service: restart a stale shared server.",
+          "type": "string",
+          "enum": [
+            "upgrade",
+            "migrate",
+            "restart-service"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "method": {
+          "description": "Target method for 'migrate' / 'upgrade'.",
+          "type": "string"
+        },
+        "command": {
+          "description": "Shell command shown to the user, when there's a single one.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "title"
+      ]
+    },
+    "AgentSupport": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "untested",
+        "unsupported"
+      ]
+    },
+    "ApprovalDecision": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecisionKind"
+        },
+        "message": {
+          "description": "Optional message to the agent (e.g. why it was denied).",
+          "type": "string"
+        },
+        "editedInput": {
+          "description": "Replacement tool input, only when the request was `editable`."
+        }
+      },
+      "required": [
+        "decision"
+      ]
+    },
+    "ApprovalDecisionKind": {
+      "type": "string",
+      "enum": [
+        "allow",
+        "allow_always",
+        "deny"
+      ]
+    },
+    "ApprovalKind": {
+      "type": "string",
+      "enum": [
+        "shell",
+        "edit",
+        "write",
+        "read",
+        "mcp",
+        "web",
+        "plan",
+        "other"
+      ]
+    },
+    "ApprovalRequest": {
+      "type": "object",
+      "properties": {
+        "approvalId": {
+          "type": "string"
+        },
+        "toolId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "input": {
+          "description": "The tool input the agent wants to use (command, file edit, …)."
+        },
+        "editable": {
+          "description": "Whether the adapter supports `editedInput` in the decision.",
+          "type": "boolean"
+        },
+        "options": {
+          "description": "Decisions this agent supports for this request.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ApprovalDecisionKind"
+          }
+        }
+      },
+      "required": [
+        "approvalId",
+        "kind",
+        "title",
+        "editable",
+        "options"
+      ]
+    },
+    "ApprovalResolution": {
+      "description": "How an approval ended: a decision, or 'cancelled' when its turn ended / the node restarted first.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ApprovalDecisionKind"
+        },
+        {
+          "const": "cancelled"
+        }
+      ]
+    },
+    "BillingClass": {
+      "description": "spec §12.3: metered = pay per token · plan = subscription windows · budgetless = inference you own.",
+      "type": "string",
+      "enum": [
+        "metered",
+        "plan",
+        "budgetless"
+      ]
+    },
+    "ChallengeRequest": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    },
+    "ChallengeResponse": {
+      "type": "object",
+      "properties": {
+        "nonce": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nonce",
+        "expiresAt"
+      ]
+    },
+    "ChannelEvent": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/SessionEvent"
+        },
+        {
+          "$ref": "#/$defs/GlobalEvent"
+        }
+      ]
+    },
+    "ClientMsg": {
+      "$ref": "#/$defs/RequestMsg"
+    },
+    "ContextCategory": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "tokens": {
+          "type": "number"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "used",
+            "free",
+            "buffer",
+            "deferred"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "tokens",
+        "kind"
+      ]
+    },
+    "ContextUsage": {
+      "description": "usage.md §1.2. `used` is the agent's own occupancy figure, never a sum of turns.",
+      "type": "object",
+      "properties": {
+        "used": {
+          "type": "number"
+        },
+        "window": {
+          "type": "number"
+        },
+        "usable": {
+          "description": "Window minus the agent's compaction buffer, when known. Warnings key off this.",
+          "type": "number"
+        },
+        "compactAt": {
+          "description": "Token count at which the agent compacts, when known.",
+          "type": "number"
+        },
+        "categories": {
+          "description": "Only where the agent reports a breakdown (Claude); bizzi adds a 'bizzi' row for what it injects.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContextCategory"
+          }
+        }
+      },
+      "required": [
+        "used",
+        "window"
+      ]
+    },
+    "DeviceInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "machineId": {
+          "description": "For kind 'node': the machine it serves.",
+          "type": "string"
+        },
+        "owner": {
+          "description": "The first device paired with the setup code.",
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "type": "string"
+        },
+        "revoked": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "createdAt"
+      ]
+    },
+    "DeviceKind": {
+      "type": "string",
+      "enum": [
+        "device",
+        "node"
+      ]
+    },
+    "Ed25519PublicJwk": {
+      "description": "Ed25519 public key as a JWK (`{ kty: 'OKP', crv: 'Ed25519', x }`).",
+      "type": "object",
+      "properties": {
+        "kty": {
+          "const": "OKP"
+        },
+        "crv": {
+          "const": "Ed25519"
+        },
+        "x": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kty",
+        "crv",
+        "x"
+      ]
+    },
+    "Empty": {
+      "type": "object",
+      "additionalProperties": false
+    },
+    "ErrorCode": {
+      "type": "string",
+      "enum": [
+        "bad_request",
+        "unauthorized",
+        "not_found",
+        "conflict",
+        "unsupported",
+        "machine_offline",
+        "agent_unavailable",
+        "internal"
+      ]
+    },
+    "ErrorObject": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "$ref": "#/$defs/ErrorCode"
+        },
+        "message": {
+          "type": "string"
+        },
+        "data": {}
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "EventMeta": {
+      "type": "object",
+      "properties": {
+        "ch": {
+          "description": "`session:<id>` or `global`",
+          "type": "string"
+        },
+        "seq": {
+          "description": "Monotonic per channel, starting at 1.",
+          "type": "number"
+        },
+        "ts": {
+          "description": "ISO-8601",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ch",
+        "seq",
+        "ts"
+      ]
+    },
+    "EventMsg": {
+      "$ref": "#/$defs/ChannelEvent"
+    },
+    "FsEntry": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "file",
+            "dir",
+            "symlink",
+            "other"
+          ]
+        },
+        "size": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "name",
+        "type"
+      ]
+    },
+    "GitFileStatus": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "description": "Porcelain v1 XY code, e.g. \" M\", \"??\", \"A \".",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ]
+    },
+    "GlobalEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/GlobalEventBody"
+        },
+        {
+          "$ref": "#/$defs/EventMeta"
+        }
+      ]
+    },
+    "GlobalEventBody": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "machine.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:machine.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "workspace.created"
+            },
+            "data": {
+              "$ref": "#/$defs/global:workspace.created"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "workspace.removed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:workspace.removed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.created"
+            },
+            "data": {
+              "$ref": "#/$defs/global:session.created"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:session.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.removed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:session.removed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "install.progress"
+            },
+            "data": {
+              "$ref": "#/$defs/global:install.progress"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "knowledge.changed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:knowledge.changed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "account.usage"
+            },
+            "data": {
+              "$ref": "#/$defs/global:account.usage"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "widget.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:widget.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "widget.removed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:widget.removed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "device.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:device.updated"
+            }
+          }
+        }
+      ]
+    },
+    "GlobalEventType": {
+      "type": "string",
+      "enum": [
+        "machine.updated",
+        "workspace.created",
+        "workspace.removed",
+        "session.created",
+        "session.updated",
+        "session.removed",
+        "install.progress",
+        "knowledge.changed",
+        "account.usage",
+        "widget.updated",
+        "widget.removed",
+        "device.updated"
+      ]
+    },
+    "InputBlock": {
+      "anyOf": [
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "text"
+            },
+            "text": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "image"
+            },
+            "mediaType": {
+              "type": "string"
+            },
+            "dataBase64": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "mediaType",
+            "dataBase64"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "file"
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "path"
+          ]
+        }
+      ]
+    },
+    "InstallAction": {
+      "type": "string",
+      "enum": [
+        "install",
+        "update",
+        "uninstall"
+      ]
+    },
+    "InstallPlan": {
+      "type": "object",
+      "properties": {
+        "target": {
+          "description": "Agent kind, or a tool name such as 'node'.",
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/InstallAction"
+        },
+        "method": {
+          "type": "string"
+        },
+        "steps": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InstallStep"
+          }
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "method",
+        "steps"
+      ]
+    },
+    "InstallStep": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "command": {
+          "description": "Shell command shown to the user (already quoted).",
+          "type": "string"
+        },
+        "requiresSudo": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "title"
+      ]
+    },
+    "KnowledgeInboxCard": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeItemInfo"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "KnowledgeItemInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "rule",
+            "memory"
+          ]
+        },
+        "scope": {
+          "$ref": "#/$defs/KnowledgeScope"
+        },
+        "appliesTo": {
+          "description": "Default: all agents.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentKind"
+          }
+        },
+        "kind": {
+          "description": "Memories only: fact | preference | decision | gotcha | procedure | reference | todo.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string",
+              "enum": [
+                "ui",
+                "tool",
+                "harvest",
+                "extract"
+              ]
+            },
+            "userRequested": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "machineId",
+            "via"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "suggested",
+            "superseded",
+            "deleted"
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "scope",
+        "title",
+        "body",
+        "tags",
+        "source",
+        "status",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "KnowledgePreset": {
+      "type": "string",
+      "enum": [
+        "trusting",
+        "balanced",
+        "strict"
+      ]
+    },
+    "KnowledgeScope": {
+      "type": "object",
+      "properties": {
+        "level": {
+          "$ref": "#/$defs/KnowledgeScopeLevel"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "level"
+      ]
+    },
+    "KnowledgeScopeLevel": {
+      "type": "string",
+      "enum": [
+        "global",
+        "machine",
+        "project",
+        "workspace",
+        "session",
+        "team"
+      ]
+    },
+    "KnowledgeSettings": {
+      "type": "object",
+      "properties": {
+        "preset": {
+          "$ref": "#/$defs/KnowledgePreset"
+        },
+        "defaultAgentScope": {
+          "description": "Scope used when an agent writes without naming one.",
+          "$ref": "#/$defs/KnowledgeScopeLevel"
+        },
+        "overrides": {
+          "description": "Per source × scope overrides; shape owned by @bizzi/knowledge."
+        }
+      },
+      "required": [
+        "preset",
+        "defaultAgentScope"
+      ]
+    },
+    "LoginMode": {
+      "type": "string",
+      "enum": [
+        "interactive",
+        "device-code",
+        "token"
+      ]
+    },
+    "MachineInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "hostname": {
+          "type": "string"
+        },
+        "os": {
+          "type": "string",
+          "enum": [
+            "darwin",
+            "linux",
+            "win32",
+            "other"
+          ]
+        },
+        "arch": {
+          "type": "string"
+        },
+        "headful": {
+          "description": "A display/GUI session is available to agents (macOS Aqua session, or a virtual X display).",
+          "type": "boolean"
+        },
+        "alwaysOn": {
+          "type": "boolean"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "online": {
+          "type": "boolean"
+        },
+        "roles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MachineRole"
+          }
+        },
+        "bizziVersion": {
+          "type": "string"
+        },
+        "lastSeenAt": {
+          "description": "Set by the hub: last time the machine's node was connected.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "hostname",
+        "os",
+        "arch",
+        "headful",
+        "alwaysOn",
+        "tags",
+        "online",
+        "roles",
+        "bizziVersion"
+      ]
+    },
+    "MachineRole": {
+      "type": "string",
+      "enum": [
+        "node",
+        "hub"
+      ]
+    },
+    "MachineTarget": {
+      "description": "Routing to a machine (hub). Methods that name a session or workspace are routed by that id. Methods without one take an optional `machineId`: required when talking to a hub, ignored by a node when it matches its own machine (a different id → `not_found`).",
+      "type": "object",
+      "properties": {
+        "machineId": {
+          "type": "string"
+        }
+      }
+    },
+    "MethodName": {
+      "type": "string",
+      "enum": [
+        "hello",
+        "subscribe",
+        "unsubscribe",
+        "machines.list",
+        "agents.list",
+        "workspaces.list",
+        "workspace.create",
+        "workspace.remove",
+        "worktree.create",
+        "worktree.remove",
+        "sessions.list",
+        "session.get",
+        "session.create",
+        "session.fork",
+        "session.delete",
+        "session.send",
+        "session.steer",
+        "session.interrupt",
+        "session.markSeen",
+        "session.restart",
+        "session.stop",
+        "session.set",
+        "approval.respond",
+        "question.respond",
+        "term.input",
+        "term.resize",
+        "term.snapshot",
+        "fs.list",
+        "fs.read",
+        "git.status",
+        "git.diff",
+        "agent.plan",
+        "agent.install",
+        "agent.login",
+        "agent.setSecret",
+        "agent.deleteSecret",
+        "agent.secrets",
+        "agent.migrate",
+        "agent.policy.set",
+        "usage.list",
+        "widgets.list",
+        "widget.refresh",
+        "orchestration.settings.get",
+        "orchestration.settings.set",
+        "knowledge.list",
+        "knowledge.add",
+        "knowledge.update",
+        "knowledge.forget",
+        "knowledge.inbox",
+        "knowledge.accept",
+        "knowledge.reject",
+        "knowledge.settings.get",
+        "knowledge.settings.set",
+        "pairing.create",
+        "devices.list",
+        "device.revoke",
+        "themes.list",
+        "theme.save",
+        "theme.delete"
+      ]
+    },
+    "NodeHelloMsg": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "node.hello"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "token": {
+          "description": "Token from /api/auth/token for a device of kind 'node'.",
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/MachineInfo"
+        }
+      },
+      "required": [
+        "type",
+        "protocol",
+        "token",
+        "machine"
+      ]
+    },
+    "NodeLinkControlMsg": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/NodeHelloMsg"
+        },
+        {
+          "$ref": "#/$defs/NodeWelcomeMsg"
+        }
+      ]
+    },
+    "NodeWelcomeMsg": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "const": "node.welcome"
+        },
+        "hubVersion": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "hubVersion"
+      ]
+    },
+    "OrchestrationSettings": {
+      "description": "Guardrails for agent-to-agent helpers (spec §12.2). Per machine, optionally overridden per workspace.",
+      "type": "object",
+      "properties": {
+        "maxDepth": {
+          "description": "parent → helper → helper's helper = 2.",
+          "type": "number"
+        },
+        "maxHelpersPerParent": {
+          "type": "number"
+        },
+        "maxHelpersPerMachine": {
+          "type": "number"
+        },
+        "onLimit": {
+          "description": "What `session_start` does beyond the concurrency limits.",
+          "type": "string",
+          "enum": [
+            "queue",
+            "fail"
+          ]
+        },
+        "parentAnswersApprovals": {
+          "description": "Let a parent answer its helpers' approvals (default: they go to you).",
+          "type": "boolean"
+        },
+        "treeBudgetUsd": {
+          "description": "Optional metered-spend cap for a whole session tree.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "maxDepth",
+        "maxHelpersPerParent",
+        "maxHelpersPerMachine",
+        "onLimit",
+        "parentAnswersApprovals"
+      ]
+    },
+    "PairRequest": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "description": "One-time pairing code (or the setup code). Case-insensitive; dashes/spaces ignored.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "publicKey": {
+          "$ref": "#/$defs/Ed25519PublicJwk"
+        },
+        "machineId": {
+          "description": "For kind 'node': the machine id of the node being paired.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "kind",
+        "name",
+        "publicKey"
+      ]
+    },
+    "PairResponse": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "owner": {
+          "type": "boolean"
+        },
+        "clientUrl": {
+          "description": "WebSocket URLs to use from now on.",
+          "type": "string"
+        },
+        "nodeUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "kind",
+        "owner",
+        "clientUrl",
+        "nodeUrl"
+      ]
+    },
+    "PlanItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ]
+        }
+      },
+      "required": [
+        "text",
+        "status"
+      ]
+    },
+    "QuestionAnswers": {
+      "description": "Answers keyed by QuestionItem.id: an option label, several labels (multiSelect), or free text.",
+      "type": "object",
+      "additionalProperties": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "QuestionItem": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "header": {
+          "description": "Short label, e.g. \"Auth method\".",
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "label"
+            ]
+          }
+        },
+        "multiSelect": {
+          "type": "boolean"
+        },
+        "allowText": {
+          "description": "Free-text answer allowed (besides or instead of options).",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "text"
+      ]
+    },
+    "RequestMsg": {
+      "description": "A client → server request; `params` follows the method.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "hello"
+            },
+            "params": {
+              "$ref": "#/$defs/params:hello"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "subscribe"
+            },
+            "params": {
+              "$ref": "#/$defs/params:subscribe"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "unsubscribe"
+            },
+            "params": {
+              "$ref": "#/$defs/params:unsubscribe"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "machines.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:machines.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agents.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agents.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "workspaces.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:workspaces.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "workspace.create"
+            },
+            "params": {
+              "$ref": "#/$defs/params:workspace.create"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "workspace.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/params:workspace.remove"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "worktree.create"
+            },
+            "params": {
+              "$ref": "#/$defs/params:worktree.create"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "worktree.remove"
+            },
+            "params": {
+              "$ref": "#/$defs/params:worktree.remove"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "sessions.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:sessions.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.create"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.create"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.fork"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.fork"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.delete"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.delete"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.send"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.send"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.steer"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.steer"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.interrupt"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.interrupt"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.markSeen"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.markSeen"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.restart"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.restart"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.stop"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "approval.respond"
+            },
+            "params": {
+              "$ref": "#/$defs/params:approval.respond"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "question.respond"
+            },
+            "params": {
+              "$ref": "#/$defs/params:question.respond"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "term.input"
+            },
+            "params": {
+              "$ref": "#/$defs/params:term.input"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "term.resize"
+            },
+            "params": {
+              "$ref": "#/$defs/params:term.resize"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "term.snapshot"
+            },
+            "params": {
+              "$ref": "#/$defs/params:term.snapshot"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fs.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fs.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fs.read"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fs.read"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "git.status"
+            },
+            "params": {
+              "$ref": "#/$defs/params:git.status"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "git.diff"
+            },
+            "params": {
+              "$ref": "#/$defs/params:git.diff"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.plan"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.plan"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.install"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.install"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.login"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.login"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.setSecret"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.setSecret"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.deleteSecret"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.deleteSecret"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.secrets"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.secrets"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.migrate"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.migrate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agent.policy.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agent.policy.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "usage.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:usage.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "widgets.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:widgets.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "widget.refresh"
+            },
+            "params": {
+              "$ref": "#/$defs/params:widget.refresh"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "orchestration.settings.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:orchestration.settings.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "orchestration.settings.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:orchestration.settings.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.add"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.add"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.update"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.update"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.forget"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.forget"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.inbox"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.inbox"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.accept"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.accept"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.reject"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.reject"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.settings.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.settings.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.settings.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.settings.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pairing.create"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pairing.create"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "devices.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:devices.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "device.revoke"
+            },
+            "params": {
+              "$ref": "#/$defs/params:device.revoke"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "themes.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:themes.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "theme.save"
+            },
+            "params": {
+              "$ref": "#/$defs/params:theme.save"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "theme.delete"
+            },
+            "params": {
+              "$ref": "#/$defs/params:theme.delete"
+            }
+          }
+        }
+      ]
+    },
+    "ResponseErrMsg": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "error": {
+          "$ref": "#/$defs/ErrorObject"
+        }
+      },
+      "required": [
+        "id",
+        "error"
+      ]
+    },
+    "ResponseMsg": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResponseOkMsg"
+        },
+        {
+          "$ref": "#/$defs/ResponseErrMsg"
+        }
+      ]
+    },
+    "ResponseOkMsg": {
+      "description": "A successful response; `result` is the `result:<method>` of the request with the same id.",
+      "type": "object",
+      "required": [
+        "id",
+        "result"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "result": {}
+      }
+    },
+    "RestartPolicy": {
+      "type": "string",
+      "enum": [
+        "when-idle",
+        "ask",
+        "manual"
+      ]
+    },
+    "SecretInfo": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "name": {
+          "description": "Environment variable name, e.g. ANTHROPIC_API_KEY. Values are never returned.",
+          "type": "string"
+        },
+        "setAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "name",
+        "setAt"
+      ]
+    },
+    "ServeReady": {
+      "description": "Printed by `bizzi serve` as a single JSON line on stdout once it is listening.",
+      "type": "object",
+      "properties": {
+        "event": {
+          "const": "ready"
+        },
+        "url": {
+          "description": "WebSocket URL of the client-protocol endpoint, e.g. ws://127.0.0.1:7777/ws",
+          "type": "string"
+        },
+        "token": {
+          "description": "Bearer token required in `hello` (local mode).",
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "pid": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "event",
+        "url",
+        "token",
+        "machineId",
+        "pid"
+      ]
+    },
+    "ServerMsg": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/ResponseMsg"
+        },
+        {
+          "$ref": "#/$defs/EventMsg"
+        }
+      ]
+    },
+    "SessionBudget": {
+      "description": "Only `metered` spend counts toward `usd`; budgetless providers count tokens only (usage.md §2).",
+      "type": "object",
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "tokens": {
+          "type": "number"
+        },
+        "turns": {
+          "type": "number"
+        }
+      }
+    },
+    "SessionEvent": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/SessionEventBody"
+        },
+        {
+          "$ref": "#/$defs/EventMeta"
+        }
+      ]
+    },
+    "SessionEventBody": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.status"
+            },
+            "data": {
+              "$ref": "#/$defs/session:session.status"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.info"
+            },
+            "data": {
+              "$ref": "#/$defs/session:session.info"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "turn.started"
+            },
+            "data": {
+              "$ref": "#/$defs/session:turn.started"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "turn.steered"
+            },
+            "data": {
+              "$ref": "#/$defs/session:turn.steered"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "turn.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:turn.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "message.delta"
+            },
+            "data": {
+              "$ref": "#/$defs/session:message.delta"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "message.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:message.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "reasoning.delta"
+            },
+            "data": {
+              "$ref": "#/$defs/session:reasoning.delta"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "reasoning.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:reasoning.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "tool.started"
+            },
+            "data": {
+              "$ref": "#/$defs/session:tool.started"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "tool.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/session:tool.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "tool.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:tool.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "file.changed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:file.changed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "plan.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/session:plan.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "approval.requested"
+            },
+            "data": {
+              "$ref": "#/$defs/session:approval.requested"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "approval.resolved"
+            },
+            "data": {
+              "$ref": "#/$defs/session:approval.resolved"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "question.asked"
+            },
+            "data": {
+              "$ref": "#/$defs/session:question.asked"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "question.resolved"
+            },
+            "data": {
+              "$ref": "#/$defs/session:question.resolved"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "usage.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/session:usage.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "context.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/session:context.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "context.compacted"
+            },
+            "data": {
+              "$ref": "#/$defs/session:context.compacted"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "account.usage"
+            },
+            "data": {
+              "$ref": "#/$defs/session:account.usage"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.restarting"
+            },
+            "data": {
+              "$ref": "#/$defs/session:session.restarting"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "session.restarted"
+            },
+            "data": {
+              "$ref": "#/$defs/session:session.restarted"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "subagent.started"
+            },
+            "data": {
+              "$ref": "#/$defs/session:subagent.started"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "subagent.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:subagent.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "term.output"
+            },
+            "data": {
+              "$ref": "#/$defs/session:term.output"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "term.exited"
+            },
+            "data": {
+              "$ref": "#/$defs/session:term.exited"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "login.prompt"
+            },
+            "data": {
+              "$ref": "#/$defs/session:login.prompt"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "login.completed"
+            },
+            "data": {
+              "$ref": "#/$defs/session:login.completed"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "agent.raw"
+            },
+            "data": {
+              "$ref": "#/$defs/session:agent.raw"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "error"
+            },
+            "data": {
+              "$ref": "#/$defs/session:error"
+            }
+          }
+        }
+      ]
+    },
+    "SessionEventType": {
+      "type": "string",
+      "enum": [
+        "session.status",
+        "session.info",
+        "turn.started",
+        "turn.steered",
+        "turn.completed",
+        "message.delta",
+        "message.completed",
+        "reasoning.delta",
+        "reasoning.completed",
+        "tool.started",
+        "tool.updated",
+        "tool.completed",
+        "file.changed",
+        "plan.updated",
+        "approval.requested",
+        "approval.resolved",
+        "question.asked",
+        "question.resolved",
+        "usage.updated",
+        "context.updated",
+        "context.compacted",
+        "account.usage",
+        "session.restarting",
+        "session.restarted",
+        "subagent.started",
+        "subagent.completed",
+        "term.output",
+        "term.exited",
+        "login.prompt",
+        "login.completed",
+        "agent.raw",
+        "error"
+      ]
+    },
+    "SessionInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "mode": {
+          "$ref": "#/$defs/SessionMode"
+        },
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agentSessionRef": {
+          "description": "The agent's own id for this conversation (Claude session id, Codex thread id, OpenCode session id).",
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "forkedFrom": {
+          "type": "string"
+        },
+        "spawnedBy": {
+          "description": "Agent-to-agent (spec §12.1): the parent session that started this helper. Same machine for now.",
+          "type": "string"
+        },
+        "scope": {
+          "description": "Helpers only. child: stops with its parent · detached: outlives it.",
+          "type": "string",
+          "enum": [
+            "child",
+            "detached"
+          ]
+        },
+        "depth": {
+          "description": "0 for sessions you start; parent depth + 1 for helpers (spec §12.2 depth limit).",
+          "type": "number"
+        },
+        "agentVersion": {
+          "description": "Version of the agent process currently running this session (updates.md §2).",
+          "type": "string"
+        },
+        "billing": {
+          "description": "Billing class of what the session runs on (spec §12.3).",
+          "$ref": "#/$defs/BillingClass"
+        },
+        "budget": {
+          "description": "Optional cap for this session and its helpers (usage.md §2).",
+          "$ref": "#/$defs/SessionBudget"
+        },
+        "seenThrough": {
+          "description": "Highest seq viewed on any device (spec §4); \"done, not yet seen\" = idle with lastSeq > seenThrough.",
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "lastSeq": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "workspaceId",
+        "agent",
+        "mode",
+        "status",
+        "createdAt",
+        "updatedAt",
+        "lastSeq"
+      ]
+    },
+    "SessionMode": {
+      "type": "string",
+      "enum": [
+        "structured",
+        "terminal"
+      ]
+    },
+    "SessionStatus": {
+      "type": "string",
+      "enum": [
+        "starting",
+        "running",
+        "waiting_input",
+        "waiting_approval",
+        "idle",
+        "paused",
+        "ended",
+        "failed"
+      ]
+    },
+    "StopReason": {
+      "type": "string",
+      "enum": [
+        "end_turn",
+        "interrupted",
+        "error",
+        "max_turns",
+        "refusal",
+        "other"
+      ]
+    },
+    "ThemeFile": {
+      "description": "A custom theme stored on the hub (theming.md §5); `data` is the theme JSON (shape owned by @bizzi/ui).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "data": {},
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "data",
+        "updatedAt"
+      ]
+    },
+    "TokenRequest": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        },
+        "nonce": {
+          "type": "string"
+        },
+        "signature": {
+          "description": "base64url Ed25519 signature over UTF-8 `authMessage(deviceId, nonce)`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId",
+        "nonce",
+        "signature"
+      ]
+    },
+    "TokenResponse": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "description": "Bearer token for `hello` / `node.hello`.",
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "token",
+        "expiresAt"
+      ]
+    },
+    "ToolKind": {
+      "type": "string",
+      "enum": [
+        "shell",
+        "read",
+        "edit",
+        "write",
+        "search",
+        "web",
+        "mcp",
+        "task",
+        "other"
+      ]
+    },
+    "UpdatePolicy": {
+      "description": "spec §7 / updates.md §6.",
+      "type": "string",
+      "enum": [
+        "auto",
+        "notify",
+        "pinned"
+      ]
+    },
+    "Usage": {
+      "type": "object",
+      "properties": {
+        "inputTokens": {
+          "type": "number"
+        },
+        "outputTokens": {
+          "type": "number"
+        },
+        "cacheReadTokens": {
+          "type": "number"
+        },
+        "cacheWriteTokens": {
+          "type": "number"
+        },
+        "costUsd": {
+          "type": "number"
+        },
+        "contextWindow": {
+          "type": "number"
+        }
+      }
+    },
+    "UsageWindow": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "e.g. five_hour, seven_day, primary, secondary",
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "usedPercent": {
+          "type": "number"
+        },
+        "resetsAt": {
+          "type": "string"
+        },
+        "windowMins": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "usedPercent"
+      ]
+    },
+    "WidgetValue": {
+      "description": "A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "meter",
+            "text",
+            "status"
+          ]
+        },
+        "placement": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "bar",
+              "machine",
+              "workspace",
+              "session-header"
+            ]
+          }
+        },
+        "text": {
+          "type": "string"
+        },
+        "value": {
+          "type": "number"
+        },
+        "max": {
+          "type": "number"
+        },
+        "format": {
+          "type": "string",
+          "enum": [
+            "usd",
+            "percent",
+            "number",
+            "tokens"
+          ]
+        },
+        "tone": {
+          "type": "string",
+          "enum": [
+            "neutral",
+            "ok",
+            "warn",
+            "error"
+          ]
+        },
+        "tooltip": {
+          "type": "string"
+        },
+        "link": {
+          "type": "string"
+        },
+        "resetsAt": {
+          "type": "string"
+        },
+        "error": {
+          "description": "Set when the last run failed; the previous value (if any) is kept.",
+          "type": "string"
+        },
+        "observedAt": {
+          "description": "ISO time of the last successful run; the UI shows staleness.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "label",
+        "kind",
+        "placement"
+      ]
+    },
+    "WorkspaceInfo": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path on the machine.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/WorkspaceKind"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "parentWorkspaceId": {
+          "description": "kind 'worktree': the repo workspace it was created from (UI groups it under that one).",
+          "type": "string"
+        },
+        "branch": {
+          "description": "kind 'worktree': the branch checked out in it.",
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "name",
+        "path",
+        "kind",
+        "createdAt"
+      ]
+    },
+    "WorkspaceKind": {
+      "type": "string",
+      "enum": [
+        "git",
+        "dir",
+        "worktree"
+      ]
+    },
+    "global:account.usage": {
+      "type": "object",
+      "properties": {
+        "usage": {
+          "$ref": "#/$defs/AccountUsage"
+        }
+      },
+      "required": [
+        "usage"
+      ]
+    },
+    "global:device.updated": {
+      "type": "object",
+      "properties": {
+        "device": {
+          "$ref": "#/$defs/DeviceInfo"
+        }
+      },
+      "required": [
+        "device"
+      ]
+    },
+    "global:install.progress": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "tool": {
+          "description": "Set for non-agent tools (e.g. 'node'); `agent` is then the agent it was installed for.",
+          "type": "string"
+        },
+        "jobId": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        },
+        "step": {
+          "type": "number"
+        },
+        "total": {
+          "type": "number"
+        },
+        "done": {
+          "type": "boolean"
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "agent",
+        "stage"
+      ]
+    },
+    "global:knowledge.changed": {
+      "type": "object",
+      "properties": {
+        "ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "ids"
+      ]
+    },
+    "global:machine.updated": {
+      "type": "object",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineInfo"
+        }
+      },
+      "required": [
+        "machine"
+      ]
+    },
+    "global:session.created": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "global:session.removed": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "workspaceId"
+      ]
+    },
+    "global:session.updated": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "global:widget.removed": {
+      "type": "object",
+      "properties": {
+        "machineId": {
+          "type": "string"
+        },
+        "widgetId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "machineId",
+        "widgetId"
+      ]
+    },
+    "global:widget.updated": {
+      "type": "object",
+      "properties": {
+        "widget": {
+          "$ref": "#/$defs/WidgetValue"
+        }
+      },
+      "required": [
+        "widget"
+      ]
+    },
+    "global:workspace.created": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace"
+      ]
+    },
+    "global:workspace.removed": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:agent.deleteSecret": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agent",
+            "name"
+          ]
+        }
+      ]
+    },
+    "params:agent.install": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "action": {
+              "$ref": "#/$defs/InstallAction"
+            },
+            "method": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "dryRun": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "agent",
+            "action"
+          ]
+        }
+      ]
+    },
+    "params:agent.login": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "mode": {
+              "$ref": "#/$defs/LoginMode"
+            },
+            "workspaceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agent"
+          ]
+        }
+      ]
+    },
+    "params:agent.migrate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "toMethod": {
+              "type": "string"
+            },
+            "dryRun": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "agent"
+          ]
+        }
+      ]
+    },
+    "params:agent.plan": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "action": {
+              "$ref": "#/$defs/InstallAction"
+            },
+            "method": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agent",
+            "action"
+          ]
+        }
+      ]
+    },
+    "params:agent.policy.set": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "update": {
+              "$ref": "#/$defs/UpdatePolicy"
+            },
+            "restart": {
+              "$ref": "#/$defs/RestartPolicy"
+            }
+          },
+          "required": [
+            "agent"
+          ]
+        }
+      ]
+    },
+    "params:agent.secrets": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            }
+          }
+        }
+      ]
+    },
+    "params:agent.setSecret": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "name": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "agent",
+            "name",
+            "value"
+          ]
+        }
+      ]
+    },
+    "params:agents.list": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "refresh": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "params:approval.respond": {
+      "allOf": [
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "approvalId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "approvalId"
+          ]
+        },
+        {
+          "$ref": "#/$defs/ApprovalDecision"
+        }
+      ]
+    },
+    "params:device.revoke": {
+      "type": "object",
+      "properties": {
+        "deviceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "deviceId"
+      ]
+    },
+    "params:devices.list": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:fs.list": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:fs.read": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "maxBytes": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "path"
+      ]
+    },
+    "params:git.diff": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "staged": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:git.status": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:hello": {
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string"
+        },
+        "client": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "name",
+            "version"
+          ]
+        },
+        "token": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "client"
+      ]
+    },
+    "params:knowledge.accept": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "scope": {
+              "$ref": "#/$defs/KnowledgeScope"
+            }
+          },
+          "required": [
+            "ids"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.add": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "rule",
+                "memory"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/KnowledgeScope"
+            },
+            "kind": {
+              "type": "string"
+            },
+            "appliesTo": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentKind"
+              }
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "type",
+            "title",
+            "body",
+            "scope"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.forget": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.inbox": {
+      "$ref": "#/$defs/MachineTarget"
+    },
+    "params:knowledge.list": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "enum": [
+                "rule",
+                "memory"
+              ]
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "active",
+                "suggested",
+                "superseded",
+                "deleted"
+              ]
+            },
+            "scopeLevel": {
+              "$ref": "#/$defs/KnowledgeScopeLevel"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "query": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "params:knowledge.reject": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "ids"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.settings.get": {
+      "$ref": "#/$defs/MachineTarget"
+    },
+    "params:knowledge.settings.set": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "settings": {
+              "type": "object",
+              "properties": {
+                "preset": {
+                  "$ref": "#/$defs/KnowledgePreset"
+                },
+                "defaultAgentScope": {
+                  "description": "Scope used when an agent writes without naming one.",
+                  "$ref": "#/$defs/KnowledgeScopeLevel"
+                },
+                "overrides": {
+                  "description": "Per source × scope overrides; shape owned by @bizzi/knowledge."
+                }
+              }
+            }
+          },
+          "required": [
+            "settings"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.update": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            },
+            "scope": {
+              "$ref": "#/$defs/KnowledgeScope"
+            },
+            "appliesTo": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentKind"
+              }
+            },
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      ]
+    },
+    "params:machines.list": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:orchestration.settings.get": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "params:orchestration.settings.set": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "settings": {
+              "type": "object",
+              "properties": {
+                "maxDepth": {
+                  "description": "parent → helper → helper's helper = 2.",
+                  "type": "number"
+                },
+                "maxHelpersPerParent": {
+                  "type": "number"
+                },
+                "maxHelpersPerMachine": {
+                  "type": "number"
+                },
+                "onLimit": {
+                  "description": "What `session_start` does beyond the concurrency limits.",
+                  "type": "string",
+                  "enum": [
+                    "queue",
+                    "fail"
+                  ]
+                },
+                "parentAnswersApprovals": {
+                  "description": "Let a parent answer its helpers' approvals (default: they go to you).",
+                  "type": "boolean"
+                },
+                "treeBudgetUsd": {
+                  "description": "Optional metered-spend cap for a whole session tree.",
+                  "type": "number"
+                }
+              }
+            }
+          },
+          "required": [
+            "settings"
+          ]
+        }
+      ]
+    },
+    "params:pairing.create": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/DeviceKind"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind"
+      ]
+    },
+    "params:question.respond": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "questionId": {
+          "type": "string"
+        },
+        "answers": {
+          "$ref": "#/$defs/QuestionAnswers"
+        },
+        "cancel": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionId",
+        "questionId"
+      ]
+    },
+    "params:session.create": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "mode": {
+          "$ref": "#/$defs/SessionMode"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "resumeRef": {
+          "description": "Resume an existing agent-native session (Claude session id, Codex thread id, …).",
+          "type": "string"
+        },
+        "cols": {
+          "description": "Terminal mode: initial size.",
+          "type": "number"
+        },
+        "rows": {
+          "type": "number"
+        },
+        "command": {
+          "description": "Terminal mode only: run this command (argv) instead of the agent's TUI.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "budget": {
+          "$ref": "#/$defs/SessionBudget"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "agent"
+      ]
+    },
+    "params:session.delete": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.fork": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.get": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.interrupt": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.markSeen": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sessionId",
+        "seq"
+      ]
+    },
+    "params:session.restart": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.send": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputBlock"
+          }
+        }
+      },
+      "required": [
+        "sessionId",
+        "input"
+      ]
+    },
+    "params:session.set": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:session.steer": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputBlock"
+          }
+        }
+      },
+      "required": [
+        "sessionId",
+        "input"
+      ]
+    },
+    "params:session.stop": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:sessions.list": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "spawnedBy": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
+    "params:subscribe": {
+      "type": "object",
+      "properties": {
+        "ch": {
+          "type": "string"
+        },
+        "since": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ch"
+      ]
+    },
+    "params:term.input": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "dataBase64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "dataBase64"
+      ]
+    },
+    "params:term.resize": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "cols": {
+          "type": "number"
+        },
+        "rows": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sessionId",
+        "cols",
+        "rows"
+      ]
+    },
+    "params:term.snapshot": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:theme.delete": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ]
+    },
+    "params:theme.save": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "data": {}
+      },
+      "required": [
+        "name",
+        "data"
+      ]
+    },
+    "params:themes.list": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:unsubscribe": {
+      "type": "object",
+      "properties": {
+        "ch": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ch"
+      ]
+    },
+    "params:usage.list": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:widget.refresh": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "widgetId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "widgetId"
+          ]
+        }
+      ]
+    },
+    "params:widgets.list": {
+      "$ref": "#/$defs/MachineTarget"
+    },
+    "params:workspace.create": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "create": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "params:workspace.remove": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:workspaces.list": {
+      "$ref": "#/$defs/MachineTarget"
+    },
+    "params:worktree.create": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "base": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "branch"
+      ]
+    },
+    "params:worktree.remove": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "result:agent.deleteSecret": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:agent.install": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/$defs/InstallPlan"
+        }
+      },
+      "required": [
+        "jobId",
+        "plan"
+      ]
+    },
+    "result:agent.login": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "result:agent.migrate": {
+      "type": "object",
+      "properties": {
+        "jobId": {
+          "type": "string"
+        },
+        "plan": {
+          "$ref": "#/$defs/InstallPlan"
+        }
+      },
+      "required": [
+        "jobId",
+        "plan"
+      ]
+    },
+    "result:agent.plan": {
+      "type": "object",
+      "properties": {
+        "plan": {
+          "$ref": "#/$defs/InstallPlan"
+        }
+      },
+      "required": [
+        "plan"
+      ]
+    },
+    "result:agent.policy.set": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentListing"
+        }
+      },
+      "required": [
+        "agent"
+      ]
+    },
+    "result:agent.secrets": {
+      "type": "object",
+      "properties": {
+        "secrets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SecretInfo"
+          }
+        }
+      },
+      "required": [
+        "secrets"
+      ]
+    },
+    "result:agent.setSecret": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:agents.list": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentListing"
+          }
+        }
+      },
+      "required": [
+        "agents"
+      ]
+    },
+    "result:approval.respond": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:device.revoke": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:devices.list": {
+      "type": "object",
+      "properties": {
+        "devices": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DeviceInfo"
+          }
+        }
+      },
+      "required": [
+        "devices"
+      ]
+    },
+    "result:fs.list": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FsEntry"
+          }
+        }
+      },
+      "required": [
+        "entries"
+      ]
+    },
+    "result:fs.read": {
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "string"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": [
+            "utf8",
+            "base64"
+          ]
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "content",
+        "encoding",
+        "truncated"
+      ]
+    },
+    "result:git.diff": {
+      "type": "object",
+      "properties": {
+        "diff": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "diff"
+      ]
+    },
+    "result:git.status": {
+      "type": "object",
+      "properties": {
+        "isRepo": {
+          "type": "boolean"
+        },
+        "branch": {
+          "type": "string"
+        },
+        "ahead": {
+          "type": "number"
+        },
+        "behind": {
+          "type": "number"
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/GitFileStatus"
+          }
+        }
+      },
+      "required": [
+        "isRepo",
+        "files"
+      ]
+    },
+    "result:hello": {
+      "description": "`machine` is the node's machine (role 'node') or the hub's own host (role 'hub').",
+      "type": "object",
+      "properties": {
+        "protocol": {
+          "type": "string"
+        },
+        "serverVersion": {
+          "type": "string"
+        },
+        "machine": {
+          "$ref": "#/$defs/MachineInfo"
+        },
+        "role": {
+          "$ref": "#/$defs/MachineRole"
+        }
+      },
+      "required": [
+        "protocol",
+        "serverVersion",
+        "machine"
+      ]
+    },
+    "result:knowledge.accept": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:knowledge.add": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/KnowledgeItemInfo"
+        }
+      },
+      "required": [
+        "item"
+      ]
+    },
+    "result:knowledge.forget": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:knowledge.inbox": {
+      "type": "object",
+      "properties": {
+        "cards": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeInboxCard"
+          }
+        }
+      },
+      "required": [
+        "cards"
+      ]
+    },
+    "result:knowledge.list": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeItemInfo"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "result:knowledge.reject": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:knowledge.settings.get": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/KnowledgeSettings"
+        }
+      },
+      "required": [
+        "settings"
+      ]
+    },
+    "result:knowledge.settings.set": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/KnowledgeSettings"
+        }
+      },
+      "required": [
+        "settings"
+      ]
+    },
+    "result:knowledge.update": {
+      "type": "object",
+      "properties": {
+        "item": {
+          "$ref": "#/$defs/KnowledgeItemInfo"
+        }
+      },
+      "required": [
+        "item"
+      ]
+    },
+    "result:machines.list": {
+      "type": "object",
+      "properties": {
+        "machines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MachineInfo"
+          }
+        }
+      },
+      "required": [
+        "machines"
+      ]
+    },
+    "result:orchestration.settings.get": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/OrchestrationSettings"
+        }
+      },
+      "required": [
+        "settings"
+      ]
+    },
+    "result:orchestration.settings.set": {
+      "type": "object",
+      "properties": {
+        "settings": {
+          "$ref": "#/$defs/OrchestrationSettings"
+        }
+      },
+      "required": [
+        "settings"
+      ]
+    },
+    "result:pairing.create": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "expiresAt": {
+          "type": "string"
+        },
+        "pairUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "expiresAt",
+        "pairUrl"
+      ]
+    },
+    "result:question.respond": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:session.create": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "result:session.delete": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:session.fork": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "result:session.get": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "capabilities": {
+          "$ref": "#/$defs/AgentCapabilities"
+        }
+      },
+      "required": [
+        "session",
+        "capabilities"
+      ]
+    },
+    "result:session.interrupt": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:session.markSeen": {
+      "type": "object",
+      "properties": {
+        "seenThrough": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "seenThrough"
+      ]
+    },
+    "result:session.restart": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:session.send": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turnId"
+      ]
+    },
+    "result:session.set": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ]
+    },
+    "result:session.steer": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:session.stop": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:sessions.list": {
+      "type": "object",
+      "properties": {
+        "sessions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SessionInfo"
+          }
+        }
+      },
+      "required": [
+        "sessions"
+      ]
+    },
+    "result:subscribe": {
+      "type": "object",
+      "properties": {
+        "ch": {
+          "type": "string"
+        },
+        "lastSeq": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "ch",
+        "lastSeq"
+      ]
+    },
+    "result:term.input": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:term.resize": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:term.snapshot": {
+      "type": "object",
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        },
+        "seq": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "dataBase64",
+        "seq"
+      ]
+    },
+    "result:theme.delete": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:theme.save": {
+      "type": "object",
+      "properties": {
+        "theme": {
+          "$ref": "#/$defs/ThemeFile"
+        }
+      },
+      "required": [
+        "theme"
+      ]
+    },
+    "result:themes.list": {
+      "type": "object",
+      "properties": {
+        "themes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ThemeFile"
+          }
+        }
+      },
+      "required": [
+        "themes"
+      ]
+    },
+    "result:unsubscribe": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:usage.list": {
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AccountUsage"
+          }
+        }
+      },
+      "required": [
+        "accounts"
+      ]
+    },
+    "result:widget.refresh": {
+      "type": "object",
+      "properties": {
+        "widget": {
+          "$ref": "#/$defs/WidgetValue"
+        }
+      },
+      "required": [
+        "widget"
+      ]
+    },
+    "result:widgets.list": {
+      "type": "object",
+      "properties": {
+        "widgets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WidgetValue"
+          }
+        }
+      },
+      "required": [
+        "widgets"
+      ]
+    },
+    "result:workspace.create": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace"
+      ]
+    },
+    "result:workspace.remove": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:workspaces.list": {
+      "type": "object",
+      "properties": {
+        "workspaces": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorkspaceInfo"
+          }
+        }
+      },
+      "required": [
+        "workspaces"
+      ]
+    },
+    "result:worktree.create": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace"
+      ]
+    },
+    "result:worktree.remove": {
+      "$ref": "#/$defs/Empty"
+    },
+    "session:account.usage": {
+      "$ref": "#/$defs/AccountUsage"
+    },
+    "session:agent.raw": {
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "payload": {}
+      },
+      "required": [
+        "agent",
+        "payload"
+      ]
+    },
+    "session:approval.requested": {
+      "$ref": "#/$defs/ApprovalRequest"
+    },
+    "session:approval.resolved": {
+      "type": "object",
+      "properties": {
+        "approvalId": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalResolution"
+        },
+        "by": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "approvalId",
+        "decision"
+      ]
+    },
+    "session:context.compacted": {
+      "type": "object",
+      "properties": {
+        "before": {
+          "type": "number"
+        },
+        "after": {
+          "type": "number"
+        }
+      }
+    },
+    "session:context.updated": {
+      "$ref": "#/$defs/ContextUsage"
+    },
+    "session:error": {
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "code": {
+          "type": "string"
+        },
+        "fatal": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "session:file.changed": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "created",
+            "modified",
+            "deleted"
+          ]
+        },
+        "diff": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "change"
+      ]
+    },
+    "session:login.completed": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "type": "boolean"
+        },
+        "account": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ]
+    },
+    "session:login.prompt": {
+      "type": "object",
+      "properties": {
+        "urls": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "codes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "callbackPort": {
+          "type": "number"
+        },
+        "awaitingCodeInput": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "urls",
+        "codes"
+      ]
+    },
+    "session:message.completed": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "assistant",
+            "user",
+            "system"
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "role",
+        "text"
+      ]
+    },
+    "session:message.delta": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "role": {
+          "const": "assistant"
+        },
+        "text": {
+          "type": "string"
+        },
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "role",
+        "text"
+      ]
+    },
+    "session:plan.updated": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PlanItem"
+          }
+        }
+      },
+      "required": [
+        "items"
+      ]
+    },
+    "session:question.asked": {
+      "type": "object",
+      "properties": {
+        "questionId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionItem"
+          }
+        }
+      },
+      "required": [
+        "questionId",
+        "text"
+      ]
+    },
+    "session:question.resolved": {
+      "type": "object",
+      "properties": {
+        "questionId": {
+          "type": "string"
+        },
+        "answers": {
+          "$ref": "#/$defs/QuestionAnswers"
+        },
+        "cancelled": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "questionId"
+      ]
+    },
+    "session:reasoning.completed": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "boolean"
+        },
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "text"
+      ]
+    },
+    "session:reasoning.delta": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "messageId",
+        "text"
+      ]
+    },
+    "session:session.info": {
+      "type": "object",
+      "properties": {
+        "agentSessionRef": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "commands": {
+          "description": "Slash commands / skills the agent advertises.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "name"
+            ]
+          }
+        }
+      }
+    },
+    "session:session.restarted": {
+      "type": "object",
+      "properties": {
+        "fromVersion": {
+          "type": "string"
+        },
+        "toVersion": {
+          "type": "string"
+        },
+        "ok": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "ok"
+      ]
+    },
+    "session:session.restarting": {
+      "type": "object",
+      "properties": {
+        "fromVersion": {
+          "type": "string"
+        },
+        "toVersion": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      }
+    },
+    "session:session.status": {
+      "type": "object",
+      "properties": {
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "prompt": {
+          "description": "What the session is waiting on, when known (terminal heuristics, login flows).",
+          "type": "string",
+          "enum": [
+            "approval",
+            "input",
+            "login",
+            "question",
+            "budget"
+          ]
+        },
+        "source": {
+          "description": "What produced this status, for the \"explain\" view (landscape.md §4.3), e.g. 'osc7501', 'detector:claude-permission', 'adapter'.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ]
+    },
+    "session:subagent.completed": {
+      "type": "object",
+      "properties": {
+        "subagentId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "cancelled"
+          ]
+        }
+      },
+      "required": [
+        "subagentId",
+        "status"
+      ]
+    },
+    "session:subagent.started": {
+      "type": "object",
+      "properties": {
+        "subagentId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subagentId"
+      ]
+    },
+    "session:term.exited": {
+      "type": "object",
+      "properties": {
+        "exitCode": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "signal": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "exitCode"
+      ]
+    },
+    "session:term.output": {
+      "type": "object",
+      "properties": {
+        "dataBase64": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "dataBase64"
+      ]
+    },
+    "session:tool.completed": {
+      "type": "object",
+      "properties": {
+        "toolId": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "error",
+            "denied",
+            "cancelled"
+          ]
+        },
+        "output": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolId",
+        "status"
+      ]
+    },
+    "session:tool.started": {
+      "type": "object",
+      "properties": {
+        "toolId": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "name": {
+          "description": "Native tool name, e.g. \"Bash\", \"Edit\", \"commandExecution\".",
+          "type": "string"
+        },
+        "title": {
+          "description": "Human-readable one-liner, e.g. \"pnpm test\".",
+          "type": "string"
+        },
+        "input": {},
+        "parentToolId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolId",
+        "kind",
+        "name",
+        "title"
+      ]
+    },
+    "session:tool.updated": {
+      "type": "object",
+      "properties": {
+        "toolId": {
+          "type": "string"
+        },
+        "output": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolId"
+      ]
+    },
+    "session:turn.completed": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        },
+        "stopReason": {
+          "$ref": "#/$defs/StopReason"
+        },
+        "usage": {
+          "$ref": "#/$defs/Usage"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turnId",
+        "stopReason"
+      ]
+    },
+    "session:turn.started": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputBlock"
+          }
+        }
+      },
+      "required": [
+        "turnId",
+        "input"
+      ]
+    },
+    "session:turn.steered": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        },
+        "input": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/InputBlock"
+          }
+        }
+      },
+      "required": [
+        "turnId",
+        "input"
+      ]
+    },
+    "session:usage.updated": {
+      "$ref": "#/$defs/Usage"
+    }
+  }
+}
