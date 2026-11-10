@@ -77,6 +77,8 @@ export const CODEX_STRUCTURED_CAPABILITIES: AgentCapabilities = {
   usage: 'tokens',
   terminal: false,
   questions: true,
+  context: true,
+  accountUsage: true,
 };
 
 export class CodexAdapter implements AgentAdapter {
