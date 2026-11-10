@@ -366,6 +366,8 @@ export class Orchestrator {
         maxDepth: settings.maxDepth,
       });
     }
+    const over = sessions.overBudget(parentId);
+    if (over) throw new BizziError('conflict', `${over}; no new helpers until the budget is raised`, { budget: true });
     const scope = req.scope ?? 'child';
     if (scope !== 'child' && scope !== 'detached') throw new BizziError('bad_request', "scope must be 'child' or 'detached'");
 

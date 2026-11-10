@@ -269,6 +269,11 @@ export class Sessions {
     return { own: { ...(rt.state.spent ?? zeroSpent()) }, tree: this.#treeSpent(rt) };
   }
 
+  /** Why the session may not start another turn because of a budget (its own, an ancestor's, the tree cap). */
+  overBudget(id: string): string | undefined {
+    return this.#budgetExceeded(this.#get(id));
+  }
+
   /**
    * Record that the user has seen the session through `seq` (spec §4 `seen_through`). Never moves
    * backwards and never past the last event. Emits `session.updated` when it moves.

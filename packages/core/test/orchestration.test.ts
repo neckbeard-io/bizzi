@@ -314,6 +314,7 @@ test('budgets: turns and tokens stop at the turn boundary; send refused; metered
   await waitFor(() => node.sessions.pending(h.session.id).budget, 5000, 'tree budget on helper');
   assert.equal(node.sessions.pending(h.session.id).budget, 'tree budget reached: $0.4000 of $0.3000 metered spend');
   await rejects(node.call('session.send', { sessionId: root.id, input: [{ type: 'text', text: 'more' }] }), 'conflict', /tree budget reached/);
+  await rejects(node.orchestration.startHelper(root.id, { agent: 'claude', prompt: 'another' }), 'conflict', /tree budget reached.*no new helpers/);
   const w = await node.orchestration.wait(root.id, h.session.id, 'done', 1000);
   assert.equal(w.reached, true);
   assert.match(w.reason, /tree budget reached/);
