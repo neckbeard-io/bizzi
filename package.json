@@ -20,7 +20,8 @@
     "dev:ui": "npm run dev -w @bizzi/ui -- --open \"/?mock=1\"",
     "serve": "node apps/cli/src/main.ts serve --data-dir .bizzi-dev/data",
     "smoke:live": "node scripts/smoke-live.ts",
-    "smoke:hub": "node scripts/smoke-hub.ts"
+    "smoke:hub": "node scripts/smoke-hub.ts",
+    "smoke:v12": "node scripts/smoke-v12.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",

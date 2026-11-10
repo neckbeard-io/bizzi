@@ -47,6 +47,10 @@ jobs:
 
       - run: npm run build:ui
 
+      # Offline end-to-end: a real hub and node (fake adapters) over the wire, a few seconds each.
+      - run: npm run smoke:hub
+      - run: npm run smoke:v12
+
   docker:
     name: docker (node image)
     runs-on: ubuntu-latest
