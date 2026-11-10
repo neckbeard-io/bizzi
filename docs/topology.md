@@ -208,7 +208,7 @@ Machine: server-a
 
 **Why not VMs:** stronger isolation and macOS guests (e.g. Tart), but slower to boot, heavier, and more to manage. Out of scope.
 
-**Suggestion:** M4. Start with Docker/Podman on Linux hosts, `devcontainer.json` when the repo has one, a bizzi base image otherwise, and ephemeral lifecycle first.
+**Suggestion:** M5 (spec §13). Start with Docker/Podman on Linux hosts, `devcontainer.json` when the repo has one, a bizzi base image otherwise, and ephemeral lifecycle first.
 
 ## 8. Spikes
 

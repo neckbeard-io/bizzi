@@ -16,7 +16,7 @@ Companion to [spec.md](spec.md), [topology.md](topology.md), [knowledge.md](know
 | Transport | settled | WebSocket (client↔hub, node↔hub); local socket between the desktop UI and its node |
 | Storage | settled | SQLite (`node:sqlite` / better-sqlite3) + Drizzle on every install; Postgres optional for a team hub |
 | Replication | settled | single-writer event logs, HLC last-writer-wins config, append-only knowledge |
-| Agents | settled | Claude Agent SDK in-process · `codex app-server` · OpenCode SDK · `node-pty` for agy and terminal mode · official ACP SDK for anything else |
+| Agents | settled | Claude Agent SDK in-process · `codex app-server` · OpenCode **v2** server API (D12; v1 only via PTY) · `node-pty` for agy and terminal mode · official ACP SDK for anything else |
 | Knowledge MCP server | settled | official MCP TypeScript SDK |
 | Linux deployment | settled | docker compose (`hub`, `node`, optional `dind`) |
 | Push | settled-ish | ntfy / UnifiedPush and FCM on Android, APNs on iOS, Web Push in browsers, local notifications on desktop |
@@ -132,7 +132,7 @@ Single-writer event logs shipped from the outbox by `(session, seq)`; HLC last-w
 |---|---|---|
 | Claude Code | **Agent SDK in-process** | ACP (`claude-agent-acp`); `claude -p` stream-json; PTY |
 | Codex | `codex app-server` (JSON-RPC stdio; types from `generate-ts`) | `codex-acp`; PTY |
-| OpenCode | `opencode serve` + official SDK | `opencode acp`; PTY |
+| OpenCode | `opencode serve` (**v2** HTTP API, hand-written client; D12) | `opencode acp`; PTY (also the only path for v1) |
 | agy | PTY (`node-pty`) | revisit when Google ships a protocol |
 | any other ACP agent | official ACP TS SDK | PTY |
 
@@ -176,6 +176,34 @@ On Linux through the compose `dind` sidecar, never the host socket; Docker Deskt
 ## D11. Linux deployment: docker compose
 
 `hub` + `node` (+ `dind` profile) services; runtime state on volumes (`/data`, `/home/bizzi`, bind-mounted `/workspaces`); `PUID`/`PGID`; graceful drain on SIGTERM; no host Docker socket. The node image: Debian slim + Node + the core + base toolset (git, Python, build tools, Xvfb + browser dependencies, `tini`). Full layout: [topology.md](topology.md) §2.2. A bare-metal systemd install stays possible but unsupported.
+
+## D12. OpenCode v1 vs v2 (decided: v2 only)
+
+Researched 2026-11-09. OpenCode 2.0 (Anomaly, formerly SST) shipped 2026-10-12. Its server API was rebuilt from scratch (Anomaly on v1's: "It was bad"), and v1 integrations "must migrate". The plugin API and terminal config also break. v1 (1.19.x) is still maintained with no stated end date; `opencode upgrade --major` moves 1.x to 2.x, and the two can't be installed side by side (same `opencode` binary).
+
+**Where bizzi already is:** v2 only. `@bizzi/adapter-opencode` speaks the v2 HTTP API with a hand-written client checked against the server's `/openapi.json` (2.0.25), because the official `@opencode-ai/sdk` `./v2` entry was generated from an older snapshot. The probe flags a v1 install, and the provisioning recipe installs OpenCode 2.
+
+**Decision: don't add a v1 structured adapter.** It would be a second adapter against an API its own authors call bad, for a line that's being upgraded away from, and v1 and v2 can't coexist on one machine anyway. v1 machines get:
+1. a probe note plus a one-click **upgrade to v2** (`opencode upgrade --major`, through provisioning);
+2. **terminal mode** (PTY) meanwhile, like agy.
+
+**What v2 opens up:** three interface types, of which bizzi uses one today.
+
+| | What | Status | Notes |
+|---|---|---|---|
+| **A. Private server** | bizzi spawns its own `opencode serve` per node (isolated `XDG_DATA_HOME` possible) | **built** | Full control of lifecycle and config. Sessions are invisible to your own OpenCode TUI/desktop. |
+| **B. Shared background service** | v2 auto-starts one local service that the TUI, web and desktop clients all share; bizzi attaches as one more client (`serverUrl` already exists in the adapter options) | spike | Sessions you start in the OpenCode TUI appear in bizzi and vice versa, with full structured events, not a PTY scrape. This is the cleanest case of "agent sessions bizzi didn't start" ([knowledge.md](knowledge.md)). Costs: bizzi doesn't own the lifecycle or config; sessions it didn't create need adopt / observe semantics; auth via `OPENCODE_PASSWORD`; discovery through `@opencode/client`'s service lookup or a configured URL. Remote OpenCode via `opencode pair` falls out of the same mode. |
+| **C. In-process SDK** | `@opencode/sdk` (2.2.6): "executes Server's assembled HTTP router in memory, opening no listener and adding no network hop"; the same code as the CLI | defer | The OpenCode equivalent of the Claude Agent SDK. But it pulls the whole engine into bizzi's process and lockfile: Effect 4, `@opencode/core` with native addons (`@lydell/node-pty` alongside bizzi's `node-pty`, `bun-pty`, `@parcel/watcher`, wasm image tools). It pins OpenCode to bizzi's release rather than the installed binary that provisioning manages, and Node 26 support is unverified. The "few, mainstream dependencies" rule says no until there's a feature only C can give. |
+
+**Client library:** `@opencode/client` (2.2.6) is now the official client, generated from OpenCode's own `HttpApi`; it replaces the stale `@opencode-ai/sdk` v2 entry. Spike it against the hand-written client: adopt it if it tracks the installed server version cleanly (its version must match the server's). Keep the hand-written client if it doesn't, since that client fails loudly on drift. Note version drift today: the recipe and tests check 2.0.25 while npm is at 2.2.6.
+
+**Capability notes for v2:**
+- Code Mode is on by default for every MCP server, which lowers MCP context cost ([usage.md](usage.md) §1).
+- Background subagents (default depth 1) and background shell map onto `subagent.*` events.
+- `permissions` is one ordered `{action, resource, effect}` array.
+- LSP, session sharing and the `CLAUDE.md` fallback aren't in v2 yet (`AGENTS.md` only, which matches bizzi).
+
+**Spikes, in order:** (1) `@opencode/client` vs the hand-written client on 2.2.x; (2) mode B against the shared service, including adopting a TUI-started session; (3) mode C only if (2) shows a gap.
 
 ## Packaging
 

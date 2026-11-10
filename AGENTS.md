@@ -1,6 +1,6 @@
 # bizzi — agent & contributor guide
 
-bizzi is a self-hosted agentic development environment that drives existing coding agents (Claude Code, Codex, OpenCode, agy) on your machines, reachable from any device. Design docs live in `docs/` — read `docs/spec.md` first, then `docs/tech-choices.md`.
+bizzi is a self-hosted agentic development environment that drives existing coding agents (Claude Code, Codex, OpenCode, agy) on your machines, reachable from any device. Design docs live in `docs/` — read `docs/spec.md` first, then `docs/tech-choices.md`. `docs/usage.md` covers context, per-login usage, budgets and widgets. `docs/updates.md` covers ADE updates, restarts and resume. `docs/theming.md` covers themes. `docs/landscape.md` covers comparable projects (Rex, Herdr) and the ideas backlog taken from them; check it before designing terminal status, agent-to-agent tools or multi-machine features.
 
 ## Layout
 
