@@ -41,6 +41,9 @@ jobs:
 
       - run: npm run typecheck
 
+      # docs/protocol.schema.json must match packages/protocol (regenerate with `npm run schema`).
+      - run: npm run schema:check
+
       # No test spawns Electron or needs a display (desktop tests use a stub core over node:test),
       # so Linux runs without xvfb. The UI package's test also does a `vite build`.
       - run: npm test

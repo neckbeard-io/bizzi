@@ -97,8 +97,8 @@ npm run smoke:live -- opencode <model>
 
 `.github/workflows/ci.yml` runs on every push and pull request:
 
-- `check` on ubuntu-latest and macos-latest: `npm ci --strict-allow-scripts`, typecheck, tests, UI build,
-  `smoke:hub` and `smoke:v12`.
+- `check` on ubuntu-latest and macos-latest: `npm ci --strict-allow-scripts`, typecheck, schema check
+  (`docs/protocol.schema.json` vs `packages/protocol`; regenerate with `npm run schema`), tests, UI build, `smoke:hub` and `smoke:v12`.
 - `docker`: builds `deploy/Dockerfile.node` (no push), with a buildx cache.
 - `desktop-pack` (pushes to `main` only): `npm run pack -w @bizzi/desktop` on macOS, unsigned, and
   uploads the zipped `.app` as an artifact.

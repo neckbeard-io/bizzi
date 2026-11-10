@@ -15,13 +15,15 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "build:ui": "npm run build -w @bizzi/ui",
-    "check": "npm run typecheck && npm test && npm run build:ui",
+    "check": "npm run typecheck && npm run schema:check && npm test && npm run build:ui",
     "dev:desktop": "npm run build:ui && node scripts/dev-desktop.ts",
     "dev:ui": "npm run dev -w @bizzi/ui -- --open \"/?mock=1\"",
     "serve": "node apps/cli/src/main.ts serve --data-dir .bizzi-dev/data",
     "smoke:live": "node scripts/smoke-live.ts",
     "smoke:hub": "node scripts/smoke-hub.ts",
-    "smoke:v12": "node scripts/smoke-v12.ts"
+    "smoke:v12": "node scripts/smoke-v12.ts",
+    "schema": "node scripts/gen-schema.ts",
+    "schema:check": "node scripts/gen-schema.ts --check"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
