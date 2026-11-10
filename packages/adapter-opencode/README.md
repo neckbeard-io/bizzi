@@ -66,6 +66,7 @@ const [opencode] = createAdapters({ defaultAgent: 'build' });
 | child `session.created{parentID}` + subagent `tool.progress{metadata.sessionID}` | `subagent.started/completed`; child tools get `parentToolId` |
 | `session.step.ended` tokens/cost (own + subagents) | `turn.completed.usage`, per turn (+ `contextWindow` from the model's limit) |
 | `session.usage.updated` (session-cumulative, own + each subagent session) | `usage.updated`, the running session total; on resume the stored total is reported up front |
+| own `session.step.ended` tokens | `context.updated {used: input+output+reasoning+cache read+write of that step, window: model limit.context}` (window re-read when the step's model changes); with bizzi instructions, rows `bizzi` (bytes/4), `other`, `free_space`. No compaction event was observed in v2 captures, so no `context.compacted`; no `account.usage` (no login identity or window data through the server) |
 | `session.execution.succeeded/failed/interrupted` | `turn.completed` end_turn/error/interrupted (failed also emits `error`) |
 | interrupt / stop / server crash / turn end with requests still open | `approval.resolved {decision:'cancelled', by:'bizzi'}`, `question.resolved {cancelled:true}`; then rejected / cancelled on the server when it's still up (an interrupt already cancels them there) |
 | `session.agent.selected` / `model.selected` / `renamed` | `session.info` |

@@ -75,6 +75,9 @@ On `set()`, the sandbox is sent as a full `SandboxPolicy`, because `turn/start` 
 | `webSearch`, `imageView`, `dynamicToolCall`, `collabAgentToolCall` | `tool` with kind `web`, `read`, `other`, `task` respectively |
 | `turn/plan/updated` | `plan.updated` |
 | `thread/tokenUsage/updated` | `usage.updated` (cumulative thread total, with `contextWindow`) |
+| `thread/tokenUsage/updated` (also) | `context.updated {used: last.totalTokens, window: modelContextWindow}`; `compactAt`/`usable` from `config/read` `model_auto_compact_token_limit` when set. With bizzi instructions or MCP servers, rows `bizzi` (developer instructions + the schemas `mcpServerStatus/list` reports for bizzi's servers, bytes/4), `other`, `free_space` |
+| `contextCompaction` item, legacy `thread/compacted` | one `context.compacted {before}` per turn (`after` arrives with the next token-usage update) |
+| `account/rateLimits/read` (once after start, ChatGPT logins only), `account/rateLimits/updated`, `account/updated` | `account.usage` with `primary`/`secondary` windows (`resetsAt` epoch seconds), `billing: plan`, account id = email (else the rate-limit `accountId`); status limited on `rateLimitReachedType` / `spendControlReached` / `ordinaryUsageAllowed: false`, else from the highest window (80% warning). API-key, Bedrock and GCP logins emit nothing |
 | `turn/completed` | `turn.completed {stopReason, usage, error}`. Status maps completed to `end_turn`, interrupted to `interrupted`, failed to `error`. `usage` is per turn: the change in the thread total during the turn. On the first turn after a resume or fork the total before the turn is unknown (it includes inherited history), so `usage` is the sum of the per-request `last` usage reported during the turn. |
 | `error` notification | `error {message, code: codexErrorInfo, fatal: false}` |
 | `thread/name/updated`, `model/rerouted` | `session.info {title}`, `session.info {model}` |

@@ -15,6 +15,7 @@ import {
 } from '@bizzi/protocol';
 import { OpenCodeHttpError, type OpenCodeClient } from './client.ts';
 import { formatModel, parseModel, usageOf } from './mapping.ts';
+import { approxTokens } from './context.ts';
 import { probeOpenCode } from './probe.ts';
 import { OpenCodeServer } from './server.ts';
 import { OpenCodeSession } from './session.ts';
@@ -97,6 +98,9 @@ export const OPENCODE_CAPABILITIES: AgentCapabilities = {
   usage: 'tokens+cost',
   terminal: false,
   questions: true,
+  context: true,
+  // No per-login identity or window data through `opencode serve`; spend stays in usage.updated.
+  accountUsage: false,
 };
 
 /** Runtime MCP registrations, shared per (directory, name) between sessions. */
@@ -280,6 +284,8 @@ export class OpenCodeAdapter implements AgentAdapter {
       reapply,
       onStop,
       initialUsage: info.cost || info.tokens?.input || info.tokens?.output ? usageOf(info.tokens, info.cost) : undefined,
+      // MCP tool schemas aren't reported by the server, so only the instructions are counted.
+      bizziTokens: approxTokens(opts.systemPromptAppend),
       interruptFallbackMs: this.options.interruptFallbackMs ?? 5_000,
     });
     this.#sessions.add(session);

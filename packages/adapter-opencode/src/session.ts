@@ -34,6 +34,7 @@ import {
   usageOf,
 } from './mapping.ts';
 import type { OpenCodeServer, ServerListener } from './server.ts';
+import { contextFromStep } from './context.ts';
 import {
   dataOf,
   eventSessionId,
@@ -42,6 +43,7 @@ import {
   type ModelRef,
   type OcEvent,
   type PromptFileAttachment,
+  type TokenUsage,
 } from './types.ts';
 
 interface TurnState {
@@ -98,6 +100,8 @@ export interface SessionInit {
   contextWindow?: number;
   /** Session-cumulative usage when the session was opened (resume). */
   initialUsage?: Usage;
+  /** Estimated tokens bizzi injects (instructions, bytes / 4), for the "bizzi overhead" context row. */
+  bizziTokens?: number;
   /** Re-applied after a server crash/restart (runtime state is lost with the process). */
   reapply: () => Promise<void>;
   onStop: () => Promise<void>;
@@ -147,6 +151,10 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
   #ownUsage: Usage = {};
   #childUsage = new Map<string, Usage>();
   #needsReconcile = false;
+  /** Tokens of the latest own assistant step (context occupancy) and the last emitted context. */
+  #lastStepTokens: TokenUsage | undefined;
+  #lastContext: string | undefined;
+  #bizziTokens = 0;
   #crashed = false;
   #stopped = false;
   #unsubscribe: () => void;
@@ -161,6 +169,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     this.#agent = init.agent;
     this.#contextWindow = init.contextWindow;
     if (init.initialUsage) this.#ownUsage = init.initialUsage;
+    this.#bizziTokens = init.bizziTokens ?? 0;
     this.#reapply = init.reapply;
     this.#onStop = init.onStop;
     this.#interruptFallbackMs = init.interruptFallbackMs;
@@ -314,6 +323,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
         }
         if (m.limit?.context) this.#contextWindow = m.limit.context;
       }
+      this.#lastContext = undefined;
       await client.switchModel(this.#ref, ref);
       this.#model = ref;
     }
@@ -397,12 +407,20 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
         if (this.#turn?.executing) this.#completeTurn('error', message);
         return;
       }
-      case 'session.step.started':
-        this.#model = dataOf(ev, 'session.step.started').model ?? this.#model;
+      case 'session.step.started': {
+        const m = dataOf(ev, 'session.step.started').model;
+        const changed = !!m && (m.providerID !== this.#model?.providerID || m.id !== this.#model?.id);
+        this.#model = m ?? this.#model;
+        if (m && (changed || !this.#contextWindow)) void this.#refreshWindow(m);
         return;
+      }
       case 'session.step.ended': {
         const d = dataOf(ev, 'session.step.ended');
         if (this.#turn) addTokens(this.#turn.usage, d.tokens, d.cost);
+        if (d.tokens) {
+          this.#lastStepTokens = d.tokens;
+          this.#emitContext();
+        }
         return;
       }
       case 'session.step.failed':
@@ -605,6 +623,29 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
       default:
         return false;
     }
+  }
+
+  // --- context -------------------------------------------------------------------------------
+
+  async #refreshWindow(model: ModelRef): Promise<void> {
+    const client = this.#server.client;
+    if (!client) return;
+    const models = await client.models({ directory: this.#dir }).catch(() => undefined);
+    const m = models?.find((x) => x.providerID === model.providerID && x.id === model.id);
+    if (this.#stopped || !m?.limit?.context || this.#model?.providerID !== model.providerID || this.#model?.id !== model.id) return;
+    if (m.limit.context === this.#contextWindow) return;
+    this.#contextWindow = m.limit.context;
+    this.#emitContext();
+  }
+
+  #emitContext(): void {
+    if (this.#stopped) return;
+    const ctx = contextFromStep(this.#lastStepTokens, this.#contextWindow, this.#bizziTokens);
+    if (!ctx) return;
+    const key = JSON.stringify(ctx);
+    if (key === this.#lastContext) return;
+    this.#lastContext = key;
+    this.#emit({ type: 'context.updated', data: ctx });
   }
 
   // --- questions, cancellation, usage ---------------------------------------------------------
