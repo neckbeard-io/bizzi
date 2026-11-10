@@ -399,6 +399,24 @@ Budgetless doesn't mean unlimited: GPU capacity is the limit, so a provider can 
 - **Cross-machine agent-to-agent via the hub:** a parent on the laptop starts a helper on the Mac mini (Xcode build, screenshots) or the VPS (long test run). Needs nodes to send requests to the hub, an additive change to the hub contract (today the hub only acts as a client of nodes). A helper on an offline machine fails fast with `machine_offline`.
 - **Pipelines** (planner → implementer → reviewer across agents) and **watchers** (a cheap or budgetless model pings you only for real decisions). Shared knowledge keeps cross-agent work coherent.
 
+### 12.5 Implementation notes (M4, one machine)
+
+- **Worktrees.** `worktree.create` adds a git worktree at `<repo>.worktrees/<branch>` next to the repository (slashes and unsafe characters in the branch become `-`; a numeric suffix avoids clashes) unless `path` is given, and registers a workspace of kind `worktree` under the repo workspace. A worktree of a worktree groups under the same repo workspace. If a registered worktree already has the branch, that workspace is returned. `worktree.remove` never deletes the branch. It refuses uncommitted or untracked changes unless `force`, refuses while any session that isn't ended or failed uses the worktree, and prunes a worktree whose directory is already gone. `workspace.remove` on a repo workspace that still has worktree workspaces is refused, so they are never orphaned.
+- **Transport and caller identity.** `@bizzi/orchestration` serves the tools as the `bizzi-agents` MCP server over stateless Streamable HTTP, on a loopback port of its own. It never uses the client listener, which may be bound to `0.0.0.0`. Each structured session bizzi starts gets an `http` server spec with a bearer token minted when its agent process starts. The token identifies the caller, is replaced on every agent start, and is revoked when the session ends, fails or is removed. Terminal sessions and sessions at the depth limit get no tools. The injection composes with the knowledge hook: `NodeExtension.prepareStart` runs after `NodeOptions.prepareStart` and the results are merged.
+- **Ownership.** A session can only send to, wait on, read or stop helpers it started itself.
+- **Cascade.** A `child` helper stops when its parent stops, ends, fails or is deleted, recursively. `detached` helpers keep running. On node start, children of sessions that have ended are stopped.
+- **Limits.** Live helpers (not ended, failed or queued) count toward `maxHelpersPerParent` (from the parent workspace's settings) and `maxHelpersPerMachine` (machine settings). With `onLimit: 'queue'` the helper is registered as `starting` with reason `queued: …` and starts when a slot frees up. Queued helpers end on a node restart.
+- **Permissions.** Modes are compared on one scale:
+  - 0 read-only: Claude `plan`, Codex `read-only`, OpenCode `plan`
+  - 1 asks: Claude `default` and `dontAsk`, Codex `untrusted`
+  - 2 edits the workspace: Claude `acceptEdits`, Codex `auto`, OpenCode `build`
+  - 3 unrestricted: Claude `bypassPermissions`, Codex `full-access`
+
+  A helper gets its requested mode (or its agent's default), capped at the parent's level. An unknown parent mode counts as 1, and an unknown requested mode inherits the parent's. agy and shell run at their own defaults, which ask, and are refused under a read-only parent. The cap applies at start only; `session.set` can still change the mode later.
+- **Approvals.** A helper's approvals and questions always go to you. The parent only sees them as the reason `session_wait` returns. `parentAnswersApprovals` is stored, but the path for the parent to answer isn't built.
+- **Settings.** `orchestration.settings.set` merges into the machine or workspace overrides (`null` clears a field). A worktree inherits its repo workspace's overrides, then applies its own.
+- **Budgets.** Turns and tokens (input + output of each completed turn) always count; usd counts only when the session's `billing` is `metered`. Billing comes from the session environment: for Claude, `ANTHROPIC_API_KEY` means metered and `CLAUDE_CODE_OAUTH_TOKEN` means plan; for Codex, `CODEX_API_KEY` means metered. Otherwise it comes from the agent probe's `billing`, then from `account.usage` events; if none of these says, it stays unset. A session's `budget` bounds it and every helper below it, and `treeBudgetUsd` bounds the root's whole tree. After the turn that reaches a cap, the session goes `waiting_input` with `prompt: 'budget'`, and `send` and new helpers are refused. It resumes once back within budget. Today the only way to get there is raising `treeBudgetUsd`; per-session budgets can't be raised yet.
+
 ## 13. Phases
 
 | Phase | Scope | Exit criteria |

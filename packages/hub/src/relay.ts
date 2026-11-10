@@ -351,7 +351,10 @@ export class Relay {
           const machineId = this.#optMachine(p);
           if (machineId) filter.machineId = machineId;
         }
-        return { sessions: this.store.listSessions(filter).map((s) => this.#withLastSeq(s)) };
+        if (p.spawnedBy !== undefined && typeof p.spawnedBy !== 'string') throw new BizziError('bad_request', 'spawnedBy must be a string');
+        const spawnedBy = p.spawnedBy;
+        const rows = this.store.listSessions(filter).filter((s) => spawnedBy === undefined || s.spawnedBy === spawnedBy);
+        return { sessions: rows.map((s) => this.#withLastSeq(s)) };
       }
       case 'usage.list':
         return { accounts: this.listUsage() };

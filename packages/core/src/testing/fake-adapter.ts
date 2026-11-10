@@ -35,6 +35,7 @@ import {
   type StartSessionOptions,
   type StopReason,
   type ToolKind,
+  type Usage,
 } from '@bizzi/protocol';
 
 export type FakeStep =
@@ -85,6 +86,8 @@ export interface FakeAdapterOptions {
   terminalSnapshot?: boolean;
   /** Make send() reject with this message; with `afterComplete` it first emits turn.completed itself. */
   rejectSend?: { message?: string; afterComplete?: boolean };
+  /** `turn.completed.usage` of turns that end normally (default 10 input + 20 output tokens). */
+  usage?: Usage;
 }
 
 /** Scrollback kept by fake terminal sessions for snapshotTerminal(). */
@@ -309,12 +312,12 @@ export class FakeSession implements AdapterSession {
   #complete(turn: { id: string; done: boolean }, stopReason: StopReason, error?: string): void {
     if (turn.done) return;
     turn.done = true;
-    const data: { turnId: string; stopReason: StopReason; error?: string; usage?: { inputTokens: number; outputTokens: number } } = {
+    const data: { turnId: string; stopReason: StopReason; error?: string; usage?: Usage } = {
       turnId: turn.id,
       stopReason,
     };
     if (error) data.error = error;
-    if (stopReason === 'end_turn') data.usage = { inputTokens: 10, outputTokens: 20 };
+    if (stopReason === 'end_turn') data.usage = { ...(this.#adapter.options.usage ?? { inputTokens: 10, outputTokens: 20 }) };
     this.#emit({ type: 'turn.completed', data });
   }
 

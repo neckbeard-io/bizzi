@@ -13,6 +13,7 @@ packages/
   adapter-opencode/  @bizzi/adapter-opencode  `opencode serve` adapter
   pty/               @bizzi/pty           node-pty terminal host + terminal-mode adapter (agy, shell, any TUI)
   knowledge/         @bizzi/knowledge     rules + memory store, resolver, policy, MCP server
+  orchestration/     @bizzi/orchestration bizzi-agents MCP tools for agent-to-agent helpers (loopback HTTP)
   provision/         @bizzi/provision     ADE detection, install/login recipes
   services/          @bizzi/services      node extensions: provisioning, secrets, login, knowledge methods
   hub/               @bizzi/hub           hub role: relay, replica, routing, device pairing/auth; node→hub link
