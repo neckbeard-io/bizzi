@@ -24,7 +24,9 @@ import { buildMachineInfo } from './machine.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
 import { Store } from './store.ts';
+import { themesExtension } from './themes.ts';
 import { DEFAULT_MAX_BYTES, fsList, fsRead, gitDiff, gitStatus } from './tools.ts';
+import { UsageTracker, usageExtension } from './usage.ts';
 import { Workspaces } from './workspaces.ts';
 
 /** Methods served by the dispatcher (subscriptions are per-connection and handled separately). */
@@ -143,6 +145,8 @@ export interface BizziNode {
   readonly sessions: Sessions;
   readonly workspaces: Workspaces;
   readonly registry: AdapterRegistry;
+  /** Per-login usage snapshots (usage.md §3); extensions report widget-backed logins here. */
+  readonly usage: UsageTracker;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -201,8 +205,12 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     });
     sessions.load();
     node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions);
+    const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
+    node.usage = usage;
     const n = node;
-    const contexts = (opts.extensions ?? []).map((ext): [NodeExtension, ExtensionContext] => [
+    // Built-ins served through the extension mechanism (usage.list, themes.*), started first.
+    const builtins = [usageExtension(usage), themesExtension(store.path)];
+    const contexts = [...builtins, ...(opts.extensions ?? [])].map((ext): [NodeExtension, ExtensionContext] => [
       ext,
       {
         node: n,
@@ -234,6 +242,8 @@ class Node implements BizziNode {
   readonly registry: AdapterRegistry;
   readonly workspaces: Workspaces;
   readonly sessions: Sessions;
+  /** Assigned by createNode right after construction. */
+  usage!: UsageTracker;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
   readonly #builtins: ReadonlySet<string>;

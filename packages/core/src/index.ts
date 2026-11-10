@@ -15,3 +15,14 @@ export { Sessions, TERMINAL_SNAPSHOT_MAX_BYTES, type AgentEnvProvider, type Prep
 export { Workspaces } from './workspaces.ts';
 export { buildMachineInfo, detectHeadful } from './machine.ts';
 export { parseBranchLine, parsePorcelainZ } from './git.ts';
+export {
+  UsageTracker,
+  USAGE_REPUBLISH_MS,
+  mergeAccountUsage,
+  newerOrSame,
+  normalizeAccountUsage,
+  sortAccountUsage,
+  usageKey,
+  type UsageTrackerOptions,
+} from './usage.ts';
+export { MAX_THEME_BYTES, MAX_THEME_NAME, MAX_THEMES, ThemeTable, parseThemeSave, type ThemeSave } from './themes.ts';

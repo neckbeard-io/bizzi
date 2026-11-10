@@ -17,6 +17,7 @@ export class EventBus {
   readonly #logger: Logger;
   readonly #seqs = new Map<string, number>();
   readonly #listeners = new Map<string, Set<EventListener>>();
+  readonly #taps = new Set<EventListener>();
 
   constructor(store: Store, logger: Logger) {
     this.#store = store;
@@ -38,8 +39,8 @@ export class EventBus {
     this.#store.insertEvent(ev);
     this.#seqs.set(ch, seq);
     const set = this.#listeners.get(ch);
-    if (set) {
-      for (const fn of [...set]) {
+    if (set || this.#taps.size > 0) {
+      for (const fn of [...(set ?? []), ...this.#taps]) {
         try {
           fn(ev);
         } catch (err) {
@@ -73,6 +74,14 @@ export class EventBus {
       if (!s) return;
       s.delete(fn);
       if (s.size === 0) this.#listeners.delete(ch);
+    };
+  }
+
+  /** Live events on every channel, after the channel's own listeners. Returns an unsubscribe function. */
+  tap(fn: EventListener): () => void {
+    this.#taps.add(fn);
+    return () => {
+      this.#taps.delete(fn);
     };
   }
 
