@@ -5,7 +5,9 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { ThemeTable } from '@bizzi/core';
 import type {
+  AccountUsage,
   AgentCapabilities,
   ChannelEvent,
   DeviceInfo,
@@ -15,6 +17,7 @@ import type {
   GlobalEventBody,
   MachineInfo,
   SessionInfo,
+  WidgetValue,
   WorkspaceInfo,
 } from '@bizzi/protocol';
 import { GLOBAL_CHANNEL } from '@bizzi/protocol';
@@ -93,6 +96,20 @@ CREATE TABLE IF NOT EXISTS node_cursors (
   machine_id TEXT PRIMARY KEY,
   global_seq INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS account_usage (
+  agent       TEXT NOT NULL,
+  account_id  TEXT NOT NULL,
+  machine_id  TEXT NOT NULL,
+  observed_at TEXT NOT NULL,
+  data        TEXT NOT NULL,
+  PRIMARY KEY (agent, account_id, machine_id)
+);
+CREATE TABLE IF NOT EXISTS widgets (
+  machine_id TEXT NOT NULL,
+  widget_id  TEXT NOT NULL,
+  data       TEXT NOT NULL,
+  PRIMARY KEY (machine_id, widget_id)
+);
 `;
 
 export interface DeviceRow extends DeviceInfo {
@@ -139,6 +156,8 @@ export function publicDevice(d: DeviceRow): DeviceInfo {
 
 export class HubStore {
   readonly path: string;
+  /** Custom themes (theming.md §5), shared by every device. */
+  readonly themes: ThemeTable;
   readonly #db: DatabaseSync;
   readonly #insertEvent: StatementSync;
   readonly #replay: StatementSync;
@@ -153,6 +172,7 @@ export class HubStore {
     this.#db = new DatabaseSync(this.path);
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
     this.#db.exec(SCHEMA);
+    this.themes = new ThemeTable(this.#db);
     this.#insertEvent = this.#db.prepare('INSERT OR IGNORE INTO events (ch, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)');
     this.#replay = this.#db.prepare('SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?');
     this.#maxSeq = this.#db.prepare('SELECT MAX(seq) AS seq FROM events WHERE ch = ?');
@@ -440,6 +460,59 @@ export class HubStore {
 
   setNodeCursor(machineId: string, seq: number): void {
     this.#setCursor.run(machineId, seq);
+  }
+
+  // --- per-login usage (one row per machine that reported the login) ----------------------------
+
+  putUsage(machineId: string, u: AccountUsage): void {
+    this.#db
+      .prepare(
+        `INSERT INTO account_usage (agent, account_id, machine_id, observed_at, data) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(agent, account_id, machine_id) DO UPDATE SET observed_at = excluded.observed_at, data = excluded.data`,
+      )
+      .run(u.agent, u.accountId, machineId, u.observedAt, JSON.stringify(u));
+  }
+
+  /** Every machine's snapshot of one login, or of all logins. */
+  listUsage(filter?: { agent: string; accountId: string }): AccountUsage[] {
+    const rows = (
+      filter
+        ? this.#db.prepare('SELECT data FROM account_usage WHERE agent = ? AND account_id = ?').all(filter.agent, filter.accountId)
+        : this.#db.prepare('SELECT data FROM account_usage ORDER BY agent, account_id, machine_id').all()
+    ) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as AccountUsage);
+  }
+
+  // --- widget value cache -----------------------------------------------------------------------
+
+  putWidget(w: WidgetValue): void {
+    this.#db
+      .prepare(
+        `INSERT INTO widgets (machine_id, widget_id, data) VALUES (?, ?, ?)
+         ON CONFLICT(machine_id, widget_id) DO UPDATE SET data = excluded.data`,
+      )
+      .run(w.machineId, w.id, JSON.stringify(w));
+  }
+
+  deleteWidget(machineId: string, widgetId: string): void {
+    this.#db.prepare('DELETE FROM widgets WHERE machine_id = ? AND widget_id = ?').run(machineId, widgetId);
+  }
+
+  /** Replace a machine's cached widgets with what it reports now. */
+  replaceWidgets(machineId: string, widgets: WidgetValue[]): void {
+    this.tx(() => {
+      this.#db.prepare('DELETE FROM widgets WHERE machine_id = ?').run(machineId);
+      for (const w of widgets) if (w.machineId === machineId) this.putWidget(w);
+    });
+  }
+
+  listWidgets(machineId?: string): WidgetValue[] {
+    const rows = (
+      machineId
+        ? this.#db.prepare('SELECT data FROM widgets WHERE machine_id = ? ORDER BY widget_id').all(machineId)
+        : this.#db.prepare('SELECT data FROM widgets ORDER BY machine_id, widget_id').all()
+    ) as { data: string }[];
+    return rows.map((r) => JSON.parse(r.data) as WidgetValue);
   }
 }
 
