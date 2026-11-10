@@ -850,6 +850,21 @@ export class BizziStore {
     return workspace;
   }
 
+  /** Workspace picker: directories in `path` (default home) on a machine. */
+  browseDirs(params: MethodParams<'fs.browse'>): Promise<MethodResult<'fs.browse'>> {
+    return this.client.request('fs.browse', { ...params, ...this.target(params.machineId) });
+  }
+
+  /** Workspace picker: directory completions for a partially typed path. */
+  completePath(params: MethodParams<'fs.complete'>): Promise<MethodResult<'fs.complete'>> {
+    return this.client.request('fs.complete', { ...params, ...this.target(params.machineId) });
+  }
+
+  /** Workspace picker: home, source roots, recent parents and repos that aren't workspaces yet. */
+  suggestDirs(machineId?: string | null): Promise<MethodResult<'fs.suggest'>> {
+    return this.client.request('fs.suggest', this.target(machineId));
+  }
+
   async removeWorkspace(workspaceId: string): Promise<void> {
     await this.client.request('workspace.remove', { workspaceId });
     if (!this.state.workspaces) return;
