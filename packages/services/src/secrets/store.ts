@@ -137,6 +137,17 @@ export class SecretStore {
     });
   }
 
+  /** One secret's value (for node-side templating such as widgets' `${secret:…}`); never logged. */
+  async get(agent: AgentKind, name: string): Promise<string | undefined> {
+    if (!this.has(agent, name)) return undefined;
+    const account = secretAccount(agent, name);
+    const cached = this.#cache.get(account);
+    if (cached !== undefined) return cached;
+    const value = await this.backend.get(account);
+    if (value !== undefined) this.#cache.set(account, value);
+    return value;
+  }
+
   /** The agent's secrets as environment variables. Missing values (e.g. removed outside bizzi) are skipped. */
   async env(agent: AgentKind): Promise<Record<string, string>> {
     const out: Record<string, string> = {};

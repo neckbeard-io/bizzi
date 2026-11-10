@@ -1,9 +1,9 @@
 // @bizzi/services: NodeExtension implementations for the node role — provisioning (install,
-// secrets), agent logins, and the knowledge methods.
+// secrets), agent logins, the knowledge methods and widgets.
 
 import { join } from 'node:path';
 import { KnowledgeStore } from '@bizzi/knowledge';
-import type { Logger } from '@bizzi/protocol';
+import { AGENT_KINDS, type AgentKind, type Logger } from '@bizzi/protocol';
 import type { RecipeSet } from '@bizzi/provision';
 import { createKnowledgeExtension, type KnowledgeExtension, type KnowledgeStoreSource } from './knowledge.ts';
 import { createLoginExtension, type LoginExtension, type LoginOptions } from './login.ts';
@@ -11,6 +11,7 @@ import { createProvisioningExtension, type ProvisioningExtension, type Provision
 import { createDefaultSecretBackend, type SecretBackend } from './secrets/backends.ts';
 import { SecretStore } from './secrets/store.ts';
 import type { NodeExtension } from './types.ts';
+import { createWidgetsExtension, type WidgetsExtension, type WidgetsOptions } from './widgets/runtime.ts';
 
 export type { AgentEnvProvider, ExtensionContext, ExtensionMethod, NodeExtension } from './types.ts';
 export {
@@ -51,6 +52,27 @@ export {
   type SecretStoreOptions,
 } from './secrets/store.ts';
 
+export {
+  MAX_COMMAND_OUTPUT,
+  MAX_HTTP_BYTES,
+  WIDGET_REPUBLISH_MS,
+  createWidgetsExtension,
+  defaultWidgetsDir,
+  parseCommandOutput,
+  thresholdTone,
+  type WidgetsExtension,
+  type WidgetsOptions,
+} from './widgets/runtime.ts';
+export {
+  AGENTS_FILE as WIDGETS_AGENTS_FILE,
+  SCHEMA_FILE as WIDGET_SCHEMA_FILE,
+  WIDGET_JSON_SCHEMA,
+  parseDuration,
+  parseWidget,
+  type WidgetDef,
+} from './widgets/schema.ts';
+export { expand, jsonPath, parsePath, scrub, type TemplateContext } from './widgets/expr.ts';
+
 export const SECRETS_INDEX_FILE = 'secrets.json';
 
 export interface ServicesOptions {
@@ -70,6 +92,8 @@ export interface ServicesOptions {
   claudeHome?: string;
   provisioning?: Partial<Omit<ProvisioningOptions, 'secrets'>>;
   login?: LoginOptions;
+  /** Widgets (usage.md §4); `false` leaves widgets.* unimplemented. `${secret:…}` uses the secret store. */
+  widgets?: Omit<WidgetsOptions, 'secret'> | false;
 }
 
 export interface Services {
@@ -78,6 +102,23 @@ export interface Services {
   provisioning: ProvisioningExtension;
   login: LoginExtension;
   knowledge?: KnowledgeExtension;
+  widgets?: WidgetsExtension;
+}
+
+/**
+ * `${secret:NAME}` → the first agent's stored secret called NAME (claude, codex, … order), or
+ * `${secret:agent:NAME}` for one agent's.
+ */
+export function secretLookup(secrets: SecretStore): (name: string) => Promise<string | undefined> {
+  return async (ref) => {
+    const i = ref.indexOf(':');
+    if (i > 0) {
+      const agent = ref.slice(0, i) as AgentKind;
+      return AGENT_KINDS.includes(agent) ? secrets.get(agent, ref.slice(i + 1)) : undefined;
+    }
+    for (const agent of AGENT_KINDS) if (secrets.has(agent, ref)) return secrets.get(agent, ref);
+    return undefined;
+  };
 }
 
 /** Build every extension, sharing one secret store (and the given knowledge store). */
@@ -101,12 +142,14 @@ export async function createServices(opts: ServicesOptions): Promise<Services> {
       }));
   const knowledge =
     store === false ? undefined : createKnowledgeExtension({ store, ...(opts.claudeHome ? { claudeHome: opts.claudeHome } : {}) });
-  opts.logger?.log('info', 'services ready', { secrets: backend.name, knowledge: knowledge !== undefined });
+  const widgets = opts.widgets === false ? undefined : createWidgetsExtension({ ...opts.widgets, secret: secretLookup(secrets) });
+  opts.logger?.log('info', 'services ready', { secrets: backend.name, knowledge: knowledge !== undefined, widgets: widgets?.dir ?? false });
   return {
-    extensions: [provisioning, login, ...(knowledge ? [knowledge] : [])],
+    extensions: [provisioning, login, ...(knowledge ? [knowledge] : []), ...(widgets ? [widgets] : [])],
     secrets,
     provisioning,
     login,
     ...(knowledge ? { knowledge } : {}),
+    ...(widgets ? { widgets } : {}),
   };
 }
