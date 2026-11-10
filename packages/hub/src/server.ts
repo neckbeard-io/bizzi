@@ -90,6 +90,12 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
         ...(n.minTurnMs !== undefined ? { minTurnMs: n.minTurnMs } : {}),
         ...(n.fetch ? { fetch: n.fetch } : {}),
         logger: logger.child({ component: 'push' }),
+        state: {
+          load: () => store.getMeta('push.usage'),
+          save: (json) => {
+            if (store.isOpen) store.setMeta('push.usage', json);
+          },
+        },
         describe: (sessionId) => {
           const s = store.getSession(sessionId)?.info;
           const machine = s ? relay.machineView(s.machineId)?.name : undefined;

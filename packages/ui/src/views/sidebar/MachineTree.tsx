@@ -146,10 +146,10 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
   };
 
   return (
-    <div ref={ref} onMouseEnter={onEnter} onMouseLeave={onLeave} className={cx('rounded-md', props.active && 'bg-panel-2')} style={{ paddingLeft: props.depth * 14 }}>
+    <div ref={ref} onMouseEnter={onEnter} onMouseLeave={onLeave} className={cx('rounded-md', props.active && (phone ? 'bg-panel-2' : 'bg-sidebar-accent'))} style={{ paddingLeft: props.depth * 14 }}>
       <a
         href={routeHref({ name: 'workspace', workspaceId: w.id })}
-        className={cx('flex items-center gap-2 rounded-md pr-2 pl-2 hover:bg-panel-2', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]', props.active ? 'font-medium text-fg' : 'text-fg/90')}
+        className={cx('flex items-center gap-2 rounded-md pr-2 pl-2', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]', props.active ? 'font-medium text-fg' : 'text-fg/90')}
         title={w.path}
         {...(phone ? longPress : {})}
       >
@@ -169,7 +169,7 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
       {row.urgent ? (
         <a
           href={routeHref({ name: 'session', sessionId: row.urgent.sessionId, tab: 'chat' })}
-          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-8 text-xs text-muted hover:bg-panel-2 hover:text-fg', phone ? 'min-h-11' : 'h-6')}
+          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-8 text-xs text-muted hover:text-fg', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11' : 'h-6')}
           title={`${AGENT_LABEL[row.urgent.agent]}: ${row.urgent.text}`}
         >
           <span className={cx('shrink-0', MARK_TEXT[row.urgent.state])} aria-label={MARK_LABEL[row.urgent.state]}>

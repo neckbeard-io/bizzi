@@ -32,7 +32,7 @@ Observed 2026-11-09: `/upgrade` inside an OpenCode session moved the CLI to 2.2.
 | **OpenCode v2** | `opencode upgrade [--method brew\|curl\|npm]`, or `/upgrade` in the TUI (picks the method itself) | Homebrew core `opencode` formula; script: `~/.opencode/bin`; npm `@opencode/cli` | **nothing restarts** the servers | **a server**: bizzi's private `opencode serve` (one per node, shared by all bizzi OpenCode sessions), or your shared background service | OpenCode session id; sessions live in OpenCode's database, and the adapter already re-applies runtime state after a server restart (`reapply`) |
 | **agy** | script only: remove the binary and re-run the installer (bizzi's recipe) | `~/.local/bin/agy` replaced | keep running (unlinked) | one PTY per session | unknown (verify); if none, restart loses the conversation |
 
-Per-method recipe steps live in `packages/provision/recipes/*.yaml`. Known recipe bug: the OpenCode `brew` method installs and uninstalls through `anomalyco/tap/opencode-v2`, while most installs (this Mac's included) come from Homebrew core's `opencode` formula. Adopted installs need the formula the binary actually came from.
+Per-method recipe steps live in `packages/provision/recipes/*.yaml`. The OpenCode `brew` method installs fresh copies through `anomalyco/tap/opencode-v2`, while most installs (this Mac's included) come from Homebrew core's `opencode` formula. Adopted installs are updated and uninstalled through the formula the binary actually came from (its `Cellar/<formula>` path and `INSTALL_RECEIPT.json`); casks and npm prefixes work the same way.
 
 ## 4. Safe points
 

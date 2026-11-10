@@ -12,13 +12,12 @@ export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', faile
 /** Text glyphs for compact counts (`⚠1 ◐2 ●3`). */
 export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', done: '✓', idle: '●' };
 
-// TODO(theming): switch to the state tokens (state-waiting/working/done/failed/idle) once index.css has them.
-/** Text colour per state; colour carries state only. */
-export const MARK_TEXT: Record<MarkState, string> = { waiting: 'text-warn', failed: 'text-err', working: 'text-info', done: 'text-ok', idle: 'text-muted' };
+/** Text colour per state; colour carries state only (theme state tokens, which themes can't camouflage). */
+export const MARK_TEXT: Record<MarkState, string> = { waiting: 'text-state-waiting', failed: 'text-state-failed', working: 'text-state-working', done: 'text-state-done', idle: 'text-state-idle' };
 /** Ring/border colour per state. */
-export const MARK_RING: Record<MarkState, string> = { waiting: 'border-warn', failed: 'border-err', working: 'border-info', done: 'border-ok', idle: 'border-muted/50' };
+export const MARK_RING: Record<MarkState, string> = { waiting: 'border-state-waiting', failed: 'border-state-failed', working: 'border-state-working', done: 'border-state-done', idle: 'border-state-idle' };
 /** Filled dot per state (idle is hollow). */
-export const MARK_DOT: Record<MarkState, string> = { waiting: 'bg-warn', failed: 'bg-err', working: 'bg-info', done: 'bg-ok', idle: 'border border-muted/70 bg-transparent' };
+export const MARK_DOT: Record<MarkState, string> = { waiting: 'bg-state-waiting', failed: 'bg-state-failed', working: 'bg-state-working', done: 'bg-state-done', idle: 'border border-state-idle bg-transparent' };
 
 export const TONE_TEXT: Record<MeterTone, string> = { neutral: 'text-fg', warn: 'text-warn', err: 'text-err' };
 export const TONE_FILL: Record<MeterTone, string> = { neutral: 'bg-muted/70', warn: 'bg-warn', err: 'bg-err' };

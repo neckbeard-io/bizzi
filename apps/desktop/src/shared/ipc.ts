@@ -11,4 +11,6 @@ export interface BizziConnection {
 export interface Bootstrap {
   connection: BizziConnection | null;
   appVersion: string;
+  /** System accent colour as `rrggbbaa` (macOS, Windows), for the UI's Device theme; null elsewhere. */
+  accentColor?: string | null;
 }

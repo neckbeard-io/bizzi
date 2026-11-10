@@ -18,7 +18,8 @@ const VARIANT: Record<ButtonVariant, string> = {
   primary: 'bg-accent text-accent-fg hover:opacity-90 border-transparent',
   secondary: 'bg-panel text-fg border-border hover:bg-panel-2',
   ghost: 'bg-transparent text-fg border-transparent hover:bg-panel-2',
-  danger: 'bg-err text-white border-transparent hover:opacity-90',
+  // Destructive confirmations use the invariant safety tokens: no theme can restyle them (theming.md §6).
+  danger: 'bg-safety-danger text-safety-danger-foreground border-safety-danger-foreground/40 hover:opacity-90',
   ok: 'bg-ok text-white border-transparent hover:opacity-90 dark:text-black',
 };
 
@@ -73,6 +74,26 @@ export function Badge(props: { tone?: Tone; children: ReactNode; className?: str
     <span
       title={props.title}
       className={cx('inline-flex items-center gap-1 rounded-full border px-2 py-px text-[11px] leading-4 font-medium whitespace-nowrap', TONE[props.tone ?? 'neutral'], props.className)}
+    >
+      {props.children}
+    </span>
+  );
+}
+
+/**
+ * Approval prompts and permission-mode badges (e.g. bypass permissions): fixed high-contrast colours
+ * that themes can't override, so a theme can never camouflage "this agent can run anything" (§6).
+ */
+export function SafetyBadge(props: { kind?: 'warn' | 'danger'; children: ReactNode; className?: string; title?: string }): ReactNode {
+  const danger = props.kind === 'danger';
+  return (
+    <span
+      title={props.title}
+      className={cx(
+        'inline-flex items-center gap-1 rounded-full border px-2 py-px text-[11px] leading-4 font-semibold whitespace-nowrap',
+        danger ? 'border-safety-danger-foreground/60 bg-safety-danger text-safety-danger-foreground' : 'border-safety-warn-foreground/60 bg-safety-warn text-safety-warn-foreground',
+        props.className,
+      )}
     >
       {props.children}
     </span>
@@ -155,7 +176,7 @@ export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>): Re
 export function Checkbox(props: { checked: boolean; onChange: (v: boolean) => void; label: string }): ReactNode {
   return (
     <label className="inline-flex cursor-pointer items-center gap-2 text-sm select-none">
-      <input type="checkbox" className="h-4 w-4 accent-[var(--accent)]" checked={props.checked} onChange={(e) => props.onChange(e.target.checked)} />
+      <input type="checkbox" className="h-4 w-4 accent-[var(--primary)]" checked={props.checked} onChange={(e) => props.onChange(e.target.checked)} />
       {props.label}
     </label>
   );

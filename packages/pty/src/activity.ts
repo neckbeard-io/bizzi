@@ -4,122 +4,20 @@
 // bizzi types a prompt). Once output has been quiet for `idleMs`, onIdle fires once for that burst.
 // Prompt detectors run against the ANSI-stripped text of the current burst; when one matches, the
 // quiet period shrinks to `settleMs` so recognised prompts surface quickly, and the match is
-// reported as the reason. Detectors are plain objects, so callers can add their own.
+// reported as the reason. Detectors are plain objects, so callers can add their own; the shipped
+// set is data (data/detectors.json, see detectors.ts). OSC 7501 reports, when a program sends
+// them, take precedence over all of this (adapter.ts).
 
-import type { AgentKind } from '@bizzi/protocol';
 import { stripAnsi } from './ansi.ts';
+import { detectorsFor, lastLine, regexDetector, shippedDetectors, type PromptDetector, type PromptKind } from './detectors.ts';
 
-export type PromptKind = 'input' | 'approval';
+export { detectorsFor, lastLine, regexDetector, type PromptDetector, type PromptKind };
 
-export interface PromptDetector {
-  id: string;
-  kind: PromptKind;
-  /** Agents this detector applies to; omitted = every agent. */
-  agents?: AgentKind[];
-  /** Tested against the ANSI-stripped output of the current burst (tail-capped). */
-  test(text: string): boolean;
-  /** Free-form provenance, e.g. "verified against claude 2.1.311" or "unverified". */
-  note?: string;
-}
-
-export function regexDetector(
-  id: string,
-  kind: PromptKind,
-  re: RegExp,
-  opts: { agents?: AgentKind[]; note?: string } = {},
-): PromptDetector {
-  return { id, kind, agents: opts.agents, note: opts.note, test: (text) => re.test(text) };
-}
-
-/** Regex source for a phrase that tolerates missing/extra whitespace between words (cursor moves). */
-function phrase(words: string): string {
-  return words
-    .trim()
-    .split(/\s+/)
-    .map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-    .join('\\s*');
-}
-
-function anyPhrase(...phrases: string[]): RegExp {
-  return new RegExp(phrases.map(phrase).join('|'), 'i');
-}
-
-/** Last non-empty line of `text`. */
-export function lastLine(text: string): string {
-  const lines = text.split('\n');
-  for (let i = lines.length - 1; i >= 0; i--) {
-    const l = lines[i]!.trimEnd();
-    if (l.trim() !== '') return l;
-  }
-  return '';
-}
-
-export const DEFAULT_DETECTORS: readonly PromptDetector[] = [
-  // Approvals first: when both match, the approval is the more useful reason.
-  regexDetector(
-    'claude-permission',
-    'approval',
-    anyPhrase(
-      'Do you want to proceed?',
-      'Do you want to make this edit',
-      'Do you want to create',
-      'Do you want to allow',
-      'Do you want to overwrite',
-    ),
-    { agents: ['claude'], note: 'Claude Code permission dialog wording (2.x); not exercised in tests' },
-  ),
-  regexDetector('claude-trust', 'approval', anyPhrase('Yes, I trust this folder', 'Do you trust the files in this folder'), {
-    agents: ['claude'],
-    note: 'Claude Code folder-trust dialog; verified against claude 2.1.311',
-  }),
-  regexDetector(
-    'codex-approval',
-    'approval',
-    anyPhrase(
-      'Would you like to run the following command?',
-      'Would you like to make the following edits?',
-      'Allow command?',
-      'Yes, proceed',
-    ),
-    { agents: ['codex'], note: 'Codex TUI approval wording; unverified (codex not installed)' },
-  ),
-  regexDetector(
-    'agy-approval',
-    'approval',
-    anyPhrase('Allow execution', 'Allow once', 'Apply this change?', 'Waiting for user confirmation', 'Do you want to proceed?'),
-    { agents: ['agy'], note: 'Gemini-CLI-style wording; unverified (agy not installed)' },
-  ),
-  {
-    id: 'yes-no',
-    kind: 'approval',
-    note: 'generic [y/N] / (yes/no) confirmation on the last line',
-    test: (text) => /[[(]\s*y(?:es)?\s*\/\s*n(?:o)?\s*[\])]\s*[:?]?\s*$/i.test(lastLine(text)),
-  },
-  regexDetector('claude-input', 'input', anyPhrase('? for shortcuts'), {
-    agents: ['claude'],
-    note: 'Claude Code idle footer; unverified (trust dialog blocked the live check)',
-  }),
-  regexDetector('codex-input', 'input', anyPhrase('Ask Codex to do anything', '⏎ send'), {
-    agents: ['codex'],
-    note: 'Codex composer placeholder/footer; unverified',
-  }),
-  regexDetector('press-enter', 'input', anyPhrase('Press Enter to continue'), {
-    note: 'generic "press enter" pause',
-  }),
-  {
-    id: 'shell-prompt',
-    kind: 'input',
-    agents: ['shell'],
-    note: 'last line ends in a typical shell prompt character ($ % # > ❯ ➜)',
-    test: (text) => /[$%#>❯➜]\s?$/.test(lastLine(text)),
-  },
-];
-
-/** The default detectors that apply to `agent`, approvals first. */
-export function detectorsFor(agent: AgentKind, detectors: readonly PromptDetector[] = DEFAULT_DETECTORS): PromptDetector[] {
-  const applicable = detectors.filter((d) => !d.agents || d.agents.includes(agent));
-  return [...applicable.filter((d) => d.kind === 'approval'), ...applicable.filter((d) => d.kind === 'input')];
-}
+/**
+ * The shipped detector set (data/detectors.json), compiled. Nodes normally use `loadDetectorSet()`,
+ * which also applies the data-dir override and the BIZZI_DETECTORS=off switch.
+ */
+export const DEFAULT_DETECTORS: readonly PromptDetector[] = shippedDetectors().detectors;
 
 export interface IdleResult {
   /** Which detector matched, if any. */
@@ -127,6 +25,8 @@ export interface IdleResult {
   kind: PromptKind | 'idle';
   /** Short machine-friendly reason, e.g. "approval:claude-permission" or "idle". */
   reason: string;
+  /** The ANSI-stripped text the detector matched (shortened), for "explain". */
+  excerpt?: string;
 }
 
 export interface ActivityMonitorOptions {
@@ -147,6 +47,8 @@ export interface ActivityMonitorOptions {
 
 export const DEFAULT_IDLE_MS = 3000;
 export const DEFAULT_SETTLE_MS = 500;
+
+const MAX_EXCERPT = 160;
 
 export class ActivityMonitor {
   readonly idleMs: number;
@@ -210,14 +112,26 @@ export class ActivityMonitor {
 
   /** Evaluate detectors against the current burst text. */
   match(): PromptDetector | undefined {
+    return this.matchWithExcerpt()?.detector;
+  }
+
+  /** Like match(), plus the matched excerpt (the last line when the detector can't say). */
+  matchWithExcerpt(): { detector: PromptDetector; excerpt: string } | undefined {
+    if (this.#detectors.length === 0) return undefined;
     const text = stripAnsi(this.#text);
-    return this.#detectors.find((d) => {
+    for (const d of this.#detectors) {
       try {
-        return d.test(text);
+        if (d.match) {
+          const m = d.match(text);
+          if (m !== undefined) return { detector: d, excerpt: m };
+        } else if (d.test(text)) {
+          return { detector: d, excerpt: lastLine(text).trim().slice(0, MAX_EXCERPT) };
+        }
       } catch {
-        return false;
+        // A broken detector never breaks the session.
       }
-    });
+    }
+    return undefined;
   }
 
   dispose(): void {
@@ -235,10 +149,12 @@ export class ActivityMonitor {
   #fire(): void {
     this.#timer = undefined;
     if (this.#disposed || !this.#active) return;
-    const detector = this.match();
+    const hit = this.matchWithExcerpt();
     this.#active = false;
     this.#onIdle(
-      detector ? { detector, kind: detector.kind, reason: `${detector.kind}:${detector.id}` } : { kind: 'idle', reason: 'idle' },
+      hit
+        ? { detector: hit.detector, kind: hit.detector.kind, reason: `${hit.detector.kind}:${hit.detector.id}`, excerpt: hit.excerpt }
+        : { kind: 'idle', reason: 'idle' },
     );
   }
 }

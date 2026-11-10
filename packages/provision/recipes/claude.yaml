@@ -44,6 +44,22 @@ latest:
     package: "@anthropic-ai/claude-code"
     verified: true
 
+# Ranges: the adapter is built on @anthropic-ai/claude-agent-sdk 0.3.318 (bundles Claude Code
+# 2.1.318); the terminal adapter and probes were checked against 2.1.311.
+support:
+  versions: ">=2.0.0"
+  tested: ">=2.1.0 <2.2.0"
+  unsupported:
+    reason: Claude Code before 2.0 is not supported; the Agent SDK adapter needs 2.x
+    remedies:
+      - kind: upgrade
+        title: Update Claude Code
+        command: claude update
+  migrate:
+    from: [brew, npm]
+    title: Switch to the native installer
+    reason: Homebrew and npm installs of Claude Code don't update themselves; the native installer does.
+
 methods:
   - id: native
     kind: script
@@ -53,6 +69,7 @@ methods:
     pinnable: true
     selfUpdates: true
     pathHints: [/.local/share/claude/versions/]
+    watch: ["~/.local/share/claude/versions", "~/.local/bin/claude"]
     verified: true
     sources:
       - https://code.claude.com/docs/en/setup#install-a-specific-version
@@ -88,7 +105,7 @@ methods:
     verified: true
     sources: [https://code.claude.com/docs/en/setup#install-claude-code]
     notes:
-      - claude-code tracks the stable channel (about a week behind); claude-code@latest tracks latest.
+      - claude-code tracks the stable channel (about a week behind); claude-code@latest tracks latest. Adopted installs update and uninstall the cask they came from (claude-code or claude-code@latest, read from the Caskroom path).
       - Homebrew installs don't auto-update unless CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE=1.
     install:
       - description: Install the claude-code cask
@@ -96,10 +113,10 @@ methods:
         env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
     update:
       - description: Upgrade the claude-code cask
-        argv: [brew, upgrade, --cask, claude-code]
+        argv: [brew, upgrade, --cask, "{{brewCask|claude-code}}"]
     uninstall:
       - description: Uninstall the claude-code cask
-        argv: [brew, uninstall, --cask, claude-code]
+        argv: [brew, uninstall, --cask, "{{brewCask|claude-code}}"]
 
   - id: npm
     kind: npm
@@ -121,7 +138,7 @@ methods:
     uninstall:
       - description: Uninstall @anthropic-ai/claude-code
         argv: [npm, uninstall, -g, "@anthropic-ai/claude-code"]
-        env: { NPM_CONFIG_PREFIX: "~/.local" }
+        env: { NPM_CONFIG_PREFIX: "{{npmPrefix|~/.local}}" }
 
 login:
   interactive:

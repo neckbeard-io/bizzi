@@ -153,7 +153,7 @@ function Sidebar(props: { route: Route }): ReactNode {
   );
   const status = conn === 'open' ? (target.source === 'mock' ? `mock ${role ?? ''}` : role === 'hub' ? `hub${hubName ? ` · ${hubName}` : ''}` : 'connected') : conn;
   return (
-    <aside className="flex w-60 shrink-0 flex-col border-r border-border bg-panel lg:w-72">
+    <aside className="flex w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:w-72">
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <Logo size={24} />
         <div className="min-w-0 flex-1">
@@ -171,7 +171,7 @@ function Sidebar(props: { route: Route }): ReactNode {
             href={routeHref(n.route)}
             className={cx(
               'flex h-8 items-center gap-2 rounded-md px-2 text-sm',
-              n.match.includes(props.route.name) && !(n.label === 'Workspaces' && activeWs) ? 'bg-panel-2 font-medium' : 'text-muted hover:bg-panel-2 hover:text-fg',
+              n.match.includes(props.route.name) && !(n.label === 'Workspaces' && activeWs) ? 'bg-sidebar-accent font-medium text-sidebar-accent-foreground' : 'text-muted hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
             )}
           >
             <Icon name={n.icon} />
@@ -185,7 +185,7 @@ function Sidebar(props: { route: Route }): ReactNode {
           </a>
         ))}
       </nav>
-      <div className="scrollbar-thin mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-border px-1 pt-2 pb-2">
+      <div className="scrollbar-thin mt-3 flex min-h-0 flex-1 flex-col overflow-y-auto border-t border-sidebar-border px-1 pt-2 pb-2">
         <MachineTree variant="desktop" activeWorkspaceId={activeWs} />
       </div>
       <div className="flex items-center gap-1 border-t border-border px-2 py-2">

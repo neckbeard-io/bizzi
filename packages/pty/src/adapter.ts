@@ -1,6 +1,13 @@
 // Terminal-mode AgentAdapter: runs an agent's TUI (or a shell) in a PTY and maps the adapter
 // contract onto it. Structured features are absent; `send` types text + Enter and completes the
 // turn when output goes idle (best effort).
+//
+// Status sources, in precedence order:
+// 1. OSC 7501 reports from the program itself (program-status.ts), while it has live records that
+//    were reported since bizzi last typed a prompt;
+// 2. prompt detectors (detectors.ts, data/detectors.json) on the quiet timer;
+// 3. the plain quiet timer.
+// Every `session.status` carries `source`; `TerminalSession.statusProvenance()` has the details.
 
 import { isAbsolute, resolve as resolvePath } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
@@ -22,7 +29,11 @@ import {
   type StartSessionOptions,
   type StopReason,
 } from '@bizzi/protocol';
-import { ActivityMonitor, DEFAULT_DETECTORS, detectorsFor, type IdleResult, type PromptDetector } from './activity.ts';
+import { ActivityMonitor, detectorsFor, type IdleResult } from './activity.ts';
+import { loadDetectorSet, type DetectorSet, type PromptDetector } from './detectors.ts';
+import type { StatusPrompt, StatusProvenance } from './explain.ts';
+import { OscScanner, type OscEvent } from './osc.ts';
+import { ProgramStatusTracker, parseProgramStatus, type ProgramStatusRecord } from './program-status.ts';
 import {
   agySpec,
   claudeSpec,
@@ -67,8 +78,19 @@ export interface TerminalAdapterOptions {
   idleMs?: number;
   /** Quiet period when a prompt detector matches. Default 500 ms. */
   settleMs?: number;
-  /** Prompt detectors (filtered per agent). Default: DEFAULT_DETECTORS. */
+  /**
+   * Prompt detectors (filtered per agent). Default: the shipped set (data/detectors.json) merged
+   * with the node override file (see `detectorsFile`). Passing a list skips file loading.
+   */
   detectors?: readonly PromptDetector[];
+  /** false = run no detectors (OSC 7501 and the quiet timer only). Default: env BIZZI_DETECTORS != "off". */
+  detectorsEnabled?: boolean;
+  /** Detector override file. Default: env BIZZI_DETECTORS_FILE, else <dataDir>/detectors.json. */
+  detectorsFile?: string;
+  /** Node data dir (for the detector override). Default: env BIZZI_DATA_DIR, else ~/.bizzi. */
+  dataDir?: string;
+  /** Parse OSC 7501 program status reports. Default true. */
+  programStatus?: boolean;
   scrollbackBytes?: number;
   coalesceMs?: number;
   coalesceBytes?: number;
@@ -117,15 +139,41 @@ const RESET = Buffer.from('\x1bc');
 
 const NOOP_LOGGER: Logger = { log() {}, child: () => NOOP_LOGGER };
 
+/** The detector set a session should run, from the adapter options (explicit list, off switch, files). */
+export function resolveDetectorSet(opts: TerminalAdapterOptions): DetectorSet {
+  if (opts.detectors) {
+    const enabled = opts.detectorsEnabled ?? true;
+    return { detectors: enabled ? [...opts.detectors] : [], enabled, version: 'custom', warnings: [] };
+  }
+  return loadDetectorSet({ enabled: opts.detectorsEnabled, file: opts.detectorsFile, dataDir: opts.dataDir });
+}
+
 export class TerminalAdapter implements AgentAdapter {
   readonly agent: AgentKind;
   readonly spec: TerminalAgentSpec;
   readonly #opts: TerminalAdapterOptions;
+  #detectorSet: DetectorSet | undefined;
 
   constructor(spec: TerminalAgentSpec, opts: TerminalAdapterOptions = {}) {
     this.spec = spec;
     this.agent = spec.agent;
     this.#opts = opts;
+  }
+
+  /** Detectors for this agent, loaded once per adapter (override problems are logged, not fatal). */
+  #detectors(logger: Logger): PromptDetector[] {
+    if (!this.#detectorSet) {
+      const set = resolveDetectorSet(this.#opts);
+      this.#detectorSet = set;
+      for (const w of set.warnings) logger.log('warn', 'prompt detector override problem', { problem: w });
+      logger.log('debug', 'prompt detectors loaded', {
+        enabled: set.enabled,
+        version: set.version,
+        override: set.override?.path,
+        count: set.detectors.length,
+      });
+    }
+    return detectorsFor(this.agent, this.#detectorSet.detectors);
   }
 
   get #supervisor(): SupervisorOptions | undefined {
@@ -266,7 +314,7 @@ export class TerminalAdapter implements AgentAdapter {
     } catch (e) {
       throw new BizziError('agent_unavailable', `cannot start ${this.spec.binaryName}: ${(e as Error).message}`);
     }
-    const session = new TerminalSession(host, this.spec, this.#opts, emit, logger, plan.nativeRef);
+    const session = new TerminalSession(host, this.spec, this.#opts, emit, logger, plan.nativeRef, this.#detectors(logger));
     session.announce();
     return session;
   }
@@ -318,7 +366,7 @@ export class TerminalAdapter implements AgentAdapter {
       killTimeoutMs: this.#opts.killTimeoutMs,
       logger,
     });
-    const session = new TerminalSession(host, this.spec, this.#opts, emit, logger, ref);
+    const session = new TerminalSession(host, this.spec, this.#opts, emit, logger, ref, this.#detectors(logger));
     session.announce();
 
     // Output produced before this attach: on a fresh start that is the startup output (acked = 0);
@@ -350,8 +398,13 @@ export class TerminalSession implements AdapterSession {
   readonly #decoder = new StringDecoder('utf8');
   readonly #submitDelayMs: number;
   readonly #coalesceBytes: number;
+  readonly #scanner: OscScanner | undefined;
+  readonly #program = new ProgramStatusTracker();
   #turnId: string | undefined;
   #status: SessionStatus | undefined;
+  #provenance: StatusProvenance | undefined;
+  /** When bizzi last typed a prompt (send); OSC records older than this don't override the heuristics. */
+  #sentAt = -Infinity;
   #bracketedPaste = false;
   #stopping = false;
   #stopPromise: Promise<void> | undefined;
@@ -364,6 +417,8 @@ export class TerminalSession implements AdapterSession {
     emit: EmitFn,
     logger: Logger,
     ref: string | undefined,
+    /** Detectors to run (already filtered for the agent). Default: resolved from `opts`. */
+    detectors?: readonly PromptDetector[],
   ) {
     this.host = host;
     this.#spec = spec;
@@ -372,10 +427,11 @@ export class TerminalSession implements AdapterSession {
     this.#ref = ref;
     this.#submitDelayMs = opts.submitDelayMs ?? 80;
     this.#coalesceBytes = opts.coalesceBytes ?? DEFAULT_COALESCE_BYTES;
+    this.#scanner = opts.programStatus === false ? undefined : new OscScanner();
     this.#monitor = new ActivityMonitor({
       idleMs: opts.idleMs,
       settleMs: opts.settleMs,
-      detectors: detectorsFor(spec.agent, opts.detectors ?? DEFAULT_DETECTORS),
+      detectors: detectors ?? detectorsFor(spec.agent, resolveDetectorSet(opts).detectors),
       onActive: () => this.#onActive(),
       onIdle: (r) => this.#onIdle(r),
     });
@@ -397,6 +453,16 @@ export class TerminalSession implements AdapterSession {
     return this.#ref;
   }
 
+  /** What produced the current status (OSC 7501 record, detector + excerpt, timer), and when. */
+  statusProvenance(): StatusProvenance | undefined {
+    return this.#provenance ? structuredClone(this.#provenance) : undefined;
+  }
+
+  /** Live OSC 7501 records reported by the program (empty when it doesn't speak the protocol). */
+  programStatusRecords(): ProgramStatusRecord[] {
+    return this.#program.records();
+  }
+
   async send(turnId: string, input: InputBlock[]): Promise<void> {
     if (this.host.exited) throw new BizziError('conflict', 'the terminal process has exited');
     const parts: string[] = [];
@@ -412,6 +478,9 @@ export class TerminalSession implements AdapterSession {
     if (this.#turnId) this.#completeTurn('other');
     this.#turnId = turnId;
     this.#status = 'running';
+    this.#sentAt = Date.now();
+    // The core reports running from turn.started; only the provenance is recorded here.
+    this.#provenance = { status: 'running', source: 'turn', reason: 'prompt sent', at: new Date(this.#sentAt).toISOString() };
     this.#monitor.kick();
 
     const text = parts.join(' ');
@@ -474,21 +543,111 @@ export class TerminalSession implements AdapterSession {
     const text = this.#decoder.write(chunk);
     const paste = lastBracketedPasteState(text);
     if (paste !== undefined) this.#bracketedPaste = paste;
+    // OSC first, so a report in this chunk is authoritative before the heuristics see the output.
+    if (this.#scanner) for (const ev of this.#scanner.push(text)) this.#onOsc(ev);
     this.#monitor.output(text, chunk.length);
   }
 
+  /** OSC 7501 records exist and were reported since bizzi last typed a prompt: they win over heuristics. */
+  #programAuthoritative(): boolean {
+    return this.#program.size > 0 && this.#program.lastReportAt >= this.#sentAt;
+  }
+
+  #onOsc(ev: OscEvent): void {
+    if (this.host.exited || this.#detached) return;
+    if (ev.type === 'prompt-start') {
+      if (!this.#program.dropTransient()) return;
+      if (this.#program.size > 0) {
+        this.#applyProgramStatus();
+      } else {
+        // The program dropped its working/blocked record by drawing a new prompt: it wants input.
+        if (this.#turnId) this.#completeTurn('end_turn');
+        this.#setStatus({ status: 'waiting_input', prompt: 'input', reason: 'new prompt', source: 'osc133' });
+      }
+      return;
+    }
+    const parsed = parseProgramStatus(ev.payload, ev.overflow);
+    if (!parsed.ok) {
+      this.#logger.log('debug', 'discarded OSC 7501 report', { error: parsed.error });
+      return;
+    }
+    if (parsed.report.type === 'query') {
+      // Capability query: not answered (writing to the program's stdin unasked is not safe here).
+      this.#logger.log('debug', 'ignored OSC 7501 capability query');
+      return;
+    }
+    if (this.#program.apply(parsed.report) && this.#program.size > 0) this.#applyProgramStatus();
+    // All records cleared: nothing to report; the heuristics take over from the next burst.
+  }
+
+  #applyProgramStatus(): void {
+    const summary = this.#program.summary();
+    if (!summary) return;
+    const { record } = summary;
+    if (this.#turnId && (record.state === 'idle' || record.state === 'done' || record.state === 'error')) {
+      if (record.state === 'error') this.#completeTurn('error', record.msg ?? record.title ?? 'the program reported an error');
+      else this.#completeTurn('end_turn');
+    }
+    const osc: NonNullable<StatusProvenance['osc']> = { id: record.id, state: record.state, records: this.#program.size };
+    if (record.kind) osc.kind = record.kind;
+    if (record.app) osc.app = record.app;
+    if (record.title !== undefined) osc.title = record.title;
+    if (record.msg !== undefined) osc.msg = record.msg;
+    if (record.progress !== undefined) osc.progress = record.progress;
+    this.#setStatus({ status: summary.status, prompt: summary.prompt, reason: summary.reason, source: 'osc7501', osc });
+  }
+
+  /** Emit session.status (with its source) and remember the provenance. Unchanged statuses aren't re-emitted. */
+  #setStatus(p: {
+    status: SessionStatus;
+    prompt?: StatusPrompt;
+    reason?: string;
+    source: string;
+    osc?: StatusProvenance['osc'];
+    detector?: StatusProvenance['detector'];
+  }): void {
+    const prev = this.#provenance;
+    const same =
+      prev !== undefined &&
+      this.#status === p.status &&
+      prev.prompt === p.prompt &&
+      prev.reason === p.reason &&
+      prev.source === p.source;
+    const provenance: StatusProvenance = { status: p.status, source: p.source, at: new Date().toISOString() };
+    if (p.prompt) provenance.prompt = p.prompt;
+    if (p.reason !== undefined) provenance.reason = p.reason;
+    if (p.osc) provenance.osc = p.osc;
+    if (p.detector) provenance.detector = p.detector;
+    this.#provenance = provenance;
+    if (same) return;
+    this.#status = p.status;
+    const data: { status: SessionStatus; reason?: string; prompt?: StatusPrompt; source: string } = { status: p.status, source: p.source };
+    if (p.reason !== undefined) data.reason = p.reason;
+    if (p.prompt) data.prompt = p.prompt;
+    this.#emit({ type: 'session.status', data });
+  }
+
   #onActive(): void {
+    if (this.#programAuthoritative()) return;
     if (this.#status === 'waiting_input' && !this.#turnId) {
-      this.#status = 'running';
-      this.#emit({ type: 'session.status', data: { status: 'running', reason: 'terminal output' } });
+      this.#setStatus({ status: 'running', reason: 'terminal output', source: 'activity:output' });
     }
   }
 
   #onIdle(r: IdleResult): void {
     if (this.host.exited) return;
+    if (this.#programAuthoritative()) return;
     if (this.#turnId) this.#completeTurn('end_turn');
-    this.#status = 'waiting_input';
-    this.#emit({ type: 'session.status', data: { status: 'waiting_input', reason: r.reason } });
+    const d = r.detector;
+    if (d) {
+      const detector: NonNullable<StatusProvenance['detector']> = { id: d.id, kind: d.kind };
+      if (d.note) detector.note = d.note;
+      if (d.origin) detector.origin = d.origin;
+      if (r.excerpt) detector.excerpt = r.excerpt;
+      this.#setStatus({ status: 'waiting_input', prompt: d.kind, reason: r.reason, source: `detector:${d.id}`, detector });
+    } else {
+      this.#setStatus({ status: 'waiting_input', reason: r.reason, source: 'activity:idle' });
+    }
   }
 
   #completeTurn(stopReason: StopReason, error?: string): void {
@@ -500,13 +659,15 @@ export class TerminalSession implements AdapterSession {
 
   #onExit(info: ExitInfo): void {
     this.#monitor.dispose();
+    // Process exit drops every OSC 7501 record (working/blocked by the protocol, the rest with the process).
+    this.#program.clearAll();
+    this.#scanner?.reset();
     if (this.#detached) return;
     this.#emit({ type: 'term.exited', data: info.signal ? { exitCode: null, signal: info.signal } : { exitCode: info.exitCode } });
     const how = info.signal ? `signal ${info.signal}` : `exit code ${info.exitCode}`;
     const clean = this.#stopping || info.exitCode === 0;
     if (this.#turnId) this.#completeTurn(this.#stopping ? 'interrupted' : clean ? 'end_turn' : 'error', clean ? undefined : `process ended (${how})`);
-    this.#status = clean ? 'ended' : 'failed';
-    this.#emit({ type: 'session.status', data: { status: this.#status, reason: this.#stopping ? 'stopped' : how } });
+    this.#setStatus({ status: clean ? 'ended' : 'failed', reason: this.#stopping ? 'stopped' : how, source: 'process' });
     this.#logger.log('info', 'terminal process exited', { ...info });
   }
 }
@@ -521,7 +682,11 @@ class ExitedSession implements AdapterSession {
     const clean = exit.exitCode === 0;
     emit({
       type: 'session.status',
-      data: { status: clean ? 'ended' : 'failed', reason: `exited while detached (${exit.signal ?? `exit code ${exit.exitCode}`})` },
+      data: {
+        status: clean ? 'ended' : 'failed',
+        reason: `exited while detached (${exit.signal ?? `exit code ${exit.exitCode}`})`,
+        source: 'process',
+      },
     });
   }
   agentSessionRef(): string {

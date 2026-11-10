@@ -42,7 +42,9 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
     try {
       await store.removeWorktree(props.workspaceId);
     } catch (e) {
-      if (!(e instanceof BizziError && e.code === 'conflict')) throw e;
+      // Live sessions block removal outright (data.sessions); only uncommitted changes (data.paths) can be forced.
+      const data = e instanceof BizziError ? (e.data as { sessions?: unknown; paths?: unknown } | undefined) : undefined;
+      if (!(e instanceof BizziError && e.code === 'conflict') || data?.sessions !== undefined) throw e;
       if (!window.confirm(`${e.message}\n\nRemove the worktree anyway and discard them? The branch is kept.`)) return;
       await store.removeWorktree(props.workspaceId, true);
     }

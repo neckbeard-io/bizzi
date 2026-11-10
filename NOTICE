@@ -1,0 +1,89 @@
+bizzi
+=====
+
+bizzi includes third-party material listed below. Each item keeps its own licence.
+
+------------------------------------------------------------------------------
+Theming: model, converter and hand-authored themes
+(packages/ui/src/lib/theme/)
+------------------------------------------------------------------------------
+
+Chorus (an agentic development environment)
+  Licence: Apache License 2.0
+  Used: the theme model (semantic tokens, terminal palette, layout tokens per
+  light/dark variant), the base16/base24 converter including its YAML
+  inline-comment handling, theme validation, and the themes Graphite, Paper,
+  Teletype, Abyss and Ink & Bone. Ported to TypeScript modules in bizzi with
+  changes (ids and names, bizzi's extra tokens, collected validation failures).
+  Chorus's own house palette ("Chorus Default") is not included.
+
+Terax (https://github.com/crynta/terax-ai)
+  Licence: Apache License 2.0
+  Used: the theme model Chorus descends from, and the themes Tokyo Night,
+  Nord, Catppuccin, Gruvbox, Rosé Pine, Tide, Sage, Caffeine and
+  Warm Paper & Clay (Terax "claude"), via Chorus. Three light-variant muted
+  foregrounds were darkened to meet bizzi's contrast checks.
+
+  The upstream palettes behind those themes are MIT-licensed:
+  Tokyo Night (enkia), Nord (Arctic Ice Studio and Sven Greb),
+  Catppuccin (Catppuccin), gruvbox (Pavel Pertsev), Rosé Pine (Rosé Pine).
+
+  Apache License 2.0: https://www.apache.org/licenses/LICENSE-2.0
+
+------------------------------------------------------------------------------
+Cobalt2 (https://github.com/wesbos/cobalt2-vscode)
+------------------------------------------------------------------------------
+
+  Colours taken from the Cobalt2 VS Code theme.
+
+  MIT License
+
+  Copyright (c) 2018 Wes Bos, Roberto Achar
+
+  Permission is hereby granted, free of charge, to any person obtaining a copy
+  of this software and associated documentation files (the "Software"), to deal
+  in the Software without restriction, including without limitation the rights
+  to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+  copies of the Software, and to permit persons to whom the Software is
+  furnished to do so, subject to the following conditions:
+
+  The above copyright notice and this permission notice shall be included in
+  all copies or substantial portions of the Software.
+
+  THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+  IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+  FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+  AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+  SOFTWARE.
+
+------------------------------------------------------------------------------
+base16 schemes (https://github.com/tinted-theming/schemes)
+------------------------------------------------------------------------------
+
+  Copyright (c) 2022 Tinted Theming (https://github.com/tinted-theming)
+  Licence: MIT (same terms as above). Each scheme also names its author:
+
+  Ayu Dark, Ayu Light ........ Tinted Theming, Ayu Theme (https://github.com/ayu-theme)
+  Catppuccin Latte ........... Catppuccin (https://github.com/catppuccin/catppuccin)
+  Everforest ................. Sainnhe Park (https://github.com/sainnhe)
+  GitHub ..................... Tinted Theming
+  Gruvbox Light Hard ......... Dawid Kurek, morhetz (https://github.com/morhetz/gruvbox)
+  Kanagawa ................... Tommaso Laurenzi (https://github.com/rebelot)
+  Material Palenight ......... Nate Peterson
+  Monokai .................... Wimer Hazenberg (http://www.monokai.nl)
+  One Light .................. Daniel Pfeifer (http://github.com/purpleKarrot)
+  OneDark .................... Lalit Magant (http://github.com/tilal6991)
+  PaperColor Light ........... Jon Leopard, Tinted Theming, after NLKNguyen/papercolor-theme
+  Solarized Dark, Light ...... Ethan Schoonover (modified by aramisgithub)
+  Tomorrow Night ............. Chris Kempson (http://chriskempson.com)
+  Twilight ................... David Hart (https://github.com/hartbit)
+
+------------------------------------------------------------------------------
+flax (https://github.com/neckbeard-io/flax)
+------------------------------------------------------------------------------
+
+  Five-tone palettes Evergreen, Dracula (with a light variant) and
+  Synthwave, and the Device theme idea, from the bizzi author's own project.
+  The Dracula palette is by Zeno Rocha (MIT).

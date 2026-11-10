@@ -1,6 +1,7 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { delimiter, dirname } from 'node:path';
-import type { AgentAuthState, AgentKind, AgentProbe, Logger } from '@bizzi/protocol';
+import type { AgentAuthState, AgentKind, AgentProbe, AgentRemedy, AgentSupport, Logger } from '@bizzi/protocol';
+import { assessInstall, methodForPaths, type InstallFacts } from './install.ts';
 import { execCapture, type ExecResult } from './exec.ts';
 import { compareVersions, dig, type FetchFn, latestVersion } from './latest.ts';
 import { augmentedEnv, findBinaries, homeDir, isExecutable, resolveNpmPrefix, toolsDir as defaultToolsDir } from './path.ts';
@@ -40,8 +41,19 @@ export interface ToolProbe {
   version?: string;
   latestVersion?: string;
   updateAvailable?: boolean;
-  /** Install method guessed from the binary's location (recipe method id). */
+  /** Install method guessed from the binary's real location (recipe method id). */
   method?: string;
+  /** The recipe's first method on this platform. */
+  preferredMethod?: string;
+  /** The detected method updates itself. */
+  selfUpdates?: boolean;
+  support?: AgentSupport;
+  supportReason?: string;
+  remedies?: AgentRemedy[];
+  /** Homebrew formula / cask, npm prefix of the install (for update/uninstall plans). */
+  facts?: InstallFacts;
+  /** Paths that change when the install updates. */
+  watch?: string[];
   /** Found via the process's own PATH (false: only via bizzi's augmented PATH / search paths). */
   onInheritedPath?: boolean;
   auth: AgentAuthState;
@@ -58,6 +70,14 @@ export async function probe(agent: AgentKind, env: NodeJS.ProcessEnv = process.e
   if (t.version) out.version = t.version;
   if (t.latestVersion) out.latestVersion = t.latestVersion;
   if (t.account) out.account = t.account;
+  if (t.realPath) out.realPath = t.realPath;
+  if (t.method) out.method = t.method;
+  if (t.preferredMethod) out.preferredMethod = t.preferredMethod;
+  if (t.updateAvailable) out.updateAvailable = true;
+  if (t.installed && t.onInheritedPath !== undefined) out.onPath = t.onInheritedPath;
+  if (t.support) out.support = t.support;
+  if (t.supportReason) out.supportReason = t.supportReason;
+  if (t.remedies?.length) out.remedies = t.remedies;
   if (t.notes.length) out.notes = t.notes;
   return out;
 }
@@ -141,19 +161,28 @@ async function probeRecipe(recipe: Recipe, env: NodeJS.ProcessEnv, opts: ProbeOp
   if (bin) {
     result.installed = true;
     result.path = bin;
-    try {
-      result.realPath = realpathSync(bin);
-    } catch {
-      /* dangling */
-    }
     const inherited = new Set((env.PATH ?? '').split(delimiter).filter(Boolean));
     result.onInheritedPath = inherited.has(dirname(bin));
     if (!result.onInheritedPath) {
       result.notes.push(`found at ${bin}, outside this process's PATH; bizzi adds ${dirname(bin)} when it starts agents`);
     }
-    const method = guessMethod(recipe, result.realPath ?? bin);
-    if (method) result.method = method;
   }
+  const assessment = assessInstall(recipe, { ...(bin ? { path: bin } : {}), ...(result.version ? { version: result.version } : {}) }, {
+    platform,
+    env,
+    home,
+    searchDirs,
+  });
+  if (assessment.realPath) result.realPath = assessment.realPath;
+  if (assessment.method) result.method = assessment.method;
+  if (assessment.preferredMethod) result.preferredMethod = assessment.preferredMethod;
+  if (assessment.selfUpdates) result.selfUpdates = true;
+  if (bin && assessment.support) result.support = assessment.support;
+  if (bin && assessment.supportReason) result.supportReason = assessment.supportReason;
+  if (bin && assessment.remedies) result.remedies = assessment.remedies;
+  if (Object.keys(assessment.facts).length) result.facts = assessment.facts;
+  if (assessment.watch.length) result.watch = assessment.watch;
+  result.notes.push(...assessment.notes);
 
   if (recipe.auth) {
     const a = await probeAuth(recipe.auth, bin, recipe, pathEnv, vars, opts);
@@ -197,7 +226,7 @@ function safeRenderPath(p: string, vars: TemplateVars): string | undefined {
 
 /** Recipe method whose pathHints match the binary's real path. */
 export function guessMethod(recipe: Recipe, realPath: string): string | undefined {
-  return recipe.methods.find((m) => m.pathHints?.some((h) => realPath.includes(h)))?.id;
+  return methodForPaths(recipe, [realPath])?.id;
 }
 
 export function parseVersion(r: Pick<ExecResult, 'stdout' | 'stderr'>, regex: string): string | undefined {

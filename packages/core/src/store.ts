@@ -4,6 +4,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 import type { ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+import type { Spent } from './budget.ts';
 
 /** Core-private per-session state persisted next to the public SessionInfo. */
 export interface SessionState {
@@ -19,6 +20,12 @@ export interface SessionState {
   /** Terminal size. */
   cols?: number;
   rows?: number;
+  /** What this session's own turns have used (budgets, usage.md §2). */
+  spent?: Spent;
+  /** Set while the session is held at a turn boundary because a budget was reached (the reason text). */
+  budgetBlocked?: string;
+  /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
+  queued?: boolean;
 }
 
 export interface SessionRow {
@@ -100,6 +107,10 @@ export class Store {
     this.#db
       .prepare('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run(key, value);
+  }
+
+  deleteMeta(key: string): void {
+    this.#db.prepare('DELETE FROM meta WHERE key = ?').run(key);
   }
 
   // --- events -----------------------------------------------------------------------------------

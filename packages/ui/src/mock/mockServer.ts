@@ -51,6 +51,7 @@ import {
 import type { MockHost, MockModule } from './host.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
+import { MockThemes } from './themes.ts';
 import { MockUsage } from './usage.ts';
 
 export interface MockOptions {
@@ -120,7 +121,7 @@ export class MockCore implements MockHost {
     for (const x of this.sessionMap.values()) x.seenThrough = UNSEEN_SESSIONS.has(x.id) ? Math.max(0, x.lastSeq - 1) : x.lastSeq;
     this.provision = new MockProvision(this);
     this.usageModule = new MockUsage(this, { live: this.autoplay && this.speed > 0 });
-    this.modules = [this.provision, new MockKnowledge(this), this.usageModule];
+    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule];
   }
 
   /** Stop background timers (tests). */
@@ -505,8 +506,10 @@ export class MockCore implements MockHost {
       case 'worktree.remove': {
         const w = this.workspaceOnline(p.workspaceId);
         if (w.kind !== 'worktree') throw new BizziError('bad_request', `${w.name} is not a worktree`);
-        const dirty = this.git.get(w.id)?.files.length ?? 0;
-        if (dirty > 0 && p.force !== true) throw new BizziError('conflict', `${w.name} has ${dirty} uncommitted change${dirty === 1 ? '' : 's'}; removing it discards them`, { dirty });
+        const live = this.sessions().filter((x) => x.workspaceId === w.id && x.status !== 'ended' && x.status !== 'failed');
+        if (live.length > 0) throw new BizziError('conflict', `worktree is used by ${live.length} live session(s); stop them first`, { sessions: live.map((x) => x.id) });
+        const paths = this.git.get(w.id)?.files.map((f) => f.path) ?? [];
+        if (paths.length > 0 && p.force !== true) throw new BizziError('conflict', `worktree has uncommitted changes (${paths.join(', ')}); commit them or pass force`, { paths });
         this.workspaceMap.delete(w.id);
         this.git.delete(w.id);
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: w.id } });

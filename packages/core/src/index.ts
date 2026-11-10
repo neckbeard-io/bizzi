@@ -10,8 +10,49 @@ export {
 export { startServer, CLOSE_UNAUTHORIZED, type BizziServer, type ServerOptions } from './server.ts';
 export { createJsonLogger, isLogLevel, nullLogger, type JsonLoggerOptions } from './logger.ts';
 export { EventBus, type EventBody, type EventListener } from './bus.ts';
-export { AdapterRegistry, mergeCapabilities, PROBE_CACHE_MS } from './agents.ts';
-export { Sessions, TERMINAL_SNAPSHOT_MAX_BYTES, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
-export { Workspaces } from './workspaces.ts';
+export { AdapterRegistry, mergeCapabilities, PROBE_CACHE_MS, type ListingDecorator } from './agents.ts';
+export {
+  Sessions,
+  TERMINAL_SNAPSHOT_MAX_BYTES,
+  composePrepareStart,
+  type AgentEnvProvider,
+  type HelperOptions,
+  type PrepareStart,
+  type PrepareStartResult,
+} from './sessions.ts';
+export { Workspaces, sanitizeBranch } from './workspaces.ts';
+export {
+  DEFAULT_PERMISSION_MODE,
+  DEFAULT_READ_TOKENS,
+  DEFAULT_WAIT_MS,
+  MAX_READ_TOKENS,
+  MAX_WAIT_MS,
+  OrchestrationSettingsStore,
+  Orchestrator,
+  PERMISSION_LEVELS,
+  WAIT_UNTIL,
+  clampPermission,
+  permissionLevel,
+  type ChangedFile,
+  type ClampResult,
+  type ReadOptions,
+  type ReadResult,
+  type StartHelperRequest,
+  type StartHelperResult,
+  type WaitResult,
+  type WaitUntil,
+} from './orchestration.ts';
+export { addTurn, budgetReached, parseBudget, type Spent } from './budget.ts';
 export { buildMachineInfo, detectHeadful } from './machine.ts';
 export { parseBranchLine, parsePorcelainZ } from './git.ts';
+export {
+  UsageTracker,
+  USAGE_REPUBLISH_MS,
+  mergeAccountUsage,
+  newerOrSame,
+  normalizeAccountUsage,
+  sortAccountUsage,
+  usageKey,
+  type UsageTrackerOptions,
+} from './usage.ts';
+export { MAX_THEME_BYTES, MAX_THEME_NAME, MAX_THEMES, ThemeTable, parseThemeSave, type ThemeSave } from './themes.ts';
