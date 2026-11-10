@@ -306,7 +306,7 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 
 One UI codebase for every client: desktop app (macOS, Windows, Linux), phone (Android; iOS best-effort), browser client served by the hub. React, in Electron / Capacitor / the browser (tech-choices D0b).
 
-Screens: **machines** (online, headful/headless, power, ADE status with install/update/login buttons) → **workspaces** (on the selected machine, with project links) → **sessions** (timeline, composer, inline approvals, plan/todos, diff review, terminal tab, raw-events tab) · **inbox** (approvals, questions, finished turns, knowledge suggestions) · **knowledge browser** (by scope, provenance, policy) · settings.
+Screens: the **machine → workspace tree** (the desktop sidebar; the Machines tab on the phone) → **machine page** (opened from its tile: online, headful/headless, power, its workspaces with "Add workspace", ADE status with install/update/login buttons and update/restart policies, API keys, widgets, machine settings such as agent-to-agent limits) → **workspace** (sessions, project links) → **sessions** (timeline, composer, inline approvals, plan/todos, diff review, terminal tab, raw-events tab) · **inbox** (approvals, questions, finished turns, knowledge suggestions) · **knowledge browser** (by scope, provenance, policy) · **settings** (app-level only: appearance, knowledge, devices, connection).
 
 Mobile-first touches: approve/deny from the notification, voice input, file-by-file diff review, share sheet into a session.
 
@@ -340,13 +340,19 @@ Machines first, workspaces (usually a repo) under each, as in Herdr. Two referen
 
 **Row 3 (only when not default):** repo state: PR and CI status, ahead/behind. Hidden when there's no PR and the branch is in sync. PR/CI needs a forge integration on the node (`gh` first); without one the row shows ahead/behind only.
 
-**Machine header:** name, online state, totals ("6 · 1 waiting"), so a collapsed machine still shows what needs you. Offline machines are dimmed and show cached counts.
+**Machine header (tile):** name, online state, totals ("6 · 1 waiting"), so a collapsed machine still shows what needs you. Offline machines are dimmed and show cached counts; an unsupported agent shows a warning mark; "updates pending" sits under the header. Clicking the tile opens the machine's page and highlights the tile while it's open; the chevron is a separate target that collapses/expands. On hover (desktop) a **+** (add a workspace on that machine) and a gear (the machine page) overlay the totals.
+
+**Desktop sidebar = the tree** (Herdr-style; no separate Machines/Workspaces pages, `#/machines` and `#/workspaces` open the selected machine's page). Header: logo and connection status, then icon buttons for Inbox (waiting badge), Knowledge (suggestion badge) and Settings. Footer: light/dark toggle and disconnect.
+
+**Width:** a drag handle on the right edge (keyboard: focus it, arrows resize, Home/End jump, Enter fits) sets a manual width in [200, min(480, 40% of the window)]. **Auto** (the default) fits the widest row 1 or machine header (rows 2 and 3 don't count), clamped to [220, 360], and shrinks on narrow windows so the main pane keeps 640 px. Double-click the handle, its context menu, or Settings → Appearance returns to auto. Stored per device; rows ellipsise at any width. Measured once per frame at most, from a hidden max-content copy, only when the tree changes.
+
+**Settings split:** the gear opens app-level settings only (appearance, knowledge, devices, connection). Anything about one machine (agents, policies, API keys, widgets, agent-to-agent limits) lives on that machine's page, never in both places.
 
 **Bottom bar (desktop):** usage meters per login (Claude and Codex plan windows, metered spend) plus widgets such as a LiteLLM spend meter. On the phone this becomes a usage chip in the Machines and Inbox headers. The session header carries a context bar. Details: [usage.md](usage.md).
 
 Rules: colour only carries state; everything else is muted text. No chat previews unless waiting or done-unseen. No directory lists. Never more than three lines per workspace. Hover (desktop) or long-press (phone) opens a breakdown: one line per session with agent, title, state, reason and age.
 
-**Phone:** same structure. Rows 1 and 2 only (row 3 folds into a PR icon on row 1). More than three marks collapse to counts (`⚠1 ◐2 ●3`). 44 px hit targets; tapping row 2 jumps straight to the waiting session; the Inbox tab badge is the total waiting count across machines; machine sections collapse and remember their state.
+**Phone:** same structure; bottom nav Machines · Inbox · Knowledge · Settings, where Machines is the tree and tapping a machine tile opens its page. Rows 1 and 2 only (row 3 folds into a PR icon on row 1). More than three marks collapse to counts (`⚠1 ◐2 ●3`). 44 px hit targets; tapping row 2 jumps straight to the waiting session; the Inbox tab badge is the total waiting count across machines; machine sections collapse and remember their state.
 
 ## 12. Orchestration
 
@@ -426,7 +432,7 @@ Budgetless doesn't mean unlimited: GPU capacity is the limit, so a provider can 
 | **M2 provisioning + breadth** | install/update/login recipes; supported-version alerts, method migration, update policy, restart-on-new-version (§7); OpenCode adapter; terminal mode + agy; desktop + phone shells; headful Mac install; context bar, per-login usage meters, `http`/`command` widgets ([usage.md](usage.md) §5) | install and log in Codex on a fresh Linux box entirely from the phone; all four agents usable | Built: recipes with supported versions, adopted-install detection, `agent.migrate`, update/restart policies and install watching; OpenCode adapter; terminal mode (`@bizzi/pty`: agy, shell, OSC 7501); Electron and Capacitor shells; context bar, `usage.list`, `http`/`command` widgets; themes. In progress: restart-and-resume on a new agent version (updates.md §5). |
 | **M3 knowledge** | rules + memory store, MCP server, injection, harvest, acceptance policy, inbox | a rule set in Claude applies to Codex in the same workspace, on another machine too | Built on each node: `@bizzi/knowledge` store, bizzi-memory MCP server, session-start injection, Claude/Codex harvest, acceptance policy and inbox (`knowledge.*`). Open: the store has replication primitives (HLC, `changesSince`/`applyRemote`) but nothing syncs it through the hub yet, so the "another machine" half of the exit criterion isn't met. |
 | **M4 orchestration (one machine)** | worktrees as workspaces; agent-to-agent MCP tools (§12.1); guardrails (§12.2); billing classes and budgetless providers (§12.3); fan-out + compare view; helper budgets, preflight and tree view ([usage.md](usage.md) §2) | Claude asks Codex to review its change in a worktree on the same machine, waits, reads the findings and fixes them, while you watch both from the phone; local-model helpers don't count toward the budget | Built: `worktree.*`, `seen_through`, the bizzi-agents MCP tools (`@bizzi/orchestration`), guardrails and `orchestration.settings.*`, billing classes, session and tree budgets, helpers nested in the sidebar. In progress: fan-out + compare view, baselines and the preflight. `npm run smoke:v12` covers the one-machine flow offline. |
-| **M5 later** | cross-machine agent-to-agent via the hub (§12.4), pipelines/watchers, container workspaces, fork-to-machine, tool bridging, API chat, team (orgs, sharing, Postgres; deprioritized, decision 1) | | Not started. |
+| **M5 later** | cross-machine agent-to-agent via the hub (§12.4), pipelines/watchers, container workspaces, fork-to-machine, tool bridging, API chat, colour/tags per machine and workspace (sidebar and headers), team (orgs, sharing, Postgres; deprioritized, decision 1) | | Not started. |
 
 ## 14. Open questions
 

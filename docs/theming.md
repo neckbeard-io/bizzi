@@ -38,7 +38,7 @@ type LayoutTokens = Partial<{
   fontHeading, composerRadius, outerGap, spineRowHeight }>;
 ```
 
-- **Mode stays separate from the theme.** The user picks a theme and a mode (`system` / `light` / `dark`, today's `useTheme`). A theme without the requested variant falls back to its other variant.
+- **Mode stays separate from the theme.** The user picks a theme and a mode (`system` / `light` / `dark`, today's `useTheme`). A theme without the requested variant falls back to its other variant. The theme (and density) is one user-wide choice; the mode is per device (§5, Storage).
 - `applyTheme` writes tokens as CSS custom properties on `:root`, clearing the previous theme's first, so switching never leaves stale values.
 
 ## 3. bizzi's extra tokens
@@ -122,7 +122,7 @@ There's no upstream light variant, so light mode falls back to dark (§2) unless
 - **Native files:** `.bizzi-theme` (JSON, the model in §2, with a JSON Schema). bizzi also reads `.chorus-theme` files, which use the same shape, so Chorus users bring their themes along.
 - **VS Code themes** (`colors` + `tokenColors` JSON): not supported by Chorus. A later converter could map `editor.background`, `sideBar.*`, `terminal.ansi*` and friends onto §2.
 - **Creating a theme:** "Create" starts from the current theme. Theme files are plain JSON with a schema, and the themes directory has an `AGENTS.md`, so "make me a theme like Nord but warmer" is a request to your agent (as with widgets, [usage.md](usage.md) §4).
-- **Storage:** custom themes live on the hub, so every device sees them. The choice of theme and mode is per device: the phone may run light while the desktop runs dark.
+- **Storage:** custom themes live on the hub, so every device sees them. The **selected theme and the density** are one user-wide setting, `UserPrefs { themeId?, density? }`, stored on the server the client is connected to (the hub, shared by every device; a node in local mode keeps its own) and read and written with `prefs.get` / `prefs.set`. `prefs.set` merges and emits a global `prefs.updated`, so a change on one device repaints the others live. In the client, localStorage is only a cache for first paint and offline use: on connect the server's value wins; a change made offline is pushed on the next connect; a server with no prefs yet (fresh, or upgraded from per-device themes) is seeded with this device's choice. Servers without `prefs.*` answer `unsupported` and the choice stays on the device. The **mode** (`system` default / `light` / `dark`) stays per device in localStorage: the phone may run light while the desktop runs dark. A URL `?theme=` override is never saved or synced.
 
 ## 6. Validation
 
