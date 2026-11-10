@@ -79,7 +79,7 @@ test('mock 1.2: accounts, widgets, sidebar rows, helpers and worktrees', async (
   // Worktrees group under their repo; removing a dirty one needs force.
   assert.deepEqual(
     selectMachineWorkspaces(s, 'm_laptop').map((r) => `${r.workspace.id}@${r.depth}`),
-    ['w_acme@0', 'w_acme_oauth@1', 'w_notes@0'],
+    ['w_acme@0', 'w_acme_oauth@1', 'w_fo1@1', 'w_fo2@1', 'w_fo3@1', 'w_notes@0'],
   );
   // A live helper blocks removal outright; after it stops, uncommitted changes still need force.
   await assert.rejects(store.removeWorktree('w_acme_oauth', true), (e: unknown) => e instanceof BizziError && e.code === 'conflict' && (e.data as { sessions?: string[] }).sessions?.[0] === 's_helper_review');

@@ -48,6 +48,7 @@ import {
   WORKSPACES,
   iso,
 } from './fixtures.ts';
+import { FANOUT_DIFFS, FANOUT_GIT, FANOUT_SESSIONS, FANOUT_WORKSPACES, fanoutHistory } from './fanout.ts';
 import type { MockHost, MockModule } from './host.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
@@ -112,9 +113,9 @@ export class MockCore implements MockHost {
     this.machineMap.set(MACHINE.id, { ...MACHINE });
     this.machineMap.set(SERVER.id, { ...SERVER, lastSeenAt: new Date(Date.now() - 2 * 3600_000 - 14 * 60_000).toISOString() });
     this.machineMap.set(MINI.id, { ...MINI });
-    for (const w of WORKSPACES) this.workspaceMap.set(w.id, { ...w });
-    for (const s of SESSIONS) this.sessionMap.set(s.id, { ...s, ...(s.budget ? { budget: { ...s.budget } } : {}) });
-    for (const [wid, g] of Object.entries(GIT_STATUS)) this.git.set(wid, { ...g, files: [...g.files] });
+    for (const w of [...WORKSPACES, ...FANOUT_WORKSPACES]) this.workspaceMap.set(w.id, { ...w });
+    for (const s of [...SESSIONS, ...FANOUT_SESSIONS]) this.sessionMap.set(s.id, { ...s, ...(s.budget ? { budget: { ...s.budget } } : {}) });
+    for (const [wid, g] of Object.entries({ ...GIT_STATUS, ...FANOUT_GIT })) this.git.set(wid, { ...g, files: [...g.files] });
     this.seedDevices();
     this.seedHistory();
     // Everything seeded has been seen, except the sessions that finished while you were away.
@@ -412,6 +413,9 @@ export class MockCore implements MockHost {
     this.emitS('s_term', { type: 'session.status', data: { status: 'running', source: 'osc7501' } }, iso(-15));
     this.emitS('s_term', { type: 'term.output', data: { dataBase64: stringToBase64('\x1b[1;32mdev@mbp\x1b[0m:\x1b[1;34m~/src/acme-shop\x1b[0m$ git log --oneline -3\r\n\x1b[33mfd3be0d\x1b[0m Add checkout retries\r\n\x1b[33m9a01c2e\x1b[0m Bump vitest\r\n\x1b[33m2be44f1\x1b[0m Initial commit\r\n') } }, iso(-14));
     this.termPrompt('s_term');
+
+    // A fan-out of three runs on the flaky checkout spec (spec §12), one worktree each.
+    for (const [sid, body, ts] of fanoutHistory()) this.emitS(sid, body, ts);
   }
 
   private termPrompt(sessionId: string): void {
@@ -563,6 +567,7 @@ export class MockCore implements MockHost {
         if (typeof p.model === 'string' && p.model) s.model = p.model;
         if (typeof p.permissionMode === 'string' && p.permissionMode) s.permissionMode = p.permissionMode;
         if (typeof p.effort === 'string' && p.effort) s.effort = p.effort;
+        if (typeof p.group === 'string' && p.group) s.group = p.group;
         this.sessionMap.set(s.id, s);
         this.emit(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...s } } });
         if (mode === 'terminal') {
@@ -710,7 +715,9 @@ export class MockCore implements MockHost {
         return { isRepo: true, branch: g.branch, ahead: g.ahead, behind: g.behind, files: g.files.map((f) => ({ ...f })) };
       }
       case 'git.diff': {
-        this.workspaceOnline(p.workspaceId);
+        const dws = this.workspaceOnline(p.workspaceId);
+        const fanout = FANOUT_DIFFS[dws.id];
+        if (fanout !== undefined) return { diff: p.path ? fanout.split(/(?=^diff --git )/m).filter((d) => d.includes(` b/${String(p.path)}\n`)).join('') : fanout };
         if (p.path === 'src/checkout/checkout.spec.ts') return { diff: CHECKOUT_DIFF };
         if (p.path === 'notes.txt') return { diff: NOTES_DIFF };
         if (p.path) return { diff: '' };
