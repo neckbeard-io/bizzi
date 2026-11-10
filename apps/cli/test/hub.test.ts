@@ -26,7 +26,16 @@ interface Proc {
 /** Spawn the CLI and wait for its first stdout JSON line. */
 async function spawnCli(args: string[], env: Record<string, string> = {}): Promise<Proc> {
   const child = spawn(process.execPath, [MAIN, ...args], {
-    env: { ...process.env, BIZZI_HUB_URL: '', BIZZI_PAIR_CODE: '', BIZZI_PUBLIC_URL: '', BIZZI_NTFY_URL: '', ...env },
+    env: {
+      ...process.env,
+      BIZZI_HUB_URL: '',
+      BIZZI_PAIR_CODE: '',
+      BIZZI_PUBLIC_URL: '',
+      BIZZI_NTFY_URL: '',
+      // Keep widget files out of the real ~/.config.
+      BIZZI_WIDGETS_DIR: join(args[args.indexOf('--data-dir') + 1] ?? os.tmpdir(), 'widgets'),
+      ...env,
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';

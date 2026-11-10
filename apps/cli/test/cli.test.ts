@@ -27,7 +27,7 @@ interface Serving {
 
 async function startServe(dataDir: string, env: Record<string, string> = {}): Promise<Serving> {
   const child = spawn(process.execPath, [MAIN, 'serve', '--fake', '--port', '0', '--data-dir', dataDir, '--name', 'cli-test'], {
-    env: { ...process.env, BIZZI_TOKEN: 'tok-cli', ...env },
+    env: { ...process.env, BIZZI_TOKEN: 'tok-cli', BIZZI_WIDGETS_DIR: join(dataDir, 'widgets'), ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let out = '';
@@ -111,6 +111,9 @@ test('serve --fake prints a valid ready line, serves clients, and drains on SIGT
   assert.equal(s.ready.pid, s.child.pid);
   const serveJson = join(dir.path, 'serve.json');
   assert.deepEqual(JSON.parse(readFileSync(serveJson, 'utf8')), s.ready);
+  // Widgets run from $BIZZI_WIDGETS_DIR, initialised with the schema and AGENTS.md.
+  assert.ok(existsSync(join(dir.path, 'widgets', 'AGENTS.md')));
+  assert.ok(existsSync(join(dir.path, 'widgets', 'widget.schema.json')));
   // stderr is JSON lines.
   for (const l of s.stderr().trim().split('\n').filter(Boolean)) JSON.parse(l);
 
