@@ -180,6 +180,13 @@ try {
   check(!(await b.call('themes.list', {})).themes.some((t: any) => t.id === theme.id), 'theme deleted');
   step(`themes: saved ${theme.id}, listed on device B, deleted`);
 
+  // ---- user-wide prefs on the hub (theme choice synced across devices)
+  const prefsSeen = b.next((e) => e.type === 'prefs.updated' && e.data.prefs.themeId === 'nord', 'prefs.updated on device B');
+  await a.call('prefs.set', { prefs: { themeId: 'nord' } });
+  await prefsSeen;
+  check((await b.call('prefs.get', {})).prefs.themeId === 'nord', 'device B reads the shared theme choice');
+  step('prefs: theme choice set on device A → prefs.updated on device B');
+
   // ---- orchestration settings (machine and workspace)
   const { settings: before } = await a.call('orchestration.settings.get', { machineId });
   const { settings: after } = await a.call('orchestration.settings.set', { machineId, settings: { maxHelpersPerParent: 2 } });

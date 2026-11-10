@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { GLOBAL_CHANNEL, type AccountUsage, type InputBlock, type ThemeFile } from '@bizzi/protocol';
-import { createNode, mergeAccountUsage, normalizeAccountUsage, type NodeExtension } from '../src/index.ts';
+import { createNode, mergeAccountUsage, mergeUserPrefs, normalizeAccountUsage, parseUserPrefsPatch, type NodeExtension } from '../src/index.ts';
 import { FakeAdapter, type FakeStep } from '../src/testing/index.ts';
 import { record, tempDir, waitFor } from './helpers.ts';
 
@@ -168,4 +168,33 @@ test('themes CRUD on a node (local mode), persisted', async (t) => {
   t.after(() => node.close());
   ({ themes } = await node.call('themes.list', {}));
   assert.deepEqual(themes.map((x: ThemeFile) => x.data), [{ palette: { bg: '#3b4252' } }]);
+});
+
+test('prefs on a node (local mode): merge, validate, prefs.updated, persisted', async (t) => {
+  const dir = tempDir();
+  t.after(() => dir.cleanup());
+  let node = await openNode(dir.path);
+  const rec = record(node, GLOBAL_CHANNEL);
+  assert.deepEqual((await node.call('prefs.get', {})).prefs, {});
+  assert.deepEqual((await node.call('prefs.set', { prefs: { themeId: 'nord' } })).prefs, { themeId: 'nord' });
+  // Merge; unknown keys are dropped rather than rejected (newer clients, older servers).
+  const { prefs } = await node.call('prefs.set', { prefs: { density: 'compact', accent: '#fff' } as never });
+  assert.deepEqual(prefs, { themeId: 'nord', density: 'compact' });
+  const ev = await rec.waitFor('prefs.updated', (e) => e.data.prefs.density === 'compact');
+  assert.deepEqual(ev.data.prefs, { themeId: 'nord', density: 'compact' });
+  await assert.rejects(node.call('prefs.set', { prefs: { density: 'huge' } } as never), { code: 'bad_request' });
+  await assert.rejects(node.call('prefs.set', { prefs: { themeId: '../x' } }), { code: 'bad_request' });
+  await assert.rejects(node.call('prefs.set', {} as never), { code: 'bad_request' });
+  rec.stop();
+  await node.close();
+
+  node = await openNode(dir.path);
+  t.after(() => node.close());
+  assert.deepEqual((await node.call('prefs.get', {})).prefs, { themeId: 'nord', density: 'compact' });
+});
+
+test('mergeUserPrefs replaces only the keys present', () => {
+  assert.deepEqual(mergeUserPrefs({ themeId: 'a', density: 'spacious' }, { themeId: 'b' }), { themeId: 'b', density: 'spacious' });
+  assert.deepEqual(mergeUserPrefs({}, {}), {});
+  assert.deepEqual(parseUserPrefsPatch({ prefs: { themeId: 'th_01ABC', density: 'theme', other: 1 } }), { themeId: 'th_01ABC', density: 'theme' });
 });

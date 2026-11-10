@@ -516,6 +516,23 @@
       "result": {
         "$ref": "#/$defs/result:theme.delete"
       }
+    },
+    "prefs.get": {
+      "description": "User-wide preferences (theme choice, density); hub-local like themes.*. `prefs.set` merges and emits `prefs.updated`.",
+      "params": {
+        "$ref": "#/$defs/params:prefs.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:prefs.get"
+      }
+    },
+    "prefs.set": {
+      "params": {
+        "$ref": "#/$defs/params:prefs.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:prefs.set"
+      }
     }
   },
   "x-events": {
@@ -754,6 +771,12 @@
         "description": "Hub only.",
         "data": {
           "$ref": "#/$defs/global:device.updated"
+        }
+      },
+      "prefs.updated": {
+        "description": "User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them.",
+        "data": {
+          "$ref": "#/$defs/global:prefs.updated"
         }
       }
     }
@@ -1392,6 +1415,16 @@
         "window"
       ]
     },
+    "DensityPref": {
+      "description": "Density preference: a layout density, or `theme` to follow the theme's own.",
+      "type": "string",
+      "enum": [
+        "theme",
+        "compact",
+        "comfortable",
+        "spacious"
+      ]
+    },
     "DeviceInfo": {
       "type": "object",
       "properties": {
@@ -1745,6 +1778,21 @@
               "$ref": "#/$defs/global:device.updated"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "prefs.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:prefs.updated"
+            }
+          }
         }
       ]
     },
@@ -1762,7 +1810,8 @@
         "account.usage",
         "widget.updated",
         "widget.removed",
-        "device.updated"
+        "device.updated",
+        "prefs.updated"
       ]
     },
     "InputBlock": {
@@ -2220,7 +2269,9 @@
         "device.revoke",
         "themes.list",
         "theme.save",
-        "theme.delete"
+        "theme.delete",
+        "prefs.get",
+        "prefs.set"
       ]
     },
     "NodeHelloMsg": {
@@ -3592,6 +3643,44 @@
               "$ref": "#/$defs/params:theme.delete"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "prefs.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:prefs.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "prefs.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:prefs.set"
+            }
+          }
         }
       ]
     },
@@ -4507,6 +4596,19 @@
         "usedPercent"
       ]
     },
+    "UserPrefs": {
+      "description": "User-wide UI preferences (theming.md §5), stored on the server the client is connected to: the hub (shared by every device) or a node in local mode. Light/dark mode is not here: it stays per device.",
+      "type": "object",
+      "properties": {
+        "themeId": {
+          "description": "Selected theme: a built-in id or a custom theme's id (`themes.list`).",
+          "type": "string"
+        },
+        "density": {
+          "$ref": "#/$defs/DensityPref"
+        }
+      }
+    },
     "WidgetValue": {
       "description": "A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code.",
       "type": "object",
@@ -4726,6 +4828,17 @@
       },
       "required": [
         "machine"
+      ]
+    },
+    "global:prefs.updated": {
+      "type": "object",
+      "properties": {
+        "prefs": {
+          "$ref": "#/$defs/UserPrefs"
+        }
+      },
+      "required": [
+        "prefs"
       ]
     },
     "global:session.created": {
@@ -5472,6 +5585,29 @@
       },
       "required": [
         "kind"
+      ]
+    },
+    "params:prefs.get": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:prefs.set": {
+      "type": "object",
+      "properties": {
+        "prefs": {
+          "type": "object",
+          "properties": {
+            "themeId": {
+              "description": "Selected theme: a built-in id or a custom theme's id (`themes.list`).",
+              "type": "string"
+            },
+            "density": {
+              "$ref": "#/$defs/DensityPref"
+            }
+          }
+        }
+      },
+      "required": [
+        "prefs"
       ]
     },
     "params:question.respond": {
@@ -6274,6 +6410,28 @@
         "code",
         "expiresAt",
         "pairUrl"
+      ]
+    },
+    "result:prefs.get": {
+      "type": "object",
+      "properties": {
+        "prefs": {
+          "$ref": "#/$defs/UserPrefs"
+        }
+      },
+      "required": [
+        "prefs"
+      ]
+    },
+    "result:prefs.set": {
+      "type": "object",
+      "properties": {
+        "prefs": {
+          "$ref": "#/$defs/UserPrefs"
+        }
+      },
+      "required": [
+        "prefs"
       ]
     },
     "result:question.respond": {

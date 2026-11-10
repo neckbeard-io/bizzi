@@ -237,6 +237,10 @@ export class Relay {
         body = { type: 'widget.updated', data: { widget } };
         break;
       }
+      case 'prefs.updated':
+        // A node's local-mode preferences; the hub's own are the ones its devices share.
+        body = undefined;
+        break;
       case 'widget.removed': {
         if (typeof ev.data?.widgetId !== 'string') {
           body = undefined;
@@ -381,6 +385,14 @@ export class Relay {
       case 'theme.delete':
         this.store.themes.delete(p);
         return {};
+      // User-wide preferences: hub-local like themes, pushed to every device on change.
+      case 'prefs.get':
+        return { prefs: this.store.prefs.get() };
+      case 'prefs.set': {
+        const prefs = this.store.prefs.set(p);
+        this.bus.appendGlobal({ type: 'prefs.updated', data: { prefs } });
+        return { prefs };
+      }
       case 'session.get': {
         if (typeof p.sessionId !== 'string') throw new BizziError('bad_request', 'sessionId is required');
         const cached = this.store.getSession(p.sessionId);

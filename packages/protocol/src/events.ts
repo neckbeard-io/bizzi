@@ -13,6 +13,7 @@ import type {
   WidgetValue,
   SessionStatus,
   Usage,
+  UserPrefs,
   WorkspaceInfo,
 } from './model.ts';
 
@@ -157,6 +158,8 @@ export interface GlobalEventMap {
   'widget.removed': { machineId: string; widgetId: string };
   /** Hub only. */
   'device.updated': { device: DeviceInfo };
+  /** User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them. */
+  'prefs.updated': { prefs: UserPrefs };
 }
 
 export type SessionEventType = keyof SessionEventMap;

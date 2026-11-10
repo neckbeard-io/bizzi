@@ -291,6 +291,19 @@ export interface WidgetValue {
   observedAt?: string;
 }
 
+/** Density preference: a layout density, or `theme` to follow the theme's own. */
+export type DensityPref = 'theme' | 'compact' | 'comfortable' | 'spacious';
+
+/**
+ * User-wide UI preferences (theming.md §5), stored on the server the client is connected to: the hub (shared
+ * by every device) or a node in local mode. Light/dark mode is not here: it stays per device.
+ */
+export interface UserPrefs {
+  /** Selected theme: a built-in id or a custom theme's id (`themes.list`). */
+  themeId?: string;
+  density?: DensityPref;
+}
+
 /** A custom theme stored on the hub (theming.md §5); `data` is the theme JSON (shape owned by @bizzi/ui). */
 export interface ThemeFile {
   id: string;
