@@ -15,6 +15,7 @@ import {
   type ApprovalDecision,
   type ApprovalDecisionKind,
   type ApprovalRequest,
+  type BillingClass,
   type InputBlock,
   type Logger,
   type MethodParams,
@@ -25,20 +26,62 @@ import {
   type SessionMode,
   type SessionStatus,
   type StartSessionOptions,
+  type Usage,
   type WorkspaceInfo,
 } from '@bizzi/protocol';
 import type { AdapterRegistry } from './agents.ts';
+import { addTurn, budgetReached, parseBudget, sumSpent, usd, zeroSpent, type Spent } from './budget.ts';
 import type { EventBus } from './bus.ts';
 import type { SessionState, Store } from './store.ts';
 import type { Workspaces } from './workspaces.ts';
 
+export type PrepareStartResult = Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>;
+
 /** Extra start options contributed by the host (knowledge injection, env, …). */
-export type PrepareStart = (
-  session: SessionInfo,
-  workspace: WorkspaceInfo,
-) =>
-  | Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>
-  | Promise<Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>>;
+export type PrepareStart = (session: SessionInfo, workspace: WorkspaceInfo) => PrepareStartResult | Promise<PrepareStartResult>;
+
+/**
+ * Run several hooks in order and merge their results: env and mcpServers are merged (later wins on a
+ * key clash), systemPromptAppend texts are joined with a blank line.
+ */
+export function composePrepareStart(hooks: readonly PrepareStart[] | (() => readonly PrepareStart[])): PrepareStart {
+  return async (session, workspace) => {
+    const list = typeof hooks === 'function' ? hooks() : hooks;
+    const out: PrepareStartResult = {};
+    const prompts: string[] = [];
+    for (const hook of list) {
+      const r = await hook({ ...session }, workspace);
+      if (!r) continue;
+      if (r.env) out.env = { ...out.env, ...r.env };
+      if (r.mcpServers) out.mcpServers = { ...out.mcpServers, ...r.mcpServers };
+      if (r.systemPromptAppend?.trim()) prompts.push(r.systemPromptAppend.trim());
+    }
+    if (prompts.length > 0) out.systemPromptAppend = prompts.join('\n\n');
+    return out;
+  };
+}
+
+/** Agent-to-agent fields for a session started by another session (spec §12.1). */
+export interface HelperOptions {
+  spawnedBy: string;
+  scope: 'child' | 'detached';
+  depth: number;
+  /** Register the session but don't start it until `startQueued` (concurrency limit, spec §12.2). */
+  queued?: boolean;
+  queuedReason?: string;
+}
+
+/**
+ * Environment variables that mean an agent runs on a pay-per-token key (spec §12.3), or on a plan.
+ * Anything else is left to the probe or to `account.usage` events.
+ */
+const BILLING_ENV: Partial<Record<AgentKind, [string, BillingClass][]>> = {
+  claude: [
+    ['ANTHROPIC_API_KEY', 'metered'],
+    ['CLAUDE_CODE_OAUTH_TOKEN', 'plan'],
+  ],
+  codex: [['CODEX_API_KEY', 'metered']],
+};
 
 /** Extra environment for an agent's sessions (e.g. stored secrets). */
 export type AgentEnvProvider = (agent: AgentKind) => Record<string, string> | Promise<Record<string, string>>;
@@ -55,6 +98,10 @@ export interface SessionsDeps {
   interruptGraceMs?: number;
   /** Merged over prepareStart's env when an adapter session starts. */
   agentEnv?: AgentEnvProvider;
+  /** Metered-spend cap for a whole session tree, looked up by the root session's workspace (spec §12.2). */
+  treeBudgetUsd?: (workspaceId: string) => number | undefined;
+  /** Billing class of an agent's logged-in account, when the probe knows it (spec §12.3). */
+  probeBilling?: (agent: AgentKind) => Promise<BillingClass | undefined>;
 }
 
 /** Cap for `term.snapshot` output. */
@@ -122,6 +169,8 @@ export class Sessions {
   readonly #byId = new Map<string, Runtime>();
   #draining = false;
   #closed = false;
+  /** True while load() replays persisted sessions (cascades wait until every session is loaded). */
+  #loading = false;
 
   constructor(deps: SessionsDeps) {
     this.#d = deps;
@@ -132,6 +181,17 @@ export class Sessions {
 
   /** Load persisted sessions. Active ones become idle (resumable) or ended; pending approvals/questions are cancelled. */
   load(): void {
+    this.#loading = true;
+    try {
+      this.#loadRows();
+    } finally {
+      this.#loading = false;
+    }
+    // Child helpers of sessions that ended (now, or before a crash) stop too.
+    for (const rt of [...this.#byId.values()]) if (TERMINAL_STATUSES.includes(rt.info.status)) this.#cascade(rt.info.id);
+  }
+
+  #loadRows(): void {
     for (const row of this.#d.store.listSessions()) {
       const rt = newRuntime(row.info, row.state, this.#d.registry.select(row.info.agent, row.info.mode));
       // Approvals / questions that were pending when the node went down can no longer be answered.
@@ -151,23 +211,80 @@ export class Sessions {
       const ref = rt.info.agentSessionRef ?? (caps.fork ? rt.state.forkOf : undefined);
       const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && ref);
       const status: SessionStatus = resumable ? 'idle' : 'ended';
+      if (rt.state.queued) {
+        // Queued helpers were never started; the queue itself doesn't survive a restart.
+        rt.state.queued = undefined;
+        this.#append(rt, { type: 'session.status', data: { status: 'ended', reason: 'node restarted while the helper was queued' } });
+        continue;
+      }
       if (rt.info.status !== status) {
         this.#append(rt, {
           type: 'session.status',
           data: { status, reason: resumable ? 'node restarted' : 'node restarted; session cannot be resumed' },
         });
       }
+      if (status === 'idle' && rt.state.budgetBlocked) {
+        this.#append(rt, { type: 'session.status', data: { status: 'waiting_input', prompt: 'budget', reason: rt.state.budgetBlocked } });
+      }
     }
   }
 
   // --- queries --------------------------------------------------------------------------------------
 
-  list(workspaceId?: string): SessionInfo[] {
+  /** `spawnedBy`: only that parent's helpers. */
+  list(workspaceId?: string, filter: { spawnedBy?: string } = {}): SessionInfo[] {
     const out: SessionInfo[] = [];
     for (const rt of this.#byId.values()) {
-      if (workspaceId === undefined || rt.info.workspaceId === workspaceId) out.push({ ...rt.info });
+      if (workspaceId !== undefined && rt.info.workspaceId !== workspaceId) continue;
+      if (filter.spawnedBy !== undefined && rt.info.spawnedBy !== filter.spawnedBy) continue;
+      out.push({ ...rt.info });
     }
     return out;
+  }
+
+  /** A turn is in flight, being started, or the helper is still queued. */
+  isBusy(id: string): boolean {
+    const rt = this.#get(id);
+    return Boolean(rt.state.currentTurnId || rt.reservedTurn || rt.starting || rt.state.queued);
+  }
+
+  isQueued(id: string): boolean {
+    return Boolean(this.#byId.get(id)?.state.queued);
+  }
+
+  /** What the session is waiting on: pending approvals and questions, or a budget stop. */
+  pending(id: string): { approvals: ApprovalRequest[]; questions: QuestionAsked[]; budget?: string } {
+    const rt = this.#get(id);
+    const out: { approvals: ApprovalRequest[]; questions: QuestionAsked[]; budget?: string } = {
+      approvals: [...rt.pendingApprovals.values()],
+      questions: [...rt.pendingQuestions.values()],
+    };
+    if (rt.state.budgetBlocked) out.budget = rt.state.budgetBlocked;
+    return out;
+  }
+
+  /** This session's own usage, and the sum over it and every helper below it. */
+  spent(id: string): { own: Spent; tree: Spent } {
+    const rt = this.#get(id);
+    return { own: { ...(rt.state.spent ?? zeroSpent()) }, tree: this.#treeSpent(rt) };
+  }
+
+  /**
+   * Record that the user has seen the session through `seq` (spec §4 `seen_through`). Never moves
+   * backwards and never past the last event. Emits `session.updated` when it moves.
+   */
+  markSeen(id: string, seq: number): number {
+    const rt = this.#get(id);
+    if (rt.deleted) throw new BizziError('not_found', `session ${id} not found`);
+    if (typeof seq !== 'number' || !Number.isInteger(seq) || seq < 0) throw new BizziError('bad_request', 'seq must be a non-negative integer');
+    const current = rt.info.seenThrough ?? 0;
+    const next = Math.min(seq, rt.info.lastSeq);
+    if (next <= current) return current;
+    rt.info.seenThrough = next;
+    // Not a change to the session itself: updatedAt (list order) stays put.
+    this.#persist(rt);
+    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
+    return next;
   }
 
   get(id: string): { session: SessionInfo; capabilities: AgentCapabilities } {
@@ -188,7 +305,7 @@ export class Sessions {
 
   // --- lifecycle --------------------------------------------------------------------------------------
 
-  async create(p: MethodParams<'session.create'>): Promise<SessionInfo> {
+  async create(p: MethodParams<'session.create'>, helper?: HelperOptions): Promise<SessionInfo> {
     this.#assertAccepting();
     const ws = this.#d.workspaces.get(p.workspaceId);
     if (!AGENT_KINDS.includes(p.agent)) throw new BizziError('bad_request', `unknown agent ${String(p.agent)}`);
@@ -207,13 +324,47 @@ export class Sessions {
     if (p.permissionMode) info.permissionMode = p.permissionMode;
     if (p.effort) info.effort = p.effort;
     if (p.resumeRef) info.agentSessionRef = p.resumeRef;
+    const budget = parseBudget(p.budget);
+    if (budget) info.budget = budget;
+    if (helper) {
+      if (!this.#byId.has(helper.spawnedBy)) throw new BizziError('not_found', `session ${helper.spawnedBy} not found`);
+      info.spawnedBy = helper.spawnedBy;
+      info.scope = helper.scope;
+      info.depth = helper.depth;
+    }
     const rt = newRuntime(info, {}, adapter);
     if (p.cols) rt.state.cols = p.cols;
     if (p.rows) rt.state.rows = p.rows;
     if (p.command) rt.state.command = [...p.command];
+    if (helper?.queued) rt.state.queued = true;
     this.#register(rt);
-    this.#startInBackground(rt, p.resumeRef ? { resumeRef: p.resumeRef } : {});
-    return { ...info };
+    if (rt.state.queued) {
+      this.#append(rt, { type: 'session.status', data: { status: 'starting', reason: helper?.queuedReason ?? 'queued' } });
+    } else {
+      this.#startInBackground(rt, p.resumeRef ? { resumeRef: p.resumeRef } : {});
+    }
+    return { ...rt.info };
+  }
+
+  /** Start a helper registered with `queued` (its concurrency slot is free now). */
+  startQueued(id: string): void {
+    const rt = this.#get(id);
+    if (!rt.state.queued) return;
+    this.#assertOpen(rt);
+    rt.state.queued = undefined;
+    this.#persist(rt);
+    this.#startInBackground(rt, this.#resumeFor(rt));
+  }
+
+  /** Re-check sessions held for budget (e.g. after the tree cap was raised); release those now within budget. */
+  recheckBudgets(): void {
+    for (const rt of this.#byId.values()) {
+      if (!rt.state.budgetBlocked || rt.deleted || TERMINAL_STATUSES.includes(rt.info.status)) continue;
+      if (this.#budgetExceeded(rt)) continue;
+      rt.state.budgetBlocked = undefined;
+      this.#append(rt, { type: 'session.status', data: { status: this.#settledStatus(rt), reason: 'budget raised' } });
+      this.#persist(rt);
+    }
   }
 
   /**
@@ -280,6 +431,8 @@ export class Sessions {
         type: 'session.removed',
         data: { sessionId: id, workspaceId: rt.info.workspaceId },
       });
+      // Child helpers stop with their parent; detached ones carry on.
+      this.#cascade(id);
     })();
     return rt.deleting;
   }
@@ -289,8 +442,19 @@ export class Sessions {
     validateInput(input);
     this.#assertAccepting();
     this.#assertOpen(rt);
+    if (rt.state.queued) throw new BizziError('conflict', 'this helper is queued until a helper slot frees up');
     if (rt.state.currentTurnId || rt.reservedTurn) {
       throw new BizziError('conflict', 'a turn is already in progress (use session.steer or session.interrupt)');
+    }
+    const over = this.#budgetExceeded(rt);
+    if (over) {
+      if (rt.state.budgetBlocked !== over) this.#blockForBudget(rt, over);
+      throw new BizziError('conflict', `${over}; raise the budget to continue`, { budget: true });
+    }
+    if (rt.state.budgetBlocked) {
+      // Within budget again (a cap was raised): carry on.
+      rt.state.budgetBlocked = undefined;
+      this.#persist(rt);
     }
     const turnId = newId('t');
     rt.reservedTurn = turnId;
@@ -617,6 +781,7 @@ export class Sessions {
       const opts: StartSessionOptions = { ...extra, sessionId, mode: rt.info.mode, cwd: ws.path };
       const env = { ...extra.env, ...agentEnv };
       if (Object.keys(env).length > 0) opts.env = env;
+      this.#deriveBilling(rt, env);
       if (rt.info.model) opts.model = rt.info.model;
       if (rt.info.permissionMode) opts.permissionMode = rt.info.permissionMode;
       if (rt.info.effort) opts.effort = rt.info.effort;
@@ -791,6 +956,7 @@ export class Sessions {
         break;
       case 'turn.completed':
         rt.state.currentTurnId = undefined;
+        rt.state.spent = addTurn(rt.state.spent ?? zeroSpent(), body.data.usage as Usage | undefined, info.billing);
         rt.pendingApprovals.clear();
         rt.responding.clear();
         rt.pendingQuestions.clear();
@@ -839,9 +1005,136 @@ export class Sessions {
           changed = true;
         }
         break;
+      case 'account.usage':
+        // The login's billing class, as the agent reports it (spec §12.3).
+        if (body.data.billing && info.billing !== body.data.billing) {
+          info.billing = body.data.billing;
+          changed = true;
+        }
+        break;
+    }
+    if (!terminal && TERMINAL_STATUSES.includes(info.status) && rt.state.queued) {
+      rt.state.queued = undefined;
+      changed = true;
     }
     if (changed) this.#changed(rt, ev.ts);
     else if (pendingChanged) this.#persist(rt);
+
+    if (!terminal && TERMINAL_STATUSES.includes(info.status)) {
+      // Child helpers stop when their parent ends or fails (load() cascades once everything is loaded).
+      if (!this.#loading) this.#cascade(info.id);
+    } else if (body.type === 'turn.completed' && !terminal) {
+      // Budgets are enforced at turn boundaries (usage.md §2).
+      const over = this.#budgetExceeded(rt);
+      if (over) this.#blockForBudget(rt, over);
+    }
+  }
+
+  // --- helpers and budgets ---------------------------------------------------------------------------
+
+  /** Stop every child-scope helper of `parentId` that is still open. Detached helpers outlive it. */
+  #cascade(parentId: string): void {
+    for (const child of this.#byId.values()) {
+      if (child.info.spawnedBy !== parentId || child.info.scope !== 'child') continue;
+      if (child.deleted || TERMINAL_STATUSES.includes(child.info.status)) continue;
+      this.#log.log('debug', 'stopping child helper with its parent', { sessionId: child.info.id, parentId });
+      this.stop(child.info.id).catch((err: unknown) => {
+        this.#log.log('warn', 'failed to stop child helper', { sessionId: child.info.id, parentId, err });
+      });
+    }
+  }
+
+  /** Hold the session at this turn boundary: waiting_input with prompt 'budget'; send() refuses until raised. */
+  #blockForBudget(rt: Runtime, reason: string): void {
+    rt.state.budgetBlocked = reason;
+    this.#append(rt, { type: 'session.status', data: { status: 'waiting_input', prompt: 'budget', reason } });
+    this.#persist(rt);
+  }
+
+  /** Why the session may not start another turn, or undefined while every applicable cap has room. */
+  #budgetExceeded(rt: Runtime): string | undefined {
+    const chain = this.#ancestry(rt);
+    for (const a of chain) {
+      if (!a.info.budget) continue;
+      const hit = budgetReached(a.info.budget, this.#treeSpent(a));
+      if (hit) return a === rt ? `budget reached: ${hit}` : `budget of session ${a.info.id} reached: ${hit}`;
+    }
+    const root = chain[chain.length - 1]!;
+    let cap: number | undefined;
+    try {
+      cap = this.#d.treeBudgetUsd?.(root.info.workspaceId);
+    } catch {
+      cap = undefined;
+    }
+    if (cap !== undefined) {
+      const spent = this.#treeSpent(root).usd;
+      if (spent >= cap) return `tree budget reached: ${usd(spent)} of ${usd(cap)} metered spend`;
+    }
+    return undefined;
+  }
+
+  /** The session, then its parent, grandparent… (stops at a missing or repeated id). */
+  #ancestry(rt: Runtime): Runtime[] {
+    const out = [rt];
+    const seen = new Set([rt.info.id]);
+    let cur = rt;
+    while (cur.info.spawnedBy && !seen.has(cur.info.spawnedBy)) {
+      const parent = this.#byId.get(cur.info.spawnedBy);
+      if (!parent) break;
+      seen.add(parent.info.id);
+      out.push(parent);
+      cur = parent;
+    }
+    return out;
+  }
+
+  /** Spend of a session plus every helper below it (child and detached). */
+  #treeSpent(rt: Runtime): Spent {
+    const children = new Map<string, Runtime[]>();
+    for (const r of this.#byId.values()) {
+      const p = r.info.spawnedBy;
+      if (!p) continue;
+      let list = children.get(p);
+      if (!list) children.set(p, (list = []));
+      list.push(r);
+    }
+    const all: Spent[] = [];
+    const seen = new Set<string>();
+    const walk = (r: Runtime) => {
+      if (seen.has(r.info.id)) return;
+      seen.add(r.info.id);
+      all.push(r.state.spent ?? zeroSpent());
+      for (const c of children.get(r.info.id) ?? []) walk(c);
+    };
+    walk(rt);
+    return sumSpent(all);
+  }
+
+  /**
+   * Billing class (spec §12.3): an API key in the session's environment means metered, a plan token
+   * means plan; otherwise ask the probe in the background. Unknown stays undefined (usd isn't counted).
+   */
+  #deriveBilling(rt: Runtime, env: Record<string, string>): void {
+    const agent = rt.info.agent;
+    for (const [name, billing] of BILLING_ENV[agent] ?? []) {
+      if (env[name] || process.env[name]) {
+        this.#setBilling(rt, billing);
+        return;
+      }
+    }
+    if (rt.info.billing || !this.#d.probeBilling) return;
+    this.#d.probeBilling(agent).then(
+      (billing) => {
+        if (billing && !rt.info.billing) this.#setBilling(rt, billing);
+      },
+      (err: unknown) => this.#log.log('debug', 'billing probe failed', { agent, err }),
+    );
+  }
+
+  #setBilling(rt: Runtime, billing: BillingClass): void {
+    if (rt.deleted || rt.info.billing === billing || this.#closed || !this.#d.store.isOpen) return;
+    rt.info.billing = billing;
+    this.#changed(rt, new Date().toISOString());
   }
 
   #changed(rt: Runtime, ts: string): void {
@@ -861,6 +1154,9 @@ export class Sessions {
     if (rt.pendingQuestions.size > 0) state.pendingQuestions = [...rt.pendingQuestions.keys()];
     if (rt.state.cols) state.cols = rt.state.cols;
     if (rt.state.rows) state.rows = rt.state.rows;
+    if (rt.state.spent) state.spent = rt.state.spent;
+    if (rt.state.budgetBlocked) state.budgetBlocked = rt.state.budgetBlocked;
+    if (rt.state.queued) state.queued = true;
     this.#d.store.putSession({ info: rt.info, state });
   }
 }

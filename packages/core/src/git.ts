@@ -38,6 +38,33 @@ export async function isInsideGitRepo(dir: string): Promise<boolean> {
   }
 }
 
+// --- worktrees ---------------------------------------------------------------------------------
+
+/** Top-level directory of the work tree containing `dir`, or undefined outside a repo. */
+export async function gitToplevel(dir: string): Promise<string | undefined> {
+  const r = await runGit(dir, ['rev-parse', '--show-toplevel']).catch(() => undefined);
+  return r && r.code === 0 ? r.stdout.trim() || undefined : undefined;
+}
+
+/** `git check-ref-format --branch`: true when `name` is a valid branch name. */
+export async function isValidBranchName(cwd: string, name: string): Promise<boolean> {
+  if (!name || name.startsWith('-')) return false;
+  const r = await runGit(cwd, ['check-ref-format', '--branch', name]);
+  return r.code === 0;
+}
+
+export async function branchExists(cwd: string, branch: string): Promise<boolean> {
+  const r = await runGit(cwd, ['rev-parse', '--verify', '--quiet', `refs/heads/${branch}`]);
+  return r.code === 0;
+}
+
+/** Paths with uncommitted changes or untracked files, empty when clean. */
+export async function dirtyPaths(cwd: string): Promise<string[]> {
+  const r = await runGit(cwd, ['status', '--porcelain=v1', '-z', '--untracked-files=normal']);
+  if (r.code !== 0) throw new Error(r.stderr.trim() || `git status exited with ${r.code}`);
+  return parsePorcelainZ(r.stdout).files.map((f) => f.path);
+}
+
 export interface ParsedStatus {
   branch?: string;
   ahead?: number;

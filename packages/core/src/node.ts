@@ -21,8 +21,10 @@ import { AdapterRegistry } from './agents.ts';
 import { EventBus, type EventListener } from './bus.ts';
 import { nullLogger } from './logger.ts';
 import { buildMachineInfo } from './machine.ts';
+import { parseBudget } from './budget.ts';
+import { OrchestrationSettingsStore, Orchestrator } from './orchestration.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
-import { Sessions, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
+import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
 import { Store } from './store.ts';
 import { DEFAULT_MAX_BYTES, fsList, fsRead, gitDiff, gitStatus } from './tools.ts';
 import { Workspaces } from './workspaces.ts';
@@ -39,6 +41,8 @@ export interface NodeExtension {
   methods: Partial<Record<DispatchMethod, (params: any, ctx: ExtensionContext) => unknown | Promise<unknown>>>;
   start?(ctx: ExtensionContext): void | Promise<void>;
   stop?(): void | Promise<void>;
+  /** Runs after NodeOptions.prepareStart (and earlier extensions) when an adapter session starts; results are merged. */
+  prepareStart?: PrepareStart;
 }
 
 export interface ExtensionContext {
@@ -89,17 +93,12 @@ const UNIMPLEMENTED = [
   'devices.list',
   'device.revoke',
   // Protocol 1.2 additions; implemented by later phases or by extensions.
-  'worktree.create',
-  'worktree.remove',
-  'session.markSeen',
   'session.restart',
   'agent.migrate',
   'agent.policy.set',
   'usage.list',
   'widgets.list',
   'widget.refresh',
-  'orchestration.settings.get',
-  'orchestration.settings.set',
   'themes.list',
   'theme.save',
   'theme.delete',
@@ -126,6 +125,8 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'knowledge.reject',
   'knowledge.settings.get',
   'knowledge.settings.set',
+  'orchestration.settings.get',
+  'orchestration.settings.set',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
@@ -143,6 +144,8 @@ export interface BizziNode {
   readonly sessions: Sessions;
   readonly workspaces: Workspaces;
   readonly registry: AdapterRegistry;
+  /** Agent-to-agent helpers and their guardrails (spec §12). */
+  readonly orchestration: Orchestrator;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -188,6 +191,9 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
 
     const registry = new AdapterRegistry(opts.adapters, logger.child({ component: 'agents' }));
     const workspaces = new Workspaces(store, bus, machineId);
+    const settings = new OrchestrationSettingsStore(store, workspaces);
+    // NodeOptions.prepareStart first, then each extension's, merged.
+    const startHooks: PrepareStart[] = opts.prepareStart ? [opts.prepareStart] : [];
     const sessions = new Sessions({
       store,
       bus,
@@ -195,12 +201,16 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       registry,
       machineId,
       logger,
-      prepareStart: opts.prepareStart,
+      prepareStart: composePrepareStart(() => startHooks),
       interruptGraceMs: opts.interruptGraceMs,
       agentEnv,
+      treeBudgetUsd: (workspaceId) => settings.effective(workspaceId).treeBudgetUsd,
+      probeBilling: async (agent) => (await registry.list()).find((a) => a.agent === agent)?.billing,
     });
     sessions.load();
-    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions);
+    const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger });
+    for (const ext of opts.extensions ?? []) if (ext.prepareStart) startHooks.push(ext.prepareStart);
+    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration);
     const n = node;
     const contexts = (opts.extensions ?? []).map((ext): [NodeExtension, ExtensionContext] => [
       ext,
@@ -234,6 +244,7 @@ class Node implements BizziNode {
   readonly registry: AdapterRegistry;
   readonly workspaces: Workspaces;
   readonly sessions: Sessions;
+  readonly orchestration: Orchestrator;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
   readonly #builtins: ReadonlySet<string>;
@@ -249,6 +260,7 @@ class Node implements BizziNode {
     registry: AdapterRegistry,
     workspaces: Workspaces,
     sessions: Sessions,
+    orchestration: Orchestrator,
   ) {
     this.version = version;
     this.machine = machine;
@@ -258,6 +270,7 @@ class Node implements BizziNode {
     this.registry = registry;
     this.workspaces = workspaces;
     this.sessions = sessions;
+    this.orchestration = orchestration;
     const implemented = this.#implemented();
     this.#builtins = new Set(Object.keys(implemented));
     this.#handlers = { ...this.#unimplemented(), ...implemented };
@@ -311,6 +324,7 @@ class Node implements BizziNode {
             this.logger.log('warn', 'extension stop failed', { err });
           }
         }
+        this.orchestration.close();
         await this.sessions.close();
         await Promise.all(
           this.registry.adapters.map(async (a) => {
@@ -392,6 +406,13 @@ class Node implements BizziNode {
       'workspace.remove': async (p) => {
         const id = reqString(p, 'workspaceId');
         ws.get(id);
+        // A repo workspace with worktree workspaces under it is refused rather than orphaning them.
+        const worktrees = ws.worktreesOf(id);
+        if (worktrees.length > 0) {
+          throw new BizziError('conflict', `workspace has ${worktrees.length} worktree workspace(s); remove them first (worktree.remove)`, {
+            worktrees: worktrees.map((w) => w.id),
+          });
+        }
         const busy = s.busyInWorkspace(id);
         if (busy.length > 0) {
           throw new BizziError('conflict', `workspace has ${busy.length} busy session(s); stop them first`);
@@ -400,10 +421,34 @@ class Node implements BizziNode {
           if (session.status !== 'ended' && session.status !== 'failed') await s.stop(session.id);
         }
         ws.remove(id);
+        this.orchestration.settings.forget(id);
+        return {};
+      },
+      'worktree.create': async (p) => {
+        const opts: MethodParams<'worktree.create'> = { workspaceId: reqString(p, 'workspaceId'), branch: reqString(p, 'branch') };
+        for (const k of ['base', 'path', 'name'] as const) {
+          const v = optString(p, k);
+          if (v) opts[k] = v;
+        }
+        return { workspace: await ws.createWorktree(opts) };
+      },
+      'worktree.remove': async (p) => {
+        const id = reqString(p, 'workspaceId');
+        const target = ws.get(id);
+        if (target.kind !== 'worktree') throw new BizziError('bad_request', `workspace ${target.name} is not a worktree (use workspace.remove)`);
+        const live = s.list(id).filter((x) => x.status !== 'ended' && x.status !== 'failed');
+        if (live.length > 0) {
+          throw new BizziError('conflict', `worktree is used by ${live.length} live session(s); stop them first`, { sessions: live.map((x) => x.id) });
+        }
+        await ws.removeWorktree(id, optBool(p, 'force') ?? false);
+        this.orchestration.settings.forget(id);
         return {};
       },
 
-      'sessions.list': (p) => ({ sessions: s.list(optString(p, 'workspaceId')) }),
+      'sessions.list': (p) => {
+        const spawnedBy = optString(p, 'spawnedBy');
+        return { sessions: s.list(optString(p, 'workspaceId'), spawnedBy !== undefined ? { spawnedBy } : {}) };
+      },
       'session.get': (p) => s.get(reqString(p, 'sessionId')),
       'session.create': async (p) => {
         const params: MethodParams<'session.create'> = {
@@ -424,6 +469,8 @@ class Node implements BizziNode {
           validateCommand(p.command);
           params.command = p.command;
         }
+        const budget = parseBudget(p.budget);
+        if (budget) params.budget = budget;
         return { session: await s.create(params) };
       },
       'session.fork': async (p) => ({ session: await s.fork(reqString(p, 'sessionId'), optString(p, 'title') || undefined) }),
@@ -436,6 +483,7 @@ class Node implements BizziNode {
         await s.steer(reqString(p, 'sessionId'), p.input as never);
         return {};
       },
+      'session.markSeen': (p) => ({ seenThrough: s.markSeen(reqString(p, 'sessionId'), reqInt(p, 'seq')) }),
       'session.interrupt': async (p) => {
         await s.interrupt(reqString(p, 'sessionId'));
         return {};
@@ -487,6 +535,17 @@ class Node implements BizziNode {
         return {};
       },
       'term.snapshot': (p) => s.terminalSnapshot(reqString(p, 'sessionId')),
+
+      'orchestration.settings.get': (p) => ({ settings: this.orchestration.settings.get(optString(p, 'workspaceId')) }),
+      'orchestration.settings.set': (p) => {
+        if (!p.settings || typeof p.settings !== 'object' || Array.isArray(p.settings)) {
+          throw new BizziError('bad_request', 'settings must be an object');
+        }
+        const settings = this.orchestration.settings.set(optString(p, 'workspaceId'), p.settings);
+        // A raised tree cap releases sessions held for budget.
+        s.recheckBudgets();
+        return { settings };
+      },
 
       'fs.list': (p) => fsList(ws.get(reqString(p, 'workspaceId')), optString(p, 'path')),
       'fs.read': (p) =>
