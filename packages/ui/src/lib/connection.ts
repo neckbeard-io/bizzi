@@ -18,6 +18,8 @@ export interface ConnectionTarget {
 export interface BizziBridge {
   connection?: { url: string; token?: string };
   platform?: string;
+  /** System accent colour (`rrggbbaa`, macOS/Windows) for the Device theme. */
+  accentColor?: string;
 }
 
 declare global {

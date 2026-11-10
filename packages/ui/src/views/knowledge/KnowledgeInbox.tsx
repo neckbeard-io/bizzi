@@ -120,7 +120,7 @@ function SuggestionCard(props: { card: KnowledgeInboxCard }): ReactNode {
         <label className="inline-flex items-center gap-2 text-xs text-muted select-none">
           <input
             type="checkbox"
-            className="h-4 w-4 accent-[var(--accent)]"
+            className="h-4 w-4 accent-[var(--primary)]"
             checked={allSelected}
             onChange={(e) => setSelected(e.target.checked ? new Set(card.items.map((i) => i.id)) : new Set())}
           />
@@ -166,7 +166,7 @@ function SuggestionRow(props: {
   const moved = props.target !== 'keep' && props.target !== it.scope.level ? retargetScope(it, props.target, ctx) : null;
   return (
     <li className={cx('flex gap-2.5 px-3 py-2.5', props.checked && 'bg-accent-soft/40')}>
-      <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--accent)]" checked={props.checked} onChange={(e) => props.onCheck(e.target.checked)} aria-label={`Select ${it.title}`} />
+      <input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[var(--primary)]" checked={props.checked} onChange={(e) => props.onCheck(e.target.checked)} aria-label={`Select ${it.title}`} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1">
           <Badge tone={it.type === 'rule' ? 'accent' : 'info'}>{it.type}</Badge>

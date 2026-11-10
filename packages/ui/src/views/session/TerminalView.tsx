@@ -1,36 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { Terminal } from '@xterm/xterm';
-import type { ITheme } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useBizzi, useStore } from '../../app/context.tsx';
-import { useDomTheme } from '../../app/hooks.ts';
-
-const DARK: ITheme = { background: '#0c0c10', foreground: '#e7e7ec', cursor: '#8b93ff', selectionBackground: '#3b3f7a' };
-const LIGHT: ITheme = {
-  background: '#ffffff',
-  foreground: '#17171c',
-  cursor: '#4f46e5',
-  selectionBackground: '#c7cbff',
-  black: '#17171c',
-  brightBlack: '#6b6b76',
-  white: '#a1a1aa',
-  brightWhite: '#52525b',
-  yellow: '#a16207',
-  brightYellow: '#854d0e',
-  green: '#15803d',
-  brightGreen: '#166534',
-  blue: '#1d4ed8',
-  brightBlue: '#1e40af',
-};
-
-/**
- * Terminal-mode session: xterm.js with the WebGL renderer. Output comes straight from the client's
- * TerminalStreams (never through the React store); keystrokes go out as term.input, size as term.resize.
- */
-
+import { themeStore, useResolvedTheme } from '../../app/theme.ts';
+import { xtermTheme } from '../../lib/theme/terminal.ts';
 
 function wantsWebgl(): boolean {
   if (new URLSearchParams(location.search).get('term') === 'webgl') return true;
@@ -40,10 +16,16 @@ function wantsWebgl(): boolean {
     return false;
   }
 }
+
+/**
+ * Terminal-mode session (and login PTYs): xterm.js, coloured with the theme's terminal palette
+ * (derived from its UI colours when it has none). Output comes straight from the client's
+ * TerminalStreams (never through the React store); keystrokes go out as term.input, size as term.resize.
+ */
 export function TerminalView(props: { sessionId: string }): ReactNode {
   const { sessionId } = props;
   const store = useStore();
-  const theme = useDomTheme();
+  const theme = useResolvedTheme().terminal;
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const exited = useBizzi((s) => s.timelines[sessionId]?.terminalExit ?? null);
@@ -60,7 +42,7 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
       cursorBlink: true,
       scrollback: 10_000,
       allowProposedApi: false,
-      theme: document.documentElement.dataset.theme === 'dark' ? DARK : LIGHT,
+      theme: xtermTheme(themeStore.get().resolved.terminal),
     });
     termRef.current = term;
     const fit = new FitAddon();
@@ -143,12 +125,12 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
 
   useEffect(() => {
     const t = termRef.current;
-    if (t) t.options.theme = theme === 'dark' ? DARK : LIGHT;
+    if (t) t.options.theme = xtermTheme(theme);
   }, [theme]);
 
   return (
     <div className="flex h-full flex-col bg-panel">
-      <div ref={hostRef} className="term-host min-h-0 flex-1 overflow-hidden" />
+      <div ref={hostRef} className="term-host min-h-0 flex-1 overflow-hidden" style={{ background: theme.background }} />
       <div className="flex h-6 shrink-0 items-center gap-3 border-t border-border px-3 text-[11px] text-muted">
         <span>{renderer === 'webgl' ? 'WebGL renderer' : 'DOM renderer'}</span>
         {exited ? (
