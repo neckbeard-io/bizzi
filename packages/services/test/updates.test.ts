@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createNode, type BizziNode } from '@bizzi/core';
 import { FakeAdapter } from '@bizzi/core/testing';
-import { BizziError, GLOBAL_CHANNEL, type AgentKind, type ChannelEvent } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, sessionChannel, type AgentKind, type ChannelEvent } from '@bizzi/protocol';
 import { parsePlatform, type InstallPlan, type RunOptions, type RunResult } from '@bizzi/provision';
 import {
   createProvisioningExtension,
@@ -321,5 +321,43 @@ describe('auto-update check', () => {
     s.policies.set('codex', { update: 'pinned' });
     assert.deepEqual(await s.updates.checkForUpdates(), []);
     assert.equal(s.plans.length, 1);
+  });
+});
+
+describe('stale sessions and restarts (updates.md §2, §6)', () => {
+  it('a detected update restarts when-idle sessions and leaves ask sessions stale', async () => {
+    const claude = new FakeAdapter({ agent: 'claude', probe: { version: '2.1.311' } });
+    const codex = new FakeAdapter({ agent: 'codex', probe: { version: '0.167.0' } });
+    const s = await setup([claude, codex]);
+    s.policies.set('codex', { restart: 'ask' });
+    await s.updates.reprobe('start');
+    const { workspace } = await s.node.call('workspace.create', { path: join(s.dir, 'ws'), create: true });
+    const make = async (agent: AgentKind) => {
+      const { session } = await s.node.call('session.create', { workspaceId: workspace.id, agent });
+      await waitFor(() => Boolean(s.node.sessions.get(session.id).session.agentVersion), `${agent} agentVersion`);
+      return session.id;
+    };
+    const c = await make('claude');
+    const x = await make('codex');
+    assert.equal(s.node.sessions.get(c).session.agentVersion, '2.1.311');
+
+    claude.options.probe = { version: '2.1.322' };
+    codex.options.probe = { version: '0.168.0' };
+    assert.deepEqual((await s.updates.reprobe('test')).sort(), ['claude', 'codex']);
+    await waitFor(() => s.node.bus.replay(sessionChannel(c)).some((e) => e.type === 'session.restarted'), 'claude restarted');
+    await s.node.restarts.settled();
+    assert.equal(s.node.sessions.get(c).session.agentVersion, '2.1.322');
+    assert.equal(claude.starts.length, 2);
+    // ask: no restart, but agents.list says it's stale and the session still shows the old version.
+    assert.equal(codex.starts.length, 1);
+    assert.equal(s.node.sessions.get(x).session.agentVersion, '0.167.0');
+    const agents = (await s.node.call('agents.list', {})).agents;
+    assert.equal(agents.find((a) => a.agent === 'codex')!.staleSessions, 1);
+    assert.equal(agents.find((a) => a.agent === 'codex')!.restartPolicy, 'ask');
+    assert.equal(agents.find((a) => a.agent === 'claude')!.staleSessions, 0);
+    // The user says yes.
+    await s.node.call('session.restart', { sessionId: x });
+    await waitFor(() => s.node.bus.replay(sessionChannel(x)).some((e) => e.type === 'session.restarted'), 'codex restarted');
+    assert.equal(s.node.sessions.get(x).session.agentVersion, '0.168.0');
   });
 });

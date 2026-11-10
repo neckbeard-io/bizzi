@@ -81,7 +81,23 @@ Updating the node is the same problem one level up:
 - Structured sessions declare `resumeAfterNodeRestart` and resume through the same sequence (§5).
 - The node drains at safe points first: no restart mid-turn.
 
-## 8. To verify
+## 8. As built (core, first pass)
+
+- **Running version.** When an adapter session starts, the core records the last probe's `version` as `SessionInfo.agentVersion`, and the probe's `realPath` (else `path`) when that file exists. The values come from the probe, not from the process. Both are cleared on a node restart, because no agent process survives one, and recorded again on the next start.
+- **Stale.** A session is stale only while its agent runs. The UI's version chip compares `agentVersion` with the agents.list `version`. `staleSessions` on agents.list counts stale sessions per agent.
+- **Triggers.** Every completed probe (the updates extension re-probes on install-path changes and on its interval) and every `session.updated`.
+- **Safe point.** `idle` or `waiting_input`, with no turn in flight or being started, and no pending approval or question. Adapters don't report background work yet, so "no turn in flight" stands in for it.
+- **Precheck.** A fresh probe: installed, `--version` reported a version, not `unsupported`, and auth not `missing` or `expired`. On failure the old process keeps running and an `error` event (`code: restart_precheck`) is recorded, with no `session.restarting`.
+- **Verify.** The restarted adapter must report the same `agentSessionRef` (or none yet). Deeper checks such as message counts are still to do.
+- **Failure.** On a failed spawn or resume, `session.restarted { ok: false }` is followed by `session.status failed`, and the old ref is kept. Automatic restarts skip an install (version, path and auth) that a restart already failed on; `session.restart` always tries.
+- **Sends during a restart** wait up to 60 s and then go through. If the restart failed they're refused with `agent_unavailable`. The status doesn't change during a restart, so `session_wait` callers on a helper carry on.
+- **Policies.** Restart policy comes from agents.list `restartPolicy`, which the services decorate; without services it's `manual`. `ask` has no inbox item yet: the version chip and `staleSessions` are the signal, and `session.restart` is the answer.
+- **Not yet:**
+  - shared OpenCode servers are reported stale but never restarted (`session.restart` answers `unsupported`);
+  - no fallback to the previous version on a failed spawn;
+  - `resumeAfterNodeRestart` drain-and-resume for bizzi's own updates is unchanged.
+
+## 9. To verify
 
 1. **Claude native:** how many old version dirs are kept, and can the auto-updater ever remove the version a session is running?
 2. **Claude npm installs:** do running sessions survive the package being replaced in place?

@@ -129,8 +129,12 @@ export interface Methods {
   /** Restart the agent process on the installed version at the next safe point and resume (updates.md §5). */
   'session.restart': { params: { sessionId: string }; result: Empty };
   'session.stop': { params: { sessionId: string }; result: Empty };
+  /**
+   * A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces
+   * the session's budget (`{}` clears it); a session held for budget accepts sends again once within it.
+   */
   'session.set': {
-    params: { sessionId: string; model?: string; permissionMode?: string; effort?: string };
+    params: { sessionId: string; model?: string; permissionMode?: string; effort?: string; budget?: SessionBudget };
     result: { session: SessionInfo };
   };
   'approval.respond': { params: { sessionId: string; approvalId: string } & ApprovalDecision; result: Empty };

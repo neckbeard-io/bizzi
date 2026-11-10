@@ -26,6 +26,11 @@ export interface SessionState {
   budgetBlocked?: string;
   /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
   queued?: boolean;
+  /**
+   * Real path of the executable the running agent process was launched from (updates.md §2), when
+   * it existed at spawn. Gone from disk later = the process is stale.
+   */
+  agentPath?: string;
 }
 
 export interface SessionRow {
