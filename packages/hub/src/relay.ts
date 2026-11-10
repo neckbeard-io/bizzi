@@ -13,6 +13,7 @@ import {
   sessionChannel,
   type AgentCapabilities,
   type ChannelEvent,
+  type ContextBaseline,
   type DeviceInfo,
   type GlobalEvent,
   type GlobalEventBody,
@@ -367,6 +368,11 @@ export class Relay {
         if (Array.isArray(res?.widgets)) this.store.replaceWidgets(machineId, res.widgets.filter(isWidgetValue));
         return res;
       }
+      case 'baselines.list': {
+        // With a workspace or machine: routed to that node below. Without: every online machine's.
+        if (typeof p.workspaceId === 'string' || p.machineId !== undefined) break;
+        return { baselines: await this.listBaselines() };
+      }
       // Custom themes live on the hub so every device sees them (theming.md §5); never relayed.
       case 'themes.list':
         return { themes: this.store.themes.list() };
@@ -405,6 +411,24 @@ export class Relay {
       else groups.set(key, [u]);
     }
     return sortAccountUsage([...groups.values()].map((g) => mergeAccountUsage(g)).filter((u): u is AccountUsage => u !== undefined));
+  }
+
+  /** Context baselines (usage.md §2) of every online machine; a machine that fails to answer is skipped. */
+  async listBaselines(): Promise<ContextBaseline[]> {
+    const links = [...this.#links.values()];
+    const results = await Promise.allSettled(links.map((l) => l.request('baselines.list', { machineId: l.machineId })));
+    const out: ContextBaseline[] = [];
+    results.forEach((r, i) => {
+      const link = links[i]!;
+      if (r.status === 'rejected') {
+        this.logger.log('debug', 'baselines.list failed on a node', { machineId: link.machineId, err: r.reason });
+        return;
+      }
+      const list = (r.value as { baselines?: unknown } | undefined)?.baselines;
+      if (!Array.isArray(list)) return;
+      for (const b of list) if (isBaseline(b)) out.push({ ...b, machineId: link.machineId });
+    });
+    return out;
   }
 
   /** The machine that owns a request: by sessionId, workspaceId, then machineId. */
@@ -462,4 +486,10 @@ function isWidgetValue(w: unknown): w is WidgetValue {
   if (!w || typeof w !== 'object') return false;
   const v = w as Partial<WidgetValue>;
   return typeof v.id === 'string' && v.id.length > 0 && typeof v.label === 'string' && WIDGET_KINDS.has(v.kind as string) && Array.isArray(v.placement);
+}
+
+function isBaseline(b: unknown): b is ContextBaseline {
+  if (!b || typeof b !== 'object') return false;
+  const v = b as Partial<ContextBaseline>;
+  return typeof v.agent === 'string' && typeof v.tokens === 'number' && Number.isFinite(v.tokens) && typeof v.samples === 'number';
 }

@@ -131,6 +131,8 @@ export interface SessionInfo {
   billing?: BillingClass;
   /** Optional cap for this session and its helpers (usage.md §2). */
   budget?: SessionBudget;
+  /** Fan-out group (spec §12): sessions you started together on the same task share this id. */
+  group?: string;
   /** Highest seq viewed on any device (spec §4); "done, not yet seen" = idle with lastSeq > seenThrough. */
   seenThrough?: number;
   createdAt: string;
@@ -225,6 +227,22 @@ export interface ContextCategory {
   label: string;
   tokens: number;
   kind: 'used' | 'free' | 'buffer' | 'deferred';
+}
+
+/**
+ * Starting context learned per (agent, model, workspace) from the first `context.updated` of earlier
+ * sessions (usage.md §2): "Codex starts at about 14k here". `tokens` is the median of recent samples.
+ */
+export interface ContextBaseline {
+  machineId: string;
+  agent: AgentKind;
+  model?: string;
+  workspaceId?: string;
+  tokens: number;
+  /** Samples behind the median (at most the last 10 kept). */
+  samples: number;
+  /** ISO time of the newest sample. */
+  updatedAt: string;
 }
 
 /** Per-login usage snapshot (usage.md §3.3). Merged per (agent, accountId) across machines; newest wins. */

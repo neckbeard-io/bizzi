@@ -18,6 +18,7 @@ import {
   type SessionEventBody,
 } from '@bizzi/protocol';
 import { AdapterRegistry } from './agents.ts';
+import { BaselineTracker, baselinesExtension } from './baselines.ts';
 import { EventBus, type EventListener } from './bus.ts';
 import { nullLogger } from './logger.ts';
 import { buildMachineInfo } from './machine.ts';
@@ -101,6 +102,7 @@ const UNIMPLEMENTED = [
   'usage.list',
   'widgets.list',
   'widget.refresh',
+  'baselines.list',
   'themes.list',
   'theme.save',
   'theme.delete',
@@ -129,6 +131,7 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'knowledge.settings.set',
   'orchestration.settings.get',
   'orchestration.settings.set',
+  'baselines.list',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
@@ -148,6 +151,8 @@ export interface BizziNode {
   readonly registry: AdapterRegistry;
   /** Per-login usage snapshots (usage.md §3); extensions report widget-backed logins here. */
   readonly usage: UsageTracker;
+  /** Learned starting context per agent, model and workspace (usage.md §2). */
+  readonly baselines: BaselineTracker;
   /** Agent-to-agent helpers and their guardrails (spec §12). */
   readonly orchestration: Orchestrator;
   /** Typed in-process call. Throws BizziError. */
@@ -217,9 +222,24 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration);
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
+    const baselines = new BaselineTracker({
+      dbPath: store.path,
+      bus,
+      machineId,
+      logger: logger.child({ component: 'baselines' }),
+      session: (id) => (sessions.has(id) ? sessions.get(id).session : undefined),
+      workspace: (id) => {
+        try {
+          return workspaces.get(id);
+        } catch {
+          return undefined;
+        }
+      },
+    });
+    node.baselines = baselines;
     const n = node;
-    // Built-ins served through the extension mechanism (usage.list, themes.*), started first.
-    const builtins = [usageExtension(usage), themesExtension(store.path)];
+    // Built-ins served through the extension mechanism (usage.list, baselines.list, themes.*), started first.
+    const builtins = [usageExtension(usage), baselinesExtension(baselines), themesExtension(store.path)];
     const contexts = [...builtins, ...(opts.extensions ?? [])].map((ext): [NodeExtension, ExtensionContext] => [
       ext,
       {
@@ -254,6 +274,7 @@ class Node implements BizziNode {
   readonly sessions: Sessions;
   /** Assigned by createNode right after construction. */
   usage!: UsageTracker;
+  baselines!: BaselineTracker;
   readonly orchestration: Orchestrator;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
@@ -481,6 +502,11 @@ class Node implements BizziNode {
         }
         const budget = parseBudget(p.budget);
         if (budget) params.budget = budget;
+        const group = optString(p, 'group')?.trim();
+        if (group) {
+          if (group.length > 128) throw new BizziError('bad_request', 'group must be at most 128 characters');
+          params.group = group;
+        }
         return { session: await s.create(params) };
       },
       'session.fork': async (p) => ({ session: await s.fork(reqString(p, 'sessionId'), optString(p, 'title') || undefined) }),
