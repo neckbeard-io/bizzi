@@ -48,6 +48,7 @@ import {
 import type { MockHost, MockModule } from './host.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
+import { MockThemes } from './themes.ts';
 
 export interface MockOptions {
   /** Multiplier for every delay (0 = instant, for tests). */
@@ -106,7 +107,7 @@ export class MockCore implements MockHost {
     for (const s of SESSIONS) this.sessionMap.set(s.id, { ...s });
     this.seedDevices();
     this.seedHistory();
-    this.modules = [new MockProvision(this), new MockKnowledge(this)];
+    this.modules = [new MockProvision(this), new MockKnowledge(this), new MockThemes(this)];
   }
 
   // ---------------------------------------------------------------- MockHost

@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import { parseHash, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
-import { loadString, saveString } from '../lib/storage.ts';
+import type { ModePref } from '../lib/theme/types.ts';
+import { useThemeMode } from './theme.ts';
 
 function subscribeHash(cb: () => void): () => void {
   window.addEventListener('hashchange', cb);
@@ -42,23 +43,11 @@ export function useIsWide(): boolean {
   return useMediaQuery('(min-width: 768px)');
 }
 
-export type ThemePref = 'system' | 'light' | 'dark';
+export type ThemePref = ModePref;
 
-function applyTheme(pref: ThemePref): void {
-  const dark = pref === 'dark' || (pref === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  document.documentElement.dataset.theme = dark ? 'dark' : 'light';
-}
-
+/** Mode (system / light / dark) as [pref, set, isDark]; the theme itself is in ./theme.ts. */
 export function useTheme(): [ThemePref, (p: ThemePref) => void, boolean] {
-  const [pref, setPref] = useState<ThemePref>(() => (loadString('bizzi.theme') as ThemePref | null) ?? 'system');
-  const systemDark = useMediaQuery('(prefers-color-scheme: dark)');
-  useEffect(() => applyTheme(pref), [pref, systemDark]);
-  const set = useCallback((p: ThemePref) => {
-    saveString('bizzi.theme', p);
-    setPref(p);
-  }, []);
-  const isDark = pref === 'dark' || (pref === 'system' && systemDark);
-  return [pref, set, isDark];
+  return useThemeMode();
 }
 
 /** Current theme as seen in the DOM (for canvas renderers like xterm). */

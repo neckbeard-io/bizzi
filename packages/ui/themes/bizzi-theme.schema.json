@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "bizzi-theme.schema.json",
+  "title": "bizzi theme (.bizzi-theme)",
+  "description": "A bizzi theme: semantic UI tokens, a terminal palette and layout tokens per light/dark variant (docs/theming.md §2). Chorus .chorus-theme files use the same shape. Every token is optional; missing ones are derived. Validation (contrast) runs at import: see packages/ui/src/lib/theme/validate.ts.",
+  "type": "object",
+  "required": ["id", "name", "variants"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
+    "name": { "type": "string", "minLength": 1 },
+    "author": { "type": "string" },
+    "description": { "type": "string" },
+    "license": { "type": "string" },
+    "layout": { "$ref": "#/$defs/layout" },
+    "editorTheme": {
+      "type": "object",
+      "properties": { "light": { "type": "string" }, "dark": { "type": "string" } },
+      "additionalProperties": false
+    },
+    "variants": {
+      "type": "object",
+      "properties": { "light": { "$ref": "#/$defs/variant" }, "dark": { "$ref": "#/$defs/variant" } },
+      "minProperties": 1,
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "color": {
+      "type": "string",
+      "description": "#rgb, #rrggbb, #rrggbbaa, rgb() or rgba()",
+      "pattern": "^(#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})|rgba?\\([^)]*\\))$"
+    },
+    "variant": {
+      "type": "object",
+      "properties": {
+        "colors": { "$ref": "#/$defs/colors" },
+        "terminal": { "$ref": "#/$defs/terminal" },
+        "layout": { "$ref": "#/$defs/layout" }
+      },
+      "additionalProperties": false
+    },
+    "colors": {
+      "type": "object",
+      "properties": {
+        "background": { "$ref": "#/$defs/color" },
+        "foreground": { "$ref": "#/$defs/color" },
+        "card": { "$ref": "#/$defs/color" },
+        "cardForeground": { "$ref": "#/$defs/color" },
+        "popover": { "$ref": "#/$defs/color" },
+        "popoverForeground": { "$ref": "#/$defs/color" },
+        "primary": { "$ref": "#/$defs/color" },
+        "primaryForeground": { "$ref": "#/$defs/color" },
+        "secondary": { "$ref": "#/$defs/color" },
+        "secondaryForeground": { "$ref": "#/$defs/color" },
+        "muted": { "$ref": "#/$defs/color", "description": "muted surface (shadcn)" },
+        "mutedForeground": { "$ref": "#/$defs/color", "description": "secondary text; must be 4.5:1 on card and sidebar" },
+        "accent": { "$ref": "#/$defs/color", "description": "hover / raised surface (shadcn)" },
+        "accentForeground": { "$ref": "#/$defs/color" },
+        "destructive": { "$ref": "#/$defs/color" },
+        "border": { "$ref": "#/$defs/color" },
+        "input": { "$ref": "#/$defs/color" },
+        "ring": { "$ref": "#/$defs/color" },
+        "sidebar": { "$ref": "#/$defs/color" },
+        "sidebarForeground": { "$ref": "#/$defs/color" },
+        "sidebarPrimary": { "$ref": "#/$defs/color" },
+        "sidebarPrimaryForeground": { "$ref": "#/$defs/color" },
+        "sidebarAccent": { "$ref": "#/$defs/color" },
+        "sidebarAccentForeground": { "$ref": "#/$defs/color" },
+        "sidebarBorder": { "$ref": "#/$defs/color" },
+        "sidebarRing": { "$ref": "#/$defs/color" },
+        "radius": { "type": "string", "pattern": "^\\d*\\.?\\d+(px|rem|em)?$" },
+        "ok": { "$ref": "#/$defs/color" },
+        "warn": { "$ref": "#/$defs/color" },
+        "err": { "$ref": "#/$defs/color" },
+        "info": { "$ref": "#/$defs/color" },
+        "code": { "$ref": "#/$defs/color" },
+        "diffAdd": { "$ref": "#/$defs/color" },
+        "diffAddForeground": { "$ref": "#/$defs/color" },
+        "diffDel": { "$ref": "#/$defs/color" },
+        "diffDelForeground": { "$ref": "#/$defs/color" },
+        "diffHunk": { "$ref": "#/$defs/color" },
+        "diffHunkForeground": { "$ref": "#/$defs/color" },
+        "primarySoft": { "$ref": "#/$defs/color" },
+        "stateWaiting": { "$ref": "#/$defs/color" },
+        "stateWorking": { "$ref": "#/$defs/color" },
+        "stateDone": { "$ref": "#/$defs/color" },
+        "stateFailed": { "$ref": "#/$defs/color" },
+        "stateIdle": { "$ref": "#/$defs/color" }
+      },
+      "additionalProperties": false
+    },
+    "terminal": {
+      "type": "object",
+      "properties": {
+        "background": { "$ref": "#/$defs/color" },
+        "foreground": { "$ref": "#/$defs/color" },
+        "cursor": { "$ref": "#/$defs/color" },
+        "cursorAccent": { "$ref": "#/$defs/color" },
+        "selection": { "$ref": "#/$defs/color" },
+        "ansi": { "type": "array", "items": { "$ref": "#/$defs/color" }, "minItems": 16, "maxItems": 16 }
+      },
+      "additionalProperties": false
+    },
+    "layout": {
+      "type": "object",
+      "properties": {
+        "panelStyle": { "enum": ["floating-island", "flush-ide", "minimal-split"] },
+        "density": { "enum": ["compact", "comfortable", "spacious"] },
+        "fontHeading": { "type": "string" },
+        "composerRadius": { "type": "string" },
+        "outerGap": { "type": "string" },
+        "spineRowHeight": { "type": "string" },
+        "defaultFocusSurface": { "description": "Chorus only; accepted and ignored" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

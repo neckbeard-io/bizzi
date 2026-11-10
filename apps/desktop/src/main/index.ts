@@ -13,6 +13,7 @@ import {
   powerMonitor,
   session,
   shell,
+  systemPreferences,
   Tray,
   type MenuItemConstructorOptions,
 } from 'electron';
@@ -174,7 +175,17 @@ async function onReady(): Promise<void> {
 function bootstrap(): Bootstrap {
   const c = manager.status.connection;
   loadedConn = c;
-  return { connection: c ? { url: c.url, token: c.token } : null, appVersion: app.getVersion() };
+  return { connection: c ? { url: c.url, token: c.token } : null, appVersion: app.getVersion(), accentColor: accentColor() };
+}
+
+/** The platform accent colour (`rrggbbaa`) for the UI's Device theme; macOS and Windows only. */
+function accentColor(): string | null {
+  if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
+  try {
+    return systemPreferences.getAccentColor() || null;
+  } catch {
+    return null;
+  }
 }
 
 function onCoreStatus(status: CoreStatus): void {

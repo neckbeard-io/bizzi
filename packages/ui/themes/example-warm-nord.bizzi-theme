@@ -1,0 +1,18 @@
+{
+  "$schema": "bizzi-theme.schema.json",
+  "id": "warm-nord",
+  "name": "Warm Nord",
+  "author": "bizzi (example)",
+  "description": "Nord, warmer: the minimal form. Every token not given here is derived and checked.",
+  "variants": {
+    "light": {
+      "colors": { "background": "#f2efea", "foreground": "#2e3440", "primary": "#56698c" },
+      "terminal": {
+        "ansi": ["#3b4252", "#a8505a", "#5f7e4a", "#9a6f1e", "#4f6f99", "#8a5a85", "#3f7f86", "#5c6370", "#4c566a", "#bf616a", "#6f8f5a", "#b0802a", "#5e81ac", "#9a6a95", "#4f8f96", "#2e3440"]
+      }
+    },
+    "dark": {
+      "colors": { "background": "#2f3233", "foreground": "#ece7df", "primary": "#8fb8c6", "warn": "#e6b86a" }
+    }
+  }
+}

@@ -1,0 +1,126 @@
+// bizzi's own palette ("bizzi Default", theming.md §4): indigo primary, neutral greys. These are also the
+// fallbacks for tokens a theme leaves out and the derivation can't fill (§3 step 3), and for state
+// colours that fail the contrast checks. Keep in sync with the :root / [data-theme='dark'] blocks in
+// src/index.css, which paint before any theme is applied.
+import type { Ansi16, ResolvedColors, ThemeMode } from './types.ts';
+
+export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
+  light: {
+    background: '#f7f7f8',
+    foreground: '#17171c',
+    card: '#ffffff',
+    cardForeground: '#17171c',
+    popover: '#ffffff',
+    popoverForeground: '#17171c',
+    primary: '#4f46e5',
+    primaryForeground: '#ffffff',
+    secondary: '#f1f1f4',
+    secondaryForeground: '#17171c',
+    muted: '#f1f1f4',
+    mutedForeground: '#6b6b76',
+    accent: '#f1f1f4',
+    accentForeground: '#17171c',
+    destructive: '#dc2626',
+    border: '#e3e3e8',
+    input: '#e3e3e8',
+    ring: '#4f46e5',
+    sidebar: '#ffffff',
+    sidebarForeground: '#17171c',
+    sidebarPrimary: '#4f46e5',
+    sidebarPrimaryForeground: '#ffffff',
+    sidebarAccent: '#f1f1f4',
+    sidebarAccentForeground: '#17171c',
+    sidebarBorder: '#e3e3e8',
+    sidebarRing: '#4f46e5',
+    ok: '#15803d',
+    warn: '#b45309',
+    err: '#dc2626',
+    info: '#2563eb',
+    code: '#f3f3f6',
+    diffAdd: '#e6f7ea',
+    diffAddForeground: '#14532d',
+    diffDel: '#fdecec',
+    diffDelForeground: '#7f1d1d',
+    diffHunk: '#eef1fb',
+    diffHunkForeground: '#3949ab',
+    primarySoft: '#eef0ff',
+    stateWaiting: '#b45309',
+    stateWorking: '#4f46e5',
+    stateDone: '#0369a1',
+    stateFailed: '#dc2626',
+    stateIdle: '#6b6b76',
+    radius: '0.5rem',
+  },
+  dark: {
+    background: '#0c0c10',
+    foreground: '#e7e7ec',
+    card: '#141419',
+    cardForeground: '#e7e7ec',
+    popover: '#141419',
+    popoverForeground: '#e7e7ec',
+    primary: '#8b93ff',
+    primaryForeground: '#0c0c10',
+    secondary: '#1c1c23',
+    secondaryForeground: '#e7e7ec',
+    muted: '#1c1c23',
+    mutedForeground: '#9a9aa6',
+    accent: '#1c1c23',
+    accentForeground: '#e7e7ec',
+    destructive: '#f87171',
+    border: '#2a2a33',
+    input: '#2a2a33',
+    ring: '#8b93ff',
+    sidebar: '#141419',
+    sidebarForeground: '#e7e7ec',
+    sidebarPrimary: '#8b93ff',
+    sidebarPrimaryForeground: '#0c0c10',
+    sidebarAccent: '#1c1c23',
+    sidebarAccentForeground: '#e7e7ec',
+    sidebarBorder: '#2a2a33',
+    sidebarRing: '#8b93ff',
+    ok: '#4ade80',
+    warn: '#fbbf24',
+    err: '#f87171',
+    info: '#60a5fa',
+    code: '#1a1a21',
+    diffAdd: '#0f2a19',
+    diffAddForeground: '#bbf7d0',
+    diffDel: '#2f1414',
+    diffDelForeground: '#fecaca',
+    diffHunk: '#1b1f3a',
+    diffHunkForeground: '#a5b4fc',
+    primarySoft: '#23244a',
+    stateWaiting: '#fbbf24',
+    stateWorking: '#8b93ff',
+    stateDone: '#38bdf8',
+    stateFailed: '#f87171',
+    stateIdle: '#9a9aa6',
+    radius: '0.5rem',
+  },
+};
+
+/** Terminal ANSI palettes for themes without one (black red green yellow blue magenta cyan white, then bright). */
+export const DEFAULT_ANSI: Record<ThemeMode, Ansi16> = {
+  dark: ['#1c1c23', '#f87171', '#4ade80', '#fbbf24', '#60a5fa', '#c084fc', '#22d3ee', '#d4d4d8', '#6b6b76', '#fca5a5', '#86efac', '#fde68a', '#93c5fd', '#d8b4fe', '#67e8f9', '#ffffff'],
+  // Light: "white" is a mid grey and bright white a dark one, so `white` text stays readable on white.
+  light: ['#17171c', '#dc2626', '#15803d', '#a16207', '#1d4ed8', '#9333ea', '#0e7490', '#a1a1aa', '#6b6b76', '#b91c1c', '#166534', '#854d0e', '#1e40af', '#7e22ce', '#155e75', '#52525b'],
+};
+
+/** Terminal chrome for bizzi Default (the terminal sits on a card surface). */
+export const DEFAULT_TERMINAL = {
+  light: { background: '#ffffff', foreground: '#17171c', cursor: '#4f46e5', cursorAccent: '#ffffff', selection: '#c7cbff' },
+  dark: { background: '#0c0c10', foreground: '#e7e7ec', cursor: '#8b93ff', cursorAccent: '#0c0c10', selection: '#3b3f7a' },
+} as const;
+
+/**
+ * Invariant safety tokens (theming.md §6): approval prompts, permission-mode badges (bypass
+ * permissions) and destructive confirmations. Self-contained fill + text + border pairs that read on
+ * any background, light or dark. Not part of the theme model: no theme, import or custom file can set
+ * them, and applyTheme never writes them.
+ */
+export const SAFETY = {
+  warn: '#f5b400',
+  warnForeground: '#1a1300',
+  danger: '#c81e1e',
+  dangerForeground: '#ffffff',
+} as const;

@@ -1,11 +1,11 @@
 import type { ReactNode } from 'react';
 import { useBizzi, useBizziContext } from '../../app/context.tsx';
-import { navigate, useTheme } from '../../app/hooks.ts';
-import type { ThemePref } from '../../app/hooks.ts';
+import { navigate } from '../../app/hooks.ts';
 import { Page, PageHeader, SectionTitle } from '../../components/layout.tsx';
-import { Button, Card, Segmented, Tabs } from '../../components/ui.tsx';
+import { Button, Card, Tabs } from '../../components/ui.tsx';
 import type { SettingsSection } from '../../lib/router.ts';
 import { KnowledgeSettings } from '../knowledge/KnowledgeSettings.tsx';
+import { AppearanceSettings } from './AppearanceSettings.tsx';
 import { DevicesSettings } from './DevicesSettings.tsx';
 
 export function SettingsView(props: { section: SettingsSection }): ReactNode {
@@ -29,22 +29,9 @@ function GeneralSettings(): ReactNode {
   const conn = useBizzi((s) => s.connection);
   const role = useBizzi((s) => s.role);
   const machine = useBizzi((s) => s.machine);
-  const [theme, setTheme] = useTheme();
   return (
     <>
-      <SectionTitle>Appearance</SectionTitle>
-      <Card className="flex flex-wrap items-center gap-3 p-4">
-        <span className="flex-1 text-sm">Theme</span>
-        <Segmented<ThemePref>
-          value={theme}
-          onChange={setTheme}
-          items={[
-            { value: 'system', label: 'Auto' },
-            { value: 'light', label: 'Light' },
-            { value: 'dark', label: 'Dark' },
-          ]}
-        />
-      </Card>
+      <AppearanceSettings />
       <SectionTitle>Connection</SectionTitle>
       <Card className="grid gap-2 p-4 text-sm">
         <Row label="Connected to">{role === 'hub' ? `hub ${machine?.name ?? ''}` : `node ${machine?.name ?? ''}`}</Row>
