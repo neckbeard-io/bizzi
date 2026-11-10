@@ -19,6 +19,7 @@ import {
 } from '@bizzi/protocol';
 import { AdapterRegistry } from './agents.ts';
 import { BaselineTracker, baselinesExtension } from './baselines.ts';
+import { FsBrowser, MAX_COMPLETE_LIMIT, type BrowserOptions } from './browse.ts';
 import { EventBus, type EventListener } from './bus.ts';
 import { nullLogger } from './logger.ts';
 import { buildMachineInfo } from './machine.ts';
@@ -74,6 +75,8 @@ export interface NodeOptions {
   interruptGraceMs?: number;
   /** Service extensions (provisioning, knowledge, secrets…); started in order, stopped in reverse. */
   extensions?: NodeExtension[];
+  /** Workspace picker (fs.browse / fs.complete / fs.suggest) overrides; tests set `home` and `caseInsensitive`. */
+  browse?: Pick<BrowserOptions, 'home' | 'caseInsensitive' | 'maxEntries'>;
 }
 
 /** Protocol methods the core doesn't implement; they answer `unsupported` unless an extension claims them. */
@@ -134,6 +137,9 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'orchestration.settings.get',
   'orchestration.settings.set',
   'baselines.list',
+  'fs.browse',
+  'fs.complete',
+  'fs.suggest',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
@@ -224,7 +230,9 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger });
     const restarts = new Restarts({ sessions, registry, bus, logger });
     for (const ext of opts.extensions ?? []) if (ext.prepareStart) startHooks.push(ext.prepareStart);
-    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration, restarts);
+    // Runs as the node's OS user, like a terminal session (spec §10); see browse.ts.
+    const browser = new FsBrowser({ ...opts.browse, workspaces: () => workspaces.list() });
+    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration, restarts, browser);
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
     const baselines = new BaselineTracker({
@@ -282,6 +290,7 @@ class Node implements BizziNode {
   baselines!: BaselineTracker;
   readonly orchestration: Orchestrator;
   readonly restarts: Restarts;
+  readonly #browser: FsBrowser;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
   readonly #builtins: ReadonlySet<string>;
@@ -299,7 +308,9 @@ class Node implements BizziNode {
     sessions: Sessions,
     orchestration: Orchestrator,
     restarts: Restarts,
+    browser: FsBrowser,
   ) {
+    this.#browser = browser;
     this.version = version;
     this.machine = machine;
     this.logger = logger;
@@ -601,6 +612,25 @@ class Node implements BizziNode {
       'fs.list': (p) => fsList(ws.get(reqString(p, 'workspaceId')), optString(p, 'path')),
       'fs.read': (p) =>
         fsRead(ws.get(reqString(p, 'workspaceId')), reqString(p, 'path'), optInt(p, 'maxBytes', 0) ?? DEFAULT_MAX_BYTES),
+      'fs.browse': (p) => {
+        const opts: { path?: string; showHidden?: boolean } = {};
+        const path = optString(p, 'path');
+        const showHidden = optBool(p, 'showHidden');
+        if (path !== undefined) opts.path = path;
+        if (showHidden !== undefined) opts.showHidden = showHidden;
+        return this.#browser.browse(opts);
+      },
+      'fs.complete': (p) => {
+        const prefix = optString(p, 'prefix');
+        if (prefix === undefined) throw new BizziError('bad_request', 'prefix must be a string');
+        const opts: { prefix: string; limit?: number; showHidden?: boolean } = { prefix };
+        const limit = optInt(p, 'limit', 1, MAX_COMPLETE_LIMIT);
+        const showHidden = optBool(p, 'showHidden');
+        if (limit !== undefined) opts.limit = limit;
+        if (showHidden !== undefined) opts.showHidden = showHidden;
+        return this.#browser.complete(opts);
+      },
+      'fs.suggest': () => this.#browser.suggest(),
       'git.status': (p) => gitStatus(ws.get(reqString(p, 'workspaceId'))),
       'git.diff': (p) => {
         const opts: { path?: string; staged?: boolean } = {};

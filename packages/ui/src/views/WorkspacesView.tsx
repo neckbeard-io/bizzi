@@ -1,15 +1,15 @@
 import { useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { shallowEqual } from '@bizzi/client';
 import type { WorkspaceInfo } from '@bizzi/protocol';
 import { openAddWorkspace } from '../app/addWorkspace.ts';
-import { useBizzi, useStore } from '../app/context.tsx';
-import { navigate, useAction, useIsWide } from '../app/hooks.ts';
+import { useBizzi } from '../app/context.tsx';
+import { useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
-import { Badge, Button, Card, Checkbox, Empty, ErrorText, Field, Input, Spinner } from '../components/ui.tsx';
+import { Badge, Button, Card, Checkbox, Empty, Spinner } from '../components/ui.tsx';
 import { routeHref } from '../lib/router.ts';
 import { MachineTree } from './sidebar/MachineTree.tsx';
 
@@ -105,53 +105,5 @@ export function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean
         </div>
       </Card>
     </a>
-  );
-}
-
-/** The add-workspace form; shown in the add-workspace dialog (AddWorkspaceDialog.tsx). */
-export function AddWorkspaceForm(props: { machineId: string | null; onDone: () => void }): ReactNode {
-  const store = useStore();
-  const [path, setPath] = useState('');
-  const [name, setName] = useState('');
-  const [create, setCreate] = useState(false);
-  const action = useAction(async () => {
-    const params: { machineId?: string; path: string; name?: string; create?: boolean } = { path: path.trim() };
-    if (props.machineId) params.machineId = props.machineId;
-    if (name.trim()) params.name = name.trim();
-    if (create) params.create = true;
-    return store.createWorkspace(params);
-  });
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    const ws = await action.run();
-    if (ws) {
-      props.onDone();
-      navigate({ name: 'workspace', workspaceId: ws.id });
-    }
-  };
-  return (
-    <Card className="mb-4 p-4">
-      <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-[2fr_1fr]">
-        <Field label="Path on this machine">
-          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/you/src/project" className="font-mono" autoFocus required spellCheck={false} autoCapitalize="off" />
-        </Field>
-        <Field label="Name (optional)">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="defaults to the folder name" />
-        </Field>
-        <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <Checkbox checked={create} onChange={setCreate} label="Create the directory if it does not exist" />
-          <div className="flex-1" />
-          <Button variant="ghost" onClick={props.onDone}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" busy={action.busy} disabled={!path.trim()}>
-            Add
-          </Button>
-        </div>
-        <div className="sm:col-span-2">
-          <ErrorText error={action.error} />
-        </div>
-      </form>
-    </Card>
   );
 }

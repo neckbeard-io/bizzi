@@ -40,6 +40,25 @@ export interface FsEntry {
   size?: number;
 }
 
+/**
+ * A directory offered by the workspace picker (`fs.browse` / `fs.complete` / `fs.suggest`). Only
+ * directories and symlinks that resolve to directories are ever listed.
+ */
+export interface BrowseEntry {
+  name: string;
+  /** Absolute path on the machine (not symlink-resolved). */
+  path: string;
+  kind: 'dir' | 'symlink';
+  /** Has a `.git` entry (a repository root or a worktree). */
+  git?: boolean;
+  /** Already registered as this bizzi workspace (compared by real path). */
+  workspaceId?: string;
+  /** Name starts with '.'. */
+  hidden?: boolean;
+  /** `fs.suggest` only: why it was offered. */
+  suggest?: 'home' | 'root' | 'recent' | 'repo';
+}
+
 export interface GitFileStatus {
   path: string;
   /** Porcelain v1 XY code, e.g. " M", "??", "A ". */
@@ -159,6 +178,31 @@ export interface Methods {
     params: { workspaceId: string; path: string; maxBytes?: number };
     result: { content: string; encoding: 'utf8' | 'base64'; truncated: boolean };
   };
+  /**
+   * Workspace picker (spec §5.2, §10): list the directories in `path` on the machine (default: the node
+   * user's home; `~` and `~/…` are expanded). Unlike fs.list this is not confined to a workspace: it runs
+   * as the node's OS user, the same trust as a terminal session. Directories and symlinks to directories
+   * only; file contents are never read. `truncated` when the listing hit the node's entry cap.
+   */
+  'fs.browse': {
+    params: MachineTarget & { path?: string; showHidden?: boolean };
+    result: { path: string; parent?: string; home: string; entries: BrowseEntry[]; truncated: boolean };
+  };
+  /**
+   * Shell-like directory completion of a partially typed absolute path (`~/re` → `repo`). `base` is the
+   * typed directory part (`~/`), so a completion's full text is `base + name + '/'`. Matches that keep
+   * the typed case come first; matching ignores case on case-insensitive filesystems (macOS, Windows).
+   * Hidden directories only when `showHidden` or the typed name starts with '.'. `limit` default 50.
+   */
+  'fs.complete': {
+    params: MachineTarget & { prefix: string; limit?: number; showHidden?: boolean };
+    result: { completions: BrowseEntry[]; base: string };
+  };
+  /**
+   * Starting points for the picker: home, common source roots that exist (~/src, ~/repo, ~/code, …),
+   * parents of existing workspaces, and git repositories one level under those that aren't workspaces yet.
+   */
+  'fs.suggest': { params: MachineTarget; result: { entries: BrowseEntry[] } };
   'git.status': {
     params: { workspaceId: string };
     result: { isRepo: boolean; branch?: string; ahead?: number; behind?: number; files: GitFileStatus[] };

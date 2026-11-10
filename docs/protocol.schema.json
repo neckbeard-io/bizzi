@@ -259,6 +259,33 @@
         "$ref": "#/$defs/result:fs.read"
       }
     },
+    "fs.browse": {
+      "description": "Workspace picker (spec §5.2, §10): list the directories in `path` on the machine (default: the node user's home; `~` and `~/…` are expanded). Unlike fs.list this is not confined to a workspace: it runs as the node's OS user, the same trust as a terminal session. Directories and symlinks to directories only; file contents are never read. `truncated` when the listing hit the node's entry cap.",
+      "params": {
+        "$ref": "#/$defs/params:fs.browse"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fs.browse"
+      }
+    },
+    "fs.complete": {
+      "description": "Shell-like directory completion of a partially typed absolute path (`~/re` → `repo`). `base` is the typed directory part (`~/`), so a completion's full text is `base + name + '/'`. Matches that keep the typed case come first; matching ignores case on case-insensitive filesystems (macOS, Windows). Hidden directories only when `showHidden` or the typed name starts with '.'. `limit` default 50.",
+      "params": {
+        "$ref": "#/$defs/params:fs.complete"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fs.complete"
+      }
+    },
+    "fs.suggest": {
+      "description": "Starting points for the picker: home, common source roots that exist (~/src, ~/repo, ~/code, …), parents of existing workspaces, and git repositories one level under those that aren't workspaces yet.",
+      "params": {
+        "$ref": "#/$defs/params:fs.suggest"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fs.suggest"
+      }
+    },
     "git.status": {
       "params": {
         "$ref": "#/$defs/params:git.status"
@@ -1280,6 +1307,53 @@
         "budgetless"
       ]
     },
+    "BrowseEntry": {
+      "description": "A directory offered by the workspace picker (`fs.browse` / `fs.complete` / `fs.suggest`). Only directories and symlinks that resolve to directories are ever listed.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "path": {
+          "description": "Absolute path on the machine (not symlink-resolved).",
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "dir",
+            "symlink"
+          ]
+        },
+        "git": {
+          "description": "Has a `.git` entry (a repository root or a worktree).",
+          "type": "boolean"
+        },
+        "workspaceId": {
+          "description": "Already registered as this bizzi workspace (compared by real path).",
+          "type": "string"
+        },
+        "hidden": {
+          "description": "Name starts with '.'.",
+          "type": "boolean"
+        },
+        "suggest": {
+          "description": "`fs.suggest` only: why it was offered.",
+          "type": "string",
+          "enum": [
+            "home",
+            "root",
+            "recent",
+            "repo"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "path",
+        "kind"
+      ]
+    },
     "ChallengeRequest": {
       "type": "object",
       "properties": {
@@ -2239,6 +2313,9 @@
         "term.snapshot",
         "fs.list",
         "fs.read",
+        "fs.browse",
+        "fs.complete",
+        "fs.suggest",
         "git.status",
         "git.diff",
         "agent.plan",
@@ -3052,6 +3129,63 @@
             },
             "params": {
               "$ref": "#/$defs/params:fs.read"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fs.browse"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fs.browse"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fs.complete"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fs.complete"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fs.suggest"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fs.suggest"
             }
           }
         },
@@ -5186,6 +5320,48 @@
     "params:devices.list": {
       "$ref": "#/$defs/Empty"
     },
+    "params:fs.browse": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "showHidden": {
+              "type": "boolean"
+            }
+          }
+        }
+      ]
+    },
+    "params:fs.complete": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "prefix": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            },
+            "showHidden": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "prefix"
+          ]
+        }
+      ]
+    },
     "params:fs.list": {
       "type": "object",
       "properties": {
@@ -5217,6 +5393,9 @@
         "workspaceId",
         "path"
       ]
+    },
+    "params:fs.suggest": {
+      "$ref": "#/$defs/MachineTarget"
     },
     "params:git.diff": {
       "type": "object",
@@ -6178,6 +6357,53 @@
         "devices"
       ]
     },
+    "result:fs.browse": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "parent": {
+          "type": "string"
+        },
+        "home": {
+          "type": "string"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrowseEntry"
+          }
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path",
+        "home",
+        "entries",
+        "truncated"
+      ]
+    },
+    "result:fs.complete": {
+      "type": "object",
+      "properties": {
+        "completions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrowseEntry"
+          }
+        },
+        "base": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "completions",
+        "base"
+      ]
+    },
     "result:fs.list": {
       "type": "object",
       "properties": {
@@ -6213,6 +6439,20 @@
         "content",
         "encoding",
         "truncated"
+      ]
+    },
+    "result:fs.suggest": {
+      "type": "object",
+      "properties": {
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BrowseEntry"
+          }
+        }
+      },
+      "required": [
+        "entries"
       ]
     },
     "result:git.diff": {

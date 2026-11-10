@@ -3,7 +3,8 @@
 // Covers worktree.create/remove on a git workspace, a shell session with session.markSeen seen by a
 // second device, a command widget dropped at runtime (widget.updated via the hub) that feeds usage.list
 // through billing.account, hub-stored themes, orchestration settings, agents.list decorations, and the
-// bizzi-agents MCP endpoint called by a (fake) structured agent with its own session token.
+// bizzi-agents MCP endpoint called by a (fake) structured agent with its own session token, and the
+// workspace picker (fs.browse / fs.complete / fs.suggest).
 //
 //   node scripts/smoke-v12.ts            # or: npm run smoke:v12
 
@@ -123,6 +124,41 @@ try {
   check(!(await b.call('workspaces.list', { machineId })).workspaces.some((w: any) => w.id === wt.id), 'hub forgot the worktree workspace');
   check(git(repo, 'branch', '--list', 'smoke/wt').includes('smoke/wt'), 'branch kept');
   step('worktree.remove: refused while dirty, then forced; branch kept');
+
+  // ---- workspace picker: fs.browse / fs.complete / fs.suggest through the hub
+  const tree = join(root, 'browse');
+  mkdirSync(join(tree, 'apps', 'web', '.git'), { recursive: true });
+  mkdirSync(join(tree, 'apps', 'Worker'), { recursive: true });
+  mkdirSync(join(tree, '.cache'), { recursive: true });
+  writeFileSync(join(tree, 'apps', 'readme.txt'), 'x\n');
+  const browsed = await a.call('fs.browse', { machineId, path: join(tree, 'apps') });
+  check(browsed.path === join(tree, 'apps') && browsed.parent === tree, `fs.browse path/parent (${browsed.path})`);
+  check(
+    JSON.stringify(browsed.entries.map((e: any) => [e.name, Boolean(e.git)])) === JSON.stringify([['web', true], ['Worker', false]]),
+    `fs.browse lists directories only, with repo marks (${JSON.stringify(browsed.entries)})`,
+  );
+  const top = await a.call('fs.browse', { machineId, path: tree });
+  check(!top.entries.some((e: any) => e.name === '.cache'), 'fs.browse hides dot-directories by default');
+  check((await a.call('fs.browse', { machineId, path: tree, showHidden: true })).entries.some((e: any) => e.name === '.cache' && e.hidden), 'fs.browse showHidden');
+  const home = await a.call('fs.browse', { machineId });
+  check(home.path === home.home && home.path.length > 1, 'fs.browse defaults to home');
+  const rootListing = await b.call('fs.browse', { machineId, path: root });
+  check(rootListing.entries.some((e: any) => e.name === 'repo' && e.git && e.workspaceId === ws.id), 'fs.browse marks the existing workspace');
+  const comp = await a.call('fs.complete', { machineId, prefix: join(tree, 'apps', 'w') });
+  check(comp.base === join(tree, 'apps') + '/', `fs.complete base (${comp.base})`);
+  check(comp.completions[0]?.name === 'web', `fs.complete exact-case match first (${comp.completions.map((e: any) => e.name).join(',')})`);
+  const tilde = await a.call('fs.complete', { machineId, prefix: '~/', limit: 3 });
+  check(tilde.base === '~/' && tilde.completions.length <= 3, 'fs.complete keeps ~/ and honours limit');
+  const { entries: suggested } = await a.call('fs.suggest', { machineId });
+  check(suggested[0]?.suggest === 'home' && suggested.some((e: any) => e.suggest === 'recent' && e.path === root), 'fs.suggest: home and the parent of the repo workspace');
+  let missing = '';
+  try {
+    await a.call('fs.browse', { machineId, path: join(tree, 'nope') });
+  } catch (err) {
+    missing = (err as any).code;
+  }
+  check(missing === 'not_found', `fs.browse of a missing path → not_found (got ${missing || 'success'})`);
+  step(`fs.browse/complete/suggest through the hub: ${browsed.entries.length} dirs, completion ${comp.base}${comp.completions[0]?.name}/, ${suggested.length} suggestions`);
 
   // ---- shell session + markSeen across devices
   const { session: sh } = await a.call('session.create', { workspaceId: ws.id, agent: 'shell', mode: 'terminal', cols: 80, rows: 24 });

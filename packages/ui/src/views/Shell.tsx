@@ -1,6 +1,7 @@
-import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import { selectKnowledgeSuggestionCount, selectMachineList, selectWaitingCount } from '@bizzi/client';
+import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { useBizzi, useBizziContext } from '../app/context.tsx';
 import { navigate, useIsWide, useRoute, useTheme } from '../app/hooks.ts';
 import type { ThemePref } from '../app/hooks.ts';
@@ -10,6 +11,7 @@ import { useServerThemes } from '../app/theme.ts';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
 import { Button, Spinner, cx } from '../components/ui.tsx';
+import { pickerRequestFromHash } from '../lib/picker.ts';
 import { desktopRedirect, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { SIDEBAR_MIN, keyWidth, manualMax, clampManual, sidebarWidth } from '../lib/sidebarWidth.ts';
@@ -45,9 +47,19 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
     if (conn.state === 'closed' && conn.lastError) onFatal(conn.lastError.message);
   }, [conn.state, conn.lastError, onFatal]);
 
+  // `#/workspaces?add=1[&machine=…][&path=…]` opens the workspace picker, wherever the page lands.
+  const hash = useSyncExternalStore(subscribeHash, () => window.location.hash, () => '');
+  const addRequest = useMemo(() => pickerRequestFromHash(hash), [hash]);
+
   // Desktop: the sidebar is the tree, so the list pages open the machine page instead.
-  const redirect = desktopRedirect(route, wide, target ?? firstMachine);
+  const redirect = desktopRedirect(route, wide, addRequest?.machineId ?? target ?? firstMachine);
   const redirectHref = redirect ? routeHref(redirect) : null;
+  useEffect(() => {
+    if (!addRequest) return;
+    openAddWorkspace(addRequest.machineId ?? null, addRequest.path);
+    // Drop the query so closing the picker (or a reload) doesn't reopen it.
+    if (!redirect) navigate(route, { replace: true });
+  }, [hash]);
   useEffect(() => {
     if (redirect) navigate(redirect, { replace: true });
   }, [redirectHref]);
@@ -99,6 +111,11 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
       <AddWorkspaceDialog />
     </div>
   );
+}
+
+function subscribeHash(cb: () => void): () => void {
+  window.addEventListener('hashchange', cb);
+  return () => window.removeEventListener('hashchange', cb);
 }
 
 function RouteView(props: { route: Route }): ReactNode {
