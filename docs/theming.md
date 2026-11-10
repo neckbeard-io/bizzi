@@ -4,7 +4,7 @@ Companion to [spec.md](spec.md) §11. bizzi adopts the theme model from Chorus (
 
 ## 1. Provenance and licence
 
-- Chorus and Terax are both Apache-2.0. bizzi can reuse the theme model, the converter and the theme definitions with attribution: keep each theme's `author`, and add a `NOTICE` entry naming both projects.
+- Chorus and Terax are both Apache-2.0. Cobalt2 (Wes Bos) is MIT: keep its copyright notice in `NOTICE`. bizzi can reuse the theme model, the converter and the theme definitions with attribution: keep each theme's `author`, and add a `NOTICE` entry naming both projects.
 - **base16 schemes** each carry their author's licence (mostly MIT, from the tinted-theming ecosystem). Record the licence per scheme when vendoring them.
 - **flax** (`neckbeard-io/flax`, the user's own Flutter music player) is GPL-3.0 with a single contributor. The palettes are the user's to reuse under whatever licence bizzi ends up with (bizzi has no licence yet). The colour values are mostly the canonical public palettes (Dracula, Nord, Catppuccin, Gruvbox).
 - **Don't ship Chorus's house palette** (deep teal and emerald, "Chorus Default") as bizzi's look: that's Chorus's identity, not a generic theme. bizzi keeps its own default.
@@ -88,6 +88,23 @@ From flax (the user's picks; five tones per variant, converted as in §5):
 - **Where flax and Chorus overlap** (Nord, Catppuccin, Gruvbox): ship one entry per name. Use Chorus's hand-authored token sets, which include terminal palettes, and check their accents agree with flax's tones.
 - **Dracula, Evergreen and Synthwave** come from flax. flax's Dracula is the only one with a light variant; the base16 Dracula is dark only, so it's dropped in favour of flax's.
 - **Device** (also from flax): follows the platform accent colour, from Electron's `systemPreferences.getAccentColor()` on macOS and Windows and Material You dynamic colour on Android. Elsewhere it falls back to bizzi Default.
+
+**Cobalt2** (Wes Bos, `wesbos/cobalt2-vscode`, MIT; dark only). Its colours come from the VS Code theme, not the base24 port (`tinted-theming/schemes` `base24/cobalt2.yaml`, which swaps the blue-greys for plain greys):
+
+| Token | Value | VS Code source |
+|---|---|---|
+| `background` | `#193549` | `editor.background` |
+| `sidebar` | `#15232d` | `sideBar.background` |
+| `card` | `#122738` | `activityBar.background` |
+| `foreground` | `#ffffff` | `editor.foreground` |
+| `primary` | `#ffc600` (text on it: `#193549`) | `editorCursor.foreground`, the signature yellow |
+| `ring` | `#0088ff` | `button.background` |
+| `border` | `#0d3a58` | `focusBorder` |
+| terminal background / foreground / cursor / selection | `#122738` / `#ffffff` / `#ffc600` / `#0050A4` | `terminal.*`, `editor.selectionBackground` |
+| ANSI 0–7 | `#000000` `#ff628c` `#3ad900` `#ffc600` `#0088ff` `#fb94ff` `#80fcff` `#ffffff` | `terminal.ansi*` |
+| ANSI 8–15 | `#0050A4` `#ff628c` `#3ad900` `#ffc600` `#0088ff` `#fb94ff` `#80fcff` `#ffffff` | `terminal.ansiBright*` |
+
+There's no upstream light variant, so light mode falls back to dark (§2) unless a bizzi-made "Cobalt Light" is added as a five-tone palette.
 
 **base16 catalogue** (16 schemes from Chorus, converted at load; its Dracula is replaced by flax's): Ayu Dark, Ayu Light, Catppuccin Latte, Everforest, GitHub, Gruvbox Light Hard, Kanagawa, Material Palenight, Monokai, One Light, OneDark, PaperColor Light, Solarized Dark, Solarized Light, Tomorrow Night, Twilight.
 
