@@ -1,0 +1,97 @@
+{
+  "schema": 1,
+  "version": "2026.11.10",
+  "description": "Terminal prompt detectors for @bizzi/pty. Order matters within a kind; blocking kinds (approval, login, question) are tried before input. Override per node with <data dir>/detectors.json (same schema, merged by id).",
+  "detectors": [
+    {
+      "id": "claude-permission",
+      "prompt": "approval",
+      "agents": ["claude"],
+      "patterns": [
+        {
+          "phrases": [
+            "Do you want to proceed?",
+            "Do you want to make this edit",
+            "Do you want to create",
+            "Do you want to allow",
+            "Do you want to overwrite"
+          ]
+        }
+      ],
+      "note": "Claude Code permission dialog wording (2.x); not exercised in tests"
+    },
+    {
+      "id": "claude-trust",
+      "prompt": "approval",
+      "agents": ["claude"],
+      "patterns": [{ "phrases": ["Yes, I trust this folder", "Do you trust the files in this folder"] }],
+      "note": "Claude Code folder-trust dialog; verified against claude 2.1.311"
+    },
+    {
+      "id": "codex-approval",
+      "prompt": "approval",
+      "agents": ["codex"],
+      "patterns": [
+        {
+          "phrases": [
+            "Would you like to run the following command?",
+            "Would you like to make the following edits?",
+            "Allow command?",
+            "Yes, proceed"
+          ]
+        }
+      ],
+      "note": "Codex TUI approval wording; unverified (codex not installed)"
+    },
+    {
+      "id": "agy-approval",
+      "prompt": "approval",
+      "agents": ["agy"],
+      "patterns": [
+        {
+          "phrases": [
+            "Allow execution",
+            "Allow once",
+            "Apply this change?",
+            "Waiting for user confirmation",
+            "Do you want to proceed?"
+          ]
+        }
+      ],
+      "note": "Gemini-CLI-style wording; unverified (agy not installed)"
+    },
+    {
+      "id": "yes-no",
+      "prompt": "approval",
+      "patterns": [{ "regex": "[[(]\\s*y(?:es)?\\s*\\/\\s*n(?:o)?\\s*[\\])]\\s*[:?]?\\s*$", "flags": "i", "scope": "last-line" }],
+      "note": "generic [y/N] / (yes/no) confirmation on the last line"
+    },
+    {
+      "id": "claude-input",
+      "prompt": "input",
+      "agents": ["claude"],
+      "patterns": [{ "phrases": ["? for shortcuts"] }],
+      "note": "Claude Code idle footer; unverified (trust dialog blocked the live check)"
+    },
+    {
+      "id": "codex-input",
+      "prompt": "input",
+      "agents": ["codex"],
+      "patterns": [{ "phrases": ["Ask Codex to do anything", "⏎ send"] }],
+      "note": "Codex composer placeholder/footer; unverified"
+    },
+    {
+      "id": "press-enter",
+      "prompt": "input",
+      "patterns": [{ "phrases": ["Press Enter to continue"] }],
+      "note": "generic \"press enter\" pause"
+    },
+    {
+      "id": "shell-prompt",
+      "prompt": "input",
+      "agents": ["shell"],
+      "patterns": [{ "regex": "[$%#>❯➜]\\s?$", "scope": "last-line" }],
+      "note": "last line ends in a typical shell prompt character ($ % # > ❯ ➜)"
+    }
+  ]
+}
