@@ -49,7 +49,7 @@ Format (Rex docs, "Program Status Protocol"): `ESC ] 7501 ; key=value:key=value 
 
 ### 4.2 Agent-to-agent tools over MCP
 
-**Status: designed, [spec.md](spec.md) §12, phase M4.** Agents running in bizzi start a helper session (any agent), send / steer, wait until idle or waiting, read structured results, stop. Herdr does this through a CLI with screen text; bizzi's helpers are full sessions and the parent reads events, not screens. The machine is the boundary for now; cross-machine via the hub is M5 (spec §12.4). Depth, concurrency and budget guardrails, with local inference marked budgetless (spec §12.2–12.3).
+**Status: built for one machine ([spec.md](spec.md) §12.5, `@bizzi/orchestration`), phase M4.** Agents running in bizzi start a helper session (any agent), send / steer, wait until idle or waiting, read structured results, stop. Herdr does this through a CLI with screen text; bizzi's helpers are full sessions and the parent reads events, not screens. The machine is the boundary for now; cross-machine via the hub is M5 (spec §12.4). Depth, concurrency and budget guardrails, with local inference marked budgetless (spec §12.2–12.3).
 
 ### 4.3 Data-driven prompt detectors
 
@@ -57,7 +57,7 @@ Format (Rex docs, "Program Status Protocol"): `ESC ] 7501 ; key=value:key=value 
 
 ### 4.4 Worktrees as workspaces
 
-**Status: planned, spec §13 M4.**
+**Status: built (spec §12.5).**
 
 `worktree.create { workspaceId, branch }` → `git worktree add` and a new workspace grouped under the parent repo; removal never deletes the branch and refuses on uncommitted changes without force. Listed in spec §5.2, not built. Makes fan-out safe.
 
