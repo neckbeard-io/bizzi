@@ -197,6 +197,7 @@ export class Sessions {
     if (!mode || !adapter) {
       throw new BizziError('agent_unavailable', `no adapter for ${p.agent}${p.mode ? ` in ${p.mode} mode` : ''}`);
     }
+    this.#d.registry.assertStartable(p.agent, mode);
     if (p.command !== undefined) {
       if (mode !== 'terminal') throw new BizziError('bad_request', 'command is only supported in terminal mode');
       validateCommand(p.command);
@@ -227,6 +228,7 @@ export class Sessions {
     const ws = this.#d.workspaces.get(src.info.workspaceId);
     const adapter = this.#d.registry.select(src.info.agent, src.info.mode);
     if (!adapter) throw new BizziError('agent_unavailable', `no adapter for ${src.info.agent} in ${src.info.mode} mode`);
+    this.#d.registry.assertStartable(src.info.agent, src.info.mode);
     const caps = safeCaps(adapter, src.info.mode);
     // A fork of a fork that hasn't started yet forks from the same source conversation.
     const sourceRef = src.info.agentSessionRef ?? src.state.forkOf;

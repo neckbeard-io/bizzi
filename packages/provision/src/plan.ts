@@ -1,5 +1,6 @@
 import { delimiter } from 'node:path';
 import { type AgentKind, AGENT_KINDS, BizziError } from '@bizzi/protocol';
+import { installFacts } from './install.ts';
 import { augmentedPath, findExecutable, homeDir, toolsDir as defaultToolsDir } from './path.ts';
 import { currentPlatform, methodSupports, platformKey, resolveRecipePlatform } from './platform.ts';
 import { defaultRecipes, type RecipeSet } from './recipes.ts';
@@ -22,6 +23,11 @@ export interface PlanOptions {
   hasCommand?: (command: string) => boolean;
   /** Append a `<binary> --version` check after install/update (default true). */
   verify?: boolean;
+  /**
+   * Real path of the existing (adopted) install being updated or uninstalled. Steps then use the
+   * Homebrew formula / cask and npm prefix the binary actually came from (`brewFormula`, …).
+   */
+  installedPath?: string;
 }
 
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
@@ -93,6 +99,7 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
     libc: platform.libc ?? '',
     platform: plat.key,
     brewBin: brewBinFor(platform.os, platform.arch),
+    ...(opts.installedPath && action !== 'install' ? installFacts(opts.installedPath) : {}),
     ...(plat.spec.vars ?? {}),
   };
 

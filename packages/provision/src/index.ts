@@ -17,6 +17,19 @@ export {
 } from './path.ts';
 export { evaluateAuthCommand, guessMethod, probe, probeAll, probeTool, type ProbeOptions, type ToolProbe } from './probe.ts';
 export { clearLatestVersionCache, compareVersions, latestVersion, type FetchFn, type LatestOptions } from './latest.ts';
+export { assessSupport, parseRange, satisfies, type Comparator, type Range, type RangeOp, type SupportVerdict } from './versions.ts';
+export { execTargets, readShellScript, resolveExecutable, type ResolvedExecutable, type ResolveOptions } from './shim.ts';
+export {
+  assessInstall,
+  installFacts,
+  methodBinDir,
+  methodForPaths,
+  preferredMethod,
+  watchPaths,
+  type AssessOptions,
+  type InstallAssessment,
+  type InstallFacts,
+} from './install.ts';
 export { planInstall, type PlanOptions } from './plan.ts';
 export { runPlan, type RunOptions } from './run.ts';
 export {

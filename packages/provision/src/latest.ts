@@ -2,6 +2,9 @@ import type { Logger } from '@bizzi/protocol';
 import { currentPlatform, platformKey, resolveRecipePlatform } from './platform.ts';
 import { defaultRecipes, type RecipeSet } from './recipes.ts';
 import { brewBinFor, render } from './template.ts';
+import { compareVersions } from './versions.ts';
+
+export { compareVersions };
 import type { LatestSource, Platform, Recipe } from './types.ts';
 
 export type FetchFn = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{
@@ -153,18 +156,3 @@ export function dig(value: unknown, path: string): unknown {
   return cur;
 }
 
-/** Numeric semver-ish comparison; prerelease sorts before release. */
-export function compareVersions(a: string, b: string): number {
-  const [ma = '', pa] = a.replace(/^v/, '').split('-', 2);
-  const [mb = '', pb] = b.replace(/^v/, '').split('-', 2);
-  const na = ma.split('.').map((n) => Number.parseInt(n, 10) || 0);
-  const nb = mb.split('.').map((n) => Number.parseInt(n, 10) || 0);
-  for (let i = 0; i < Math.max(na.length, nb.length); i++) {
-    const d = (na[i] ?? 0) - (nb[i] ?? 0);
-    if (d !== 0) return Math.sign(d);
-  }
-  if (pa === pb) return 0;
-  if (pa === undefined) return 1;
-  if (pb === undefined) return -1;
-  return pa < pb ? -1 : 1;
-}

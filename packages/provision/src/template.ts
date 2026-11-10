@@ -14,6 +14,14 @@ export const ENGINE_VARS = [
   'platform',
   /** Homebrew's bin dir: /opt/homebrew/bin (Apple silicon), /usr/local/bin (Intel), linuxbrew on Linux. */
   'brewBin',
+  /**
+   * Facts about an adopted install, derived from the binary's real path (install.ts); only set when
+   * planning an update/uninstall of an existing install, so steps give them a default:
+   * the Homebrew formula (`opencode`, or `tap/name` for tapped ones), the cask, and the npm prefix.
+   */
+  'brewFormula',
+  'brewCask',
+  'npmPrefix',
 ] as const;
 
 export function brewBinFor(os: string, arch: string): string {

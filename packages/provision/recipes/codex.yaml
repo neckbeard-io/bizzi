@@ -47,6 +47,19 @@ latest:
     package: "@openai/codex"
     verified: true
 
+# Ranges: src/generated in the adapter comes from `codex app-server generate-ts` of codex-cli 0.167.0;
+# no other version has been run against it.
+support:
+  versions: ">=0.167.0"
+  tested: ">=0.167.0 <0.168.0"
+  unsupported:
+    reason: Codex before 0.167 is not supported; the adapter speaks the app-server protocol of codex-cli 0.167
+    remedies:
+      - kind: upgrade
+        title: Update Codex
+        method: script
+        command: curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
 methods:
   - id: script
     kind: script
@@ -55,6 +68,7 @@ methods:
     targetDir: "~/.local/bin"
     pinnable: true
     pathHints: [/.codex/packages/standalone/]
+    watch: ["~/.codex/packages/standalone"]
     verified: true
     sources:
       - https://github.com/openai/codex#installing-and-running-codex-cli
@@ -96,10 +110,10 @@ methods:
         env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
     update:
       - description: Upgrade the codex cask
-        argv: [brew, upgrade, --cask, codex]
+        argv: [brew, upgrade, --cask, "{{brewCask|codex}}"]
     uninstall:
       - description: Uninstall the codex cask
-        argv: [brew, uninstall, --cask, codex]
+        argv: [brew, uninstall, --cask, "{{brewCask|codex}}"]
 
   - id: npm
     kind: npm
@@ -118,7 +132,7 @@ methods:
     uninstall:
       - description: Uninstall @openai/codex
         argv: [npm, uninstall, -g, "@openai/codex"]
-        env: { NPM_CONFIG_PREFIX: "~/.local" }
+        env: { NPM_CONFIG_PREFIX: "{{npmPrefix|~/.local}}" }
 
   - id: binary
     kind: binary

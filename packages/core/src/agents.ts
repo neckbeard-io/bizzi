@@ -9,9 +9,15 @@ import type {
   Logger,
   SessionMode,
 } from '@bizzi/protocol';
-import { NO_CAPABILITIES } from '@bizzi/protocol';
+import { BizziError, NO_CAPABILITIES } from '@bizzi/protocol';
 
 export const PROBE_CACHE_MS = 60_000;
+
+/**
+ * Adds facts to a probe on every `agents.list` (e.g. @bizzi/services: install method, supported
+ * versions, update/restart policies). Must be cheap and synchronous; a throwing decorator is skipped.
+ */
+export type ListingDecorator = (listing: AgentListing) => AgentListing;
 
 export class AdapterRegistry {
   readonly adapters: readonly AgentAdapter[];
@@ -19,6 +25,7 @@ export class AdapterRegistry {
   readonly #now: () => number;
   #cache?: { at: number; agents: AgentListing[] };
   #inflight?: Promise<AgentListing[]>;
+  readonly #decorators = new Set<ListingDecorator>();
 
   constructor(adapters: readonly AgentAdapter[], logger: Logger, now: () => number = Date.now) {
     this.adapters = adapters;
@@ -42,7 +49,51 @@ export class AdapterRegistry {
     return [...new Set(this.adapters.map((a) => a.agent))];
   }
 
+  /** Register a decorator; returns a function that removes it. */
+  addDecorator(fn: ListingDecorator): () => void {
+    this.#decorators.add(fn);
+    return () => this.#decorators.delete(fn);
+  }
+
+  /** The last probe of an agent (decorated), without probing. Undefined before the first probe. */
+  lastKnown(agent: AgentKind): AgentListing | undefined {
+    const l = this.#cache?.agents.find((a) => a.agent === agent);
+    return l && this.#decorate(l);
+  }
+
+  /**
+   * Refuse structured sessions on an install the last probe found `unsupported` (spec §7). Never
+   * probes; without a probe yet, nothing is refused.
+   */
+  assertStartable(agent: AgentKind, mode: SessionMode): void {
+    if (mode !== 'structured') return;
+    const l = this.lastKnown(agent);
+    if (l?.support !== 'unsupported') return;
+    const why = l.supportReason ?? `this ${agent} version${l.version ? ` (${l.version})` : ''} is not supported`;
+    throw new BizziError('unsupported', `${why}. Start a terminal-mode session instead, or fix the install first.`, {
+      agent,
+      version: l.version,
+      remedies: l.remedies ?? [],
+    });
+  }
+
   async list(refresh = false): Promise<AgentListing[]> {
+    return (await this.#list(refresh)).map((l) => this.#decorate(l));
+  }
+
+  #decorate(listing: AgentListing): AgentListing {
+    let out = listing;
+    for (const fn of this.#decorators) {
+      try {
+        out = fn({ ...out });
+      } catch (err) {
+        this.#logger.log('warn', 'agent listing decorator threw', { agent: listing.agent, err });
+      }
+    }
+    return out;
+  }
+
+  async #list(refresh: boolean): Promise<AgentListing[]> {
     if (!refresh && this.#cache && this.#now() - this.#cache.at < PROBE_CACHE_MS) return this.#cache.agents;
     if (!refresh && this.#inflight) return this.#inflight;
     const p = this.#probeAll().then(
