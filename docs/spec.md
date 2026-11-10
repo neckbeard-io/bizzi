@@ -168,7 +168,7 @@ Two protocols (client↔hub/node, node↔hub), one shared schema package, JSON e
 |---|---|
 | Machines | `machines.list`, `machine.get`, `machine.pair`, `machine.rename`, `machine.tags` |
 | Provisioning | `agents.list { machineId }`, `agent.install`, `agent.update`, `agent.uninstall`, `agent.login` (opens a login PTY, §7), `agent.logout`, `agent.probe` |
-| Workspaces | `workspaces.list { machineId }`, `workspace.create` (clone / new dir / adopt existing path), `workspace.linkProject`, `fs.list/read/write`, `git.status/diff/commit/push`, `worktree.*` |
+| Workspaces | `workspaces.list { machineId }`, `workspace.create` (clone / new dir / adopt existing path), `workspace.linkProject`, `fs.list/read/write`, `git.status/diff/commit/push`, `worktree.*`; workspace picker: `fs.browse { machineId, path?, showHidden? }` (directories only), `fs.complete { machineId, prefix }` (shell-like directory completion, `~` expanded), `fs.suggest { machineId }` (home, source roots, recent parents, repos not yet added) |
 | Sessions | `session.create { workspaceId, agent, mode }`, `send`, `steer`, `interrupt`, `stop`, `fork`, `resume`, `set` (model/effort/mode) |
 | Approvals | `approval.respond { approvalId, decision: allow\|allow_always\|deny, message?, editedInput? }` |
 | Terminal | `term.open`, `input`, `resize`, `close` |
@@ -298,6 +298,7 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 - **Hub:** behind Caddy/SWAG, authenticates every request itself (the proxy is defense in depth). Pluggable auth: **pairing-first** for M1 (a one-time setup code from the hub's first start pairs the first device; later devices are approved from a paired one); OIDC / proxy-header providers later, with passkeys handled by the IdP.
 - **Pairing:** machines and devices pair by QR / one-time code approved by a logged-in user and get a per-device keypair; access tokens are short-lived and minted by signing a challenge. Revocable per device. Machine/device endpoints bypass interactive forward-auth at the proxy (they can't follow an SSO redirect).
 - **Local mode:** the in-process / local-socket path is limited to the OS user who owns the install (socket file permissions).
+- **Workspace picker:** `fs.browse` / `fs.complete` / `fs.suggest` are not confined to a workspace: they run as the node's OS user and can list any directory that user can, which is the same trust a paired device already has through a terminal session. They return directory names, symlink-to-directory entries and a `.git` presence bit only; they never read file contents or write, and each call is bounded (entry caps, a time budget for suggestions). `fs.list` / `fs.read` stay confined to their workspace.
 - **Credentials:** ADE logins and API keys stay on their machine (OS keychain / secret store). The hub never sees them.
 - **Approvals** are attributed to the deciding device and audit-logged; remote-stricter policy is available (e.g. no `bypassPermissions` from the phone).
 - **Agent ToS:** drive each vendor's official CLI under your own login on your own machine; re-check Anthropic and Google terms before a wider release. Remote Control itself needs a claude.ai subscription; bizzi doesn't use Remote Control, it drives the CLI locally.

@@ -50,6 +50,7 @@ import {
 } from './fixtures.ts';
 import { FANOUT_DIFFS, FANOUT_GIT, FANOUT_SESSIONS, FANOUT_WORKSPACES, fanoutHistory } from './fanout.ts';
 import type { MockHost, MockModule } from './host.ts';
+import { MockFs } from './fs.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
 import { MockThemes } from './themes.ts';
@@ -96,6 +97,7 @@ export class MockCore implements MockHost {
   private readonly modules: MockModule[];
   private readonly provision: MockProvision;
   private readonly usageModule: MockUsage;
+  private readonly fs: MockFs;
   /** git.status per workspace (mutable: worktrees add entries). */
   private readonly git = new Map<string, { branch: string; ahead: number; behind: number; files: { path: string; status: string }[] }>();
   private autoplayed = false;
@@ -122,7 +124,8 @@ export class MockCore implements MockHost {
     for (const x of this.sessionMap.values()) x.seenThrough = UNSEEN_SESSIONS.has(x.id) ? Math.max(0, x.lastSeq - 1) : x.lastSeq;
     this.provision = new MockProvision(this);
     this.usageModule = new MockUsage(this, { live: this.autoplay && this.speed > 0 });
-    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule];
+    this.fs = new MockFs(this);
+    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule, this.fs];
   }
 
   /** Stop background timers (tests). */
@@ -466,7 +469,12 @@ export class MockCore implements MockHost {
         const path = String(p.path ?? '').trim();
         if (!path.startsWith('/')) throw new BizziError('bad_request', 'path must be absolute');
         const name = (typeof p.name === 'string' && p.name) || path.split('/').filter(Boolean).pop() || path;
-        const w: WorkspaceInfo = { id: id('w'), machineId: m.id, name, path, kind: p.create ? 'dir' : 'git', createdAt: new Date().toISOString() };
+        const known = this.fs.isRepo(m.id, path);
+        if (known === undefined && !p.create) throw new BizziError('not_found', `directory ${path} does not exist`);
+        const existing = this.workspaces().find((w) => w.machineId === m.id && w.path === path);
+        if (existing) return { workspace: existing };
+        const w: WorkspaceInfo = { id: id('w'), machineId: m.id, name, path, kind: known ? 'git' : 'dir', createdAt: new Date().toISOString() };
+        if (known === undefined) this.fs.mkdir(m.id, path);
         this.workspaceMap.set(w.id, w);
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.created', data: { workspace: w } });
         return { workspace: w };

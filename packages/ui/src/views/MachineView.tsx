@@ -19,6 +19,7 @@ import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 import { JobProgress } from './provision/JobProgress.tsx';
 import { PlanModal } from './provision/PlanModal.tsx';
 import { SecretsPanel } from './provision/SecretsPanel.tsx';
+import { WorkspacePicker } from './workspaces/WorkspacePicker.tsx';
 
 /** One machine: what it is, which agents it has (install / update / log in), and its API keys. */
 export function MachineView(props: { machineId?: string }): ReactNode {
@@ -35,6 +36,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
   const [plan, setPlan] = useState<{ agent: AgentKind; action: JobAction; method?: string } | null>(null);
   const [secretFor, setSecretFor] = useState<AgentKind | null>(null);
   const clearSecretFor = useCallback(() => setSecretFor(null), []);
+  const [addingWorkspace, setAddingWorkspace] = useState(false);
 
   // Opening #/m/<id> directly makes that machine the selected one.
   useEffect(() => {
@@ -60,9 +62,14 @@ export function MachineView(props: { machineId?: string }): ReactNode {
           subtitle={machine ? `${machine.hostname} · bizzi ${machine.bizziVersion}${serverVersion && !hub ? ` · server ${serverVersion}` : ''}` : undefined}
           back={() => navigate({ name: 'machines' })}
           actions={
-            <Button size="sm" variant="ghost" icon="refresh" busy={refresh.busy} disabled={!online} onClick={() => void refresh.run()}>
-              Re-probe
-            </Button>
+            <>
+              <Button size="sm" variant="ghost" icon="plus" disabled={!online} onClick={() => setAddingWorkspace(true)}>
+                Add workspace
+              </Button>
+              <Button size="sm" variant="ghost" icon="refresh" busy={refresh.busy} disabled={!online} onClick={() => void refresh.run()}>
+                Re-probe
+              </Button>
+            </>
           }
         />
       }
@@ -108,6 +115,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
           .
         </p>
       ) : null}
+      {addingWorkspace ? <WorkspacePicker machineId={machineId} onClose={() => setAddingWorkspace(false)} /> : null}
       {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} {...(plan.method ? { method: plan.method } : {})} onClose={() => setPlan(null)} /> : null}
     </Page>
   );
