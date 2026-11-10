@@ -3,8 +3,17 @@ import type { AgentAdapter, Logger } from '@bizzi/protocol';
 /** Adapter packages probed at startup, in priority order (first match wins per agent + mode). */
 export const ADAPTER_PACKAGES = ['@bizzi/adapter-claude', '@bizzi/adapter-codex', '@bizzi/adapter-opencode', '@bizzi/pty'];
 
+/**
+ * Passed to every adapter package's `createAdapters()`. Packages take what they know and ignore the
+ * rest (e.g. @bizzi/pty reads `<dataDir>/detectors.json` for its detector override).
+ */
+export interface AdapterLoadOptions {
+  /** The node's data dir (`--data-dir`). */
+  dataDir?: string;
+}
+
 interface AdapterModule {
-  createAdapters?: () => AgentAdapter[] | Promise<AgentAdapter[]>;
+  createAdapters?: (options?: AdapterLoadOptions) => AgentAdapter[] | Promise<AgentAdapter[]>;
 }
 
 export function isMissing(err: unknown, name: string): boolean {
@@ -13,7 +22,11 @@ export function isMissing(err: unknown, name: string): boolean {
 }
 
 /** Import each package and collect its adapters. Missing packages are skipped; broken ones are logged. */
-export async function loadAdapters(logger: Logger, names: readonly string[] = ADAPTER_PACKAGES): Promise<AgentAdapter[]> {
+export async function loadAdapters(
+  logger: Logger,
+  names: readonly string[] = ADAPTER_PACKAGES,
+  options: AdapterLoadOptions = {},
+): Promise<AgentAdapter[]> {
   const out: AgentAdapter[] = [];
   for (const name of names) {
     let mod: AdapterModule;
@@ -29,7 +42,7 @@ export async function loadAdapters(logger: Logger, names: readonly string[] = AD
       continue;
     }
     try {
-      const adapters = await mod.createAdapters();
+      const adapters = await mod.createAdapters({ ...options });
       for (const a of adapters) out.push(a);
       logger.log('info', 'loaded adapters', { package: name, agents: adapters.map((a) => a.agent) });
     } catch (err) {

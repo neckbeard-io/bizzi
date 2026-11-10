@@ -96,7 +96,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
     adapters.push(...testing.createAdapters());
     logger.log('info', 'fake adapters enabled');
   }
-  adapters.push(...(await loadAdapters(logger)));
+  adapters.push(...(await loadAdapters(logger, undefined, { dataDir })));
 
   // One knowledge store, shared by session-start injection and the knowledge.* methods.
   const knowledge = values['no-knowledge'] ? undefined : await createKnowledgeRuntime(dataDir, logger);
