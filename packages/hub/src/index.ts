@@ -23,5 +23,5 @@ export {
 } from './crypto.ts';
 export { Auth, FailureLimiter, RateLimitedError, type AuthOptions } from './auth.ts';
 export { HubStore, publicDevice, type DeviceRow } from './store.ts';
-export { NtfyPusher, type PushOptions } from './push.ts';
+export { NtfyPusher, USAGE_PUSH_THRESHOLDS, type PushOptions, type PushStateStore } from './push.ts';
 export { Relay, CLOSE_REVOKED } from './relay.ts';

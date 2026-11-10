@@ -2,7 +2,9 @@
 // of replicated node events, and client request handling (hub-only methods + forwarding).
 
 import os from 'node:os';
+import { mergeAccountUsage, normalizeAccountUsage, sortAccountUsage, usageKey } from '@bizzi/core';
 import {
+  type AccountUsage,
   BizziError,
   GLOBAL_CHANNEL,
   NO_CAPABILITIES,
@@ -17,6 +19,7 @@ import {
   type Logger,
   type MachineInfo,
   type SessionInfo,
+  type WidgetValue,
   type WorkspaceInfo,
 } from '@bizzi/protocol';
 import type { Auth } from './auth.ts';
@@ -172,7 +175,7 @@ export class Relay {
     const machineId = link.machineId;
     const cursor = this.#nodeCursors.get(machineId) ?? this.store.nodeCursor(machineId);
     if (ev.seq <= cursor) return;
-    let body: GlobalEventBody = { type: ev.type, data: ev.data } as GlobalEventBody;
+    let body: GlobalEventBody | undefined = { type: ev.type, data: ev.data } as GlobalEventBody;
     let afterCommit: (() => void) | undefined;
 
     switch (ev.type) {
@@ -209,13 +212,51 @@ export class Relay {
         link.forget(ch);
         break;
       }
+      case 'account.usage': {
+        // Store this machine's snapshot; relay the login merged across machines (usage.md §3.1).
+        const u = normalizeAccountUsage(ev.data?.usage);
+        if (!u) {
+          body = undefined;
+          break;
+        }
+        u.machines = [machineId];
+        this.store.putUsage(machineId, u);
+        const merged = mergeAccountUsage(this.store.listUsage({ agent: u.agent, accountId: u.accountId }));
+        body = merged ? { type: 'account.usage', data: { usage: merged } } : undefined;
+        break;
+      }
+      case 'widget.updated': {
+        const w = ev.data?.widget;
+        if (!isWidgetValue(w)) {
+          body = undefined;
+          break;
+        }
+        const widget: WidgetValue = { ...w, machineId };
+        this.store.putWidget(widget);
+        body = { type: 'widget.updated', data: { widget } };
+        break;
+      }
+      case 'widget.removed': {
+        if (typeof ev.data?.widgetId !== 'string') {
+          body = undefined;
+          break;
+        }
+        this.store.deleteWidget(machineId, ev.data.widgetId);
+        body = { type: 'widget.removed', data: { machineId, widgetId: ev.data.widgetId } };
+        break;
+      }
     }
 
-    this.bus.appendGlobal(body, {
-      ts: ev.ts,
-      machineId,
-      inTx: () => this.store.setNodeCursor(machineId, ev.seq),
-    });
+    if (body) {
+      this.bus.appendGlobal(body, {
+        ts: ev.ts,
+        machineId,
+        inTx: () => this.store.setNodeCursor(machineId, ev.seq),
+      });
+    } else {
+      this.logger.log('debug', 'dropping invalid node global event', { machineId, type: ev.type, seq: ev.seq });
+      this.store.setNodeCursor(machineId, ev.seq);
+    }
     this.#nodeCursors.set(machineId, ev.seq);
     afterCommit?.();
   }
@@ -312,6 +353,25 @@ export class Relay {
         }
         return { sessions: this.store.listSessions(filter).map((s) => this.#withLastSeq(s)) };
       }
+      case 'usage.list':
+        return { accounts: this.listUsage() };
+      case 'widgets.list': {
+        const machineId = this.#optMachine(p);
+        if (!machineId) return { widgets: this.store.listWidgets() };
+        const link = this.#links.get(machineId);
+        if (!link) return { widgets: this.store.listWidgets(machineId) };
+        const res = (await link.request(method, p)) as { widgets?: WidgetValue[] };
+        if (Array.isArray(res?.widgets)) this.store.replaceWidgets(machineId, res.widgets.filter(isWidgetValue));
+        return res;
+      }
+      // Custom themes live on the hub so every device sees them (theming.md §5); never relayed.
+      case 'themes.list':
+        return { themes: this.store.themes.list() };
+      case 'theme.save':
+        return { theme: this.store.themes.save(p) };
+      case 'theme.delete':
+        this.store.themes.delete(p);
+        return {};
       case 'session.get': {
         if (typeof p.sessionId !== 'string') throw new BizziError('bad_request', 'sessionId is required');
         const cached = this.store.getSession(p.sessionId);
@@ -330,6 +390,18 @@ export class Relay {
     const link = this.#links.get(machineId);
     if (!link) throw new BizziError('machine_offline', `machine ${machineId} is offline`, { machineId, lastSeenAt: this.store.getMachine(machineId)?.lastSeenAt });
     return link.request(method, p);
+  }
+
+  /** Every login merged across machines; offline machines' last snapshots still count (with their age). */
+  listUsage(): AccountUsage[] {
+    const groups = new Map<string, AccountUsage[]>();
+    for (const u of this.store.listUsage()) {
+      const key = usageKey(u);
+      const g = groups.get(key);
+      if (g) g.push(u);
+      else groups.set(key, [u]);
+    }
+    return sortAccountUsage([...groups.values()].map((g) => mergeAccountUsage(g)).filter((u): u is AccountUsage => u !== undefined));
   }
 
   /** The machine that owns a request: by sessionId, workspaceId, then machineId. */
@@ -379,4 +451,12 @@ export class Relay {
     for (const c of [...this.#clients]) c.close(1001, 'hub shutting down');
     for (const l of [...this.#links.values()]) l.close(1001, 'hub shutting down');
   }
+}
+
+const WIDGET_KINDS = new Set(['meter', 'text', 'status']);
+
+function isWidgetValue(w: unknown): w is WidgetValue {
+  if (!w || typeof w !== 'object') return false;
+  const v = w as Partial<WidgetValue>;
+  return typeof v.id === 'string' && v.id.length > 0 && typeof v.label === 'string' && WIDGET_KINDS.has(v.kind as string) && Array.isArray(v.placement);
 }

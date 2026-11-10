@@ -3,6 +3,7 @@
 // NodeExtension API is in this tree (it is being added in parallel).
 
 import assert from 'node:assert/strict';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { createNode, type NodeOptions } from '@bizzi/core';
@@ -25,6 +26,7 @@ describe('services inside createNode({ extensions })', { skip: supported ? false
     const services = await createServices({
       dataDir: join(dir, 'data'),
       secretBackend: new MemorySecretBackend(),
+      widgets: { dir: join(dir, 'widgets'), watch: false },
       recipes,
       knowledge: () => store,
       login: { env: { PATH: '/usr/bin:/bin', HOME: home }, probeOptions: { home, npmPrefix: null }, workspacePath: dir },
@@ -44,6 +46,8 @@ describe('services inside createNode({ extensions })', { skip: supported ? false
 
     await node.call('agent.setSecret', { agent: 'claude', name: 'ANTHROPIC_API_KEY', value: 'sk-int' });
     assert.deepEqual((await node.call('agent.secrets', {})).secrets.map((s) => s.name), ['ANTHROPIC_API_KEY']);
+    assert.deepEqual((await node.call('widgets.list', {})).widgets, []);
+    assert.ok(existsSync(join(dir, 'widgets', 'AGENTS.md')), 'widgets dir initialised');
     const { workspace } = await node.call('workspace.create', { path: tempDir() });
     await node.call('session.create', { workspaceId: workspace.id, agent: 'claude', mode: 'structured' });
     await waitFor(() => structured.starts.length === 1, 'structured start');

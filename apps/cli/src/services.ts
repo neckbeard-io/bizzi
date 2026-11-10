@@ -1,5 +1,5 @@
 // Optional node extensions from @bizzi/services: provisioning (agent.plan/install), secrets,
-// agent logins and the knowledge.* methods. Loaded like the adapter packages: skipped if missing.
+// agent logins, the knowledge.* methods and widgets. Loaded like the adapter packages: skipped if missing.
 
 import type { NodeOptions } from '@bizzi/core';
 import type { Logger } from '@bizzi/protocol';
@@ -16,6 +16,7 @@ interface ServicesModule {
     dataDir: string;
     logger?: Logger;
     knowledge?: ((machineId: string) => unknown) | false;
+    widgets?: { dir?: string } | false;
   }) => Promise<{ extensions: unknown[] }>;
 }
 
@@ -24,6 +25,8 @@ export interface LoadServicesOptions {
   logger: Logger;
   /** The node's shared knowledge store; without it the knowledge methods stay unimplemented. */
   knowledge?: KnowledgeRuntime;
+  /** Run widgets (usage.md §4); `{}` uses the services' default dir ($BIZZI_WIDGETS_DIR, ~/.config/bizzi/widgets). Default off. */
+  widgets?: { dir?: string } | false;
 }
 
 export async function loadServices(opts: LoadServicesOptions, name = SERVICES_PACKAGE): Promise<{ extensions: NodeExtensions } | undefined> {
@@ -46,6 +49,7 @@ export async function loadServices(opts: LoadServicesOptions, name = SERVICES_PA
       dataDir: opts.dataDir,
       logger,
       knowledge: knowledge ? (machineId) => knowledge.store(machineId) : false,
+      widgets: opts.widgets ?? false,
     });
     return { extensions: services.extensions as NodeExtensions };
   } catch (err) {
