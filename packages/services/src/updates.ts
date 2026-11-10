@@ -2,7 +2,9 @@
 // policies, stores policies (`agent.policy.set`), watches installs for version changes, and
 // optionally checks for and runs updates for agents whose update policy is `auto`.
 //
-// Restarting stale sessions is a later phase; this only tracks what is installed.
+// Restarting stale sessions is the core's job (@bizzi/core `Restarts`): every re-probe here refreshes
+// the registry, which re-checks running sessions against the installed version, and the restart
+// policy this extension puts on agents.list decides whether they restart on their own (`when-idle`).
 
 import { ulid, type AgentKind, type AgentListing, type Logger } from '@bizzi/protocol';
 import { compareVersions, latestVersion as provisionLatest } from '@bizzi/provision';

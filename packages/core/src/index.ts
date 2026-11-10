@@ -18,8 +18,11 @@ export {
   type AgentEnvProvider,
   type HelperOptions,
   type PrepareStart,
+  type AgentProcessInfo,
   type PrepareStartResult,
+  type RestartOutcome,
 } from './sessions.ts';
+export { Restarts, SHARED_SERVER_AGENTS, installKey, precheckProblem, staleReason, type RestartsDeps } from './restart.ts';
 export { Workspaces, sanitizeBranch } from './workspaces.ts';
 export {
   DEFAULT_PERMISSION_MODE,

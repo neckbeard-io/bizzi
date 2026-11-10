@@ -26,6 +26,7 @@ export class AdapterRegistry {
   #cache?: { at: number; agents: AgentListing[] };
   #inflight?: Promise<AgentListing[]>;
   readonly #decorators = new Set<ListingDecorator>();
+  readonly #probed = new Set<(agents: readonly AgentListing[]) => void>();
 
   constructor(adapters: readonly AgentAdapter[], logger: Logger, now: () => number = Date.now) {
     this.adapters = adapters;
@@ -53,6 +54,24 @@ export class AdapterRegistry {
   addDecorator(fn: ListingDecorator): () => void {
     this.#decorators.add(fn);
     return () => this.#decorators.delete(fn);
+  }
+
+  /**
+   * Called after every completed probe of all agents (cache refresh), with the undecorated listings.
+   * Returns a function that removes the listener. Listener errors are logged and ignored.
+   */
+  onProbed(fn: (agents: readonly AgentListing[]) => void): () => void {
+    this.#probed.add(fn);
+    return () => this.#probed.delete(fn);
+  }
+
+  /**
+   * The last probe of an agent without decorators (and without probing). For code that runs inside
+   * a decorator, where `lastKnown` would recurse.
+   */
+  lastProbe(agent: AgentKind): AgentListing | undefined {
+    const l = this.#cache?.agents.find((a) => a.agent === agent);
+    return l && { ...l };
   }
 
   /** The last probe of an agent (decorated), without probing. Undefined before the first probe. */
@@ -100,6 +119,13 @@ export class AdapterRegistry {
       (agents) => {
         this.#cache = { at: this.#now(), agents };
         if (this.#inflight === p) this.#inflight = undefined;
+        for (const fn of this.#probed) {
+          try {
+            fn(agents);
+          } catch (err) {
+            this.#logger.log('warn', 'probe listener threw', { err });
+          }
+        }
         return agents;
       },
       (err: unknown) => {

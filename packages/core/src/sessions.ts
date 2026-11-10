@@ -1,6 +1,7 @@
 // Session manager: adapter lifecycle, turn bookkeeping, status derivation, approvals, questions,
-// fork/delete, terminal snapshots and restart recovery.
+// fork/delete, terminal snapshots, restart recovery and agent-process restarts (updates.md §5).
 
+import { existsSync } from 'node:fs';
 import {
   AGENT_KINDS,
   BizziError,
@@ -12,6 +13,7 @@ import {
   type AgentAdapter,
   type AgentCapabilities,
   type AgentKind,
+  type AgentListing,
   type ApprovalDecision,
   type ApprovalDecisionKind,
   type ApprovalRequest,
@@ -21,6 +23,7 @@ import {
   type MethodParams,
   type QuestionAnswers,
   type SessionEventBody,
+  type SessionBudget,
   type SessionEventMap,
   type SessionInfo,
   type SessionMode,
@@ -32,6 +35,8 @@ import {
 import type { AdapterRegistry } from './agents.ts';
 import { addTurn, budgetReached, parseBudget, sumSpent, usd, zeroSpent, type Spent } from './budget.ts';
 import type { EventBus } from './bus.ts';
+import { clampPermission } from './orchestration.ts';
+import { installKey, precheckProblem } from './restart.ts';
 import type { SessionState, Store } from './store.ts';
 import type { Workspaces } from './workspaces.ts';
 
@@ -102,6 +107,30 @@ export interface SessionsDeps {
   treeBudgetUsd?: (workspaceId: string) => number | undefined;
   /** Billing class of an agent's logged-in account, when the probe knows it (spec §12.3). */
   probeBilling?: (agent: AgentKind) => Promise<BillingClass | undefined>;
+  /** How long a send (or session.set) arriving during an agent restart waits for it (default 60 s). */
+  restartWaitMs?: number;
+}
+
+/** What `restartAgent` did (updates.md §5). Failures are also recorded on the session channel. */
+export interface RestartOutcome {
+  ok: boolean;
+  /** The precheck refused the installed binary; the old process keeps running. */
+  precheck?: boolean;
+  /** The session was stopped, deleted or the node shut down during the restart. */
+  aborted?: boolean;
+  fromVersion?: string;
+  toVersion?: string;
+  error?: string;
+}
+
+/** The agent process behind a session, as far as the core knows (updates.md §2). */
+export interface AgentProcessInfo {
+  /** An adapter session is up (or being started). */
+  running: boolean;
+  version?: string;
+  path?: string;
+  /** installKey() of the install the last restart failed for (no automatic retry on it). */
+  restartFailedFor?: string;
 }
 
 /** Cap for `term.snapshot` output. */
@@ -110,6 +139,7 @@ export const TERMINAL_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
 const TERMINAL_STATUSES: readonly SessionStatus[] = ['ended', 'failed'];
 const DECISIONS: readonly ApprovalDecisionKind[] = ['allow', 'allow_always', 'deny'];
 const STOP_TIMEOUT_MS = 10_000;
+const RESTART_WAIT_MS = 60_000;
 
 /** How an adapter session is started: fresh, resumed, or forked from another agent session. */
 interface ResumeOpts {
@@ -144,6 +174,10 @@ interface Runtime {
   /** Set once session.delete starts: nothing more is appended or persisted for this session. */
   deleted: boolean;
   deleting?: Promise<void>;
+  /** Set while the agent process is being replaced (updates.md §5); sends wait for it. */
+  restarting?: Promise<void>;
+  /** installKey() of the install the last restart failed on; automatic restarts skip it. */
+  restartFailedFor?: string;
 }
 
 function newRuntime(info: SessionInfo, state: SessionState, adapter: AgentAdapter | undefined): Runtime {
@@ -201,6 +235,12 @@ export class Sessions {
       for (const questionId of row.state.pendingQuestions ?? []) rt.pendingQuestions.set(questionId, { questionId, text: '' });
       rt.info.lastSeq = this.#d.bus.lastSeq(sessionChannel(rt.info.id));
       this.#byId.set(rt.info.id, rt);
+      // No agent process survives a node restart; the next start records the version it runs.
+      if (rt.info.agentVersion !== undefined || rt.state.agentPath !== undefined) {
+        delete rt.info.agentVersion;
+        rt.state.agentPath = undefined;
+        this.#persist(rt);
+      }
       if (TERMINAL_STATUSES.includes(rt.info.status)) {
         this.#cancelPending(rt, false);
         continue;
@@ -306,6 +346,56 @@ export class Sessions {
     let n = 0;
     for (const rt of this.#byId.values()) if (rt.state.currentTurnId || rt.reservedTurn) n++;
     return n;
+  }
+
+  // --- agent processes and restarts (updates.md §2–§5) ------------------------------------------------
+
+  /** The running agent process: version and real executable path recorded at spawn. */
+  agentProcess(id: string): AgentProcessInfo {
+    const rt = this.#get(id);
+    const out: AgentProcessInfo = { running: Boolean((rt.handle || rt.starting) && !rt.deleted) };
+    if (rt.info.agentVersion) out.version = rt.info.agentVersion;
+    if (rt.state.agentPath) out.path = rt.state.agentPath;
+    if (rt.restartFailedFor) out.restartFailedFor = rt.restartFailedFor;
+    return out;
+  }
+
+  /** Why the agent process can't be restarted right now (updates.md §4), or undefined at a safe point. */
+  unsafeReason(id: string): string | undefined {
+    return this.#unsafe(this.#get(id));
+  }
+
+  /** Why the session can never be restarted without losing its conversation, or undefined. */
+  restartBlocker(id: string): string | undefined {
+    return this.#restartBlocker(this.#get(id));
+  }
+
+  isRestarting(id: string): boolean {
+    return Boolean(this.#byId.get(id)?.restarting);
+  }
+
+  /**
+   * Replace the agent process with the installed version and resume the same conversation
+   * (updates.md §5). The bizzi session, its event log and seq carry on. Throws BizziError only when
+   * the session can't be restarted now (not resumable, not at a safe point); a failed precheck,
+   * spawn or resume is returned as the outcome and recorded on the session channel.
+   */
+  async restartAgent(id: string, opts: { reason?: string } = {}): Promise<RestartOutcome> {
+    const rt = this.#get(id);
+    const blocker = this.#restartBlocker(rt);
+    if (blocker) throw new BizziError('unsupported', `cannot restart: ${blocker}`);
+    const unsafe = this.#unsafe(rt);
+    if (unsafe) throw new BizziError('conflict', `cannot restart now: ${unsafe}`);
+    let release!: () => void;
+    rt.restarting = new Promise<void>((r) => {
+      release = r;
+    });
+    try {
+      return await this.#restart(rt, opts.reason);
+    } finally {
+      rt.restarting = undefined;
+      release();
+    }
   }
 
   // --- lifecycle --------------------------------------------------------------------------------------
@@ -449,6 +539,12 @@ export class Sessions {
     validateInput(input);
     this.#assertAccepting();
     this.#assertOpen(rt);
+    if (rt.restarting) {
+      // Queued briefly behind the agent restart instead of rejected (updates.md §4).
+      await this.#waitForRestart(rt);
+      this.#assertAccepting();
+      this.#assertOpen(rt);
+    }
     if (rt.state.queued) throw new BizziError('conflict', 'this helper is queued until a helper slot frees up');
     if (rt.state.currentTurnId || rt.reservedTurn) {
       throw new BizziError('conflict', 'a turn is already in progress (use session.steer or session.interrupt)');
@@ -537,17 +633,30 @@ export class Sessions {
     }
   }
 
+  /**
+   * Change model / permission mode / effort (applied to the running agent when it supports it, else
+   * on the next start) and the session's budget. A helper's permission mode can't be loosened beyond
+   * its parent's (spec §12.2). `budget` replaces the session's budget (an empty object clears it);
+   * a session held for budget is released once it's within budget again.
+   */
   async set(p: MethodParams<'session.set'>): Promise<SessionInfo> {
     const rt = this.#get(p.sessionId);
     this.#assertOpen(rt);
+    if (rt.restarting) {
+      await this.#waitForRestart(rt);
+      this.#assertOpen(rt);
+    }
     const opts: { model?: string; permissionMode?: string; effort?: string } = {};
     if (p.model !== undefined) opts.model = p.model;
     if (p.permissionMode !== undefined) opts.permissionMode = p.permissionMode;
     if (p.effort !== undefined) opts.effort = p.effort;
-    if (Object.keys(opts).length === 0) return { ...rt.info };
+    // null = clear; undefined = unchanged.
+    const budget: SessionBudget | null | undefined = p.budget === undefined ? undefined : (parseBudget(p.budget) ?? null);
+    if (Object.keys(opts).length === 0 && budget === undefined) return { ...rt.info };
+    if (opts.permissionMode !== undefined && opts.permissionMode !== rt.info.permissionMode) this.#assertWithinParent(rt, opts.permissionMode);
 
     const caps = this.#caps(rt);
-    if (rt.handle) {
+    if (rt.handle && Object.keys(opts).length > 0) {
       if (!rt.handle.set) throw new BizziError('unsupported', 'this agent cannot change settings mid-session');
       if (opts.model !== undefined && !caps.setModelMidSession) {
         throw new BizziError('unsupported', 'this agent cannot switch models mid-session');
@@ -565,8 +674,35 @@ export class Sessions {
         changed = true;
       }
     }
+    if (budget !== undefined && JSON.stringify(budget ?? undefined) !== JSON.stringify(rt.info.budget)) {
+      if (budget) rt.info.budget = budget;
+      else delete rt.info.budget;
+      changed = true;
+    }
     if (changed) this.#changed(rt, new Date().toISOString());
+    // A raised budget releases this session (and helpers below it) if they were held for budget.
+    if (budget !== undefined) this.recheckBudgets();
     return { ...rt.info };
+  }
+
+  /** A helper's permission mode stays within its parent's (spec §12.2); refuses a looser one. */
+  #assertWithinParent(rt: Runtime, requested: string): void {
+    const parentId = rt.info.spawnedBy;
+    const parent = parentId ? this.#byId.get(parentId) : undefined;
+    if (!parent) return;
+    const clamp = clampPermission({
+      parentAgent: parent.info.agent,
+      parentMode: parent.info.permissionMode,
+      agent: rt.info.agent,
+      requested,
+      available: this.#caps(rt).permissionModes ?? [],
+    });
+    if (clamp.permissionMode === undefined || clamp.permissionMode === requested) return;
+    throw new BizziError(
+      'conflict',
+      `permission mode ${requested} is looser than the parent session's (${parent.info.permissionMode ?? 'default'}); at most ${clamp.permissionMode} is allowed`,
+      { parentMode: parent.info.permissionMode, allowed: clamp.permissionMode },
+    );
   }
 
   async respondApproval(p: MethodParams<'approval.respond'>): Promise<void> {
@@ -770,7 +906,11 @@ export class Sessions {
     return this.#caps(rt).resume && rt.info.agentSessionRef ? { resumeRef: rt.info.agentSessionRef } : {};
   }
 
-  #ensureStarted(rt: Runtime, resume: ResumeOpts): Promise<AdapterSession> {
+  /**
+   * Start the adapter session unless it's running. With `restart`, a start failure is left to the
+   * caller to record, and a changed agentSessionRef isn't adopted (the restart verifies it).
+   */
+  #ensureStarted(rt: Runtime, resume: ResumeOpts, restart = false): Promise<AdapterSession> {
     if (rt.handle) return Promise.resolve(rt.handle);
     if (rt.starting) return rt.starting;
     const adapter = rt.adapter;
@@ -781,7 +921,10 @@ export class Sessions {
     const sessionId = rt.info.id;
     const logger = this.#d.logger.child({ sessionId, agent: rt.info.agent });
 
+    // What is about to be spawned (updates.md §2): the last probe's version and real path.
+    let spawned: AgentListing | undefined;
     const start = async (): Promise<AdapterSession> => {
+      spawned = this.#d.registry.lastKnown(rt.info.agent);
       const ws = this.#d.workspaces.get(rt.info.workspaceId);
       const extra = this.#d.prepareStart ? await this.#d.prepareStart({ ...rt.info }, ws) : {};
       const agentEnv = this.#d.agentEnv ? await this.#d.agentEnv(rt.info.agent) : {};
@@ -808,14 +951,15 @@ export class Sessions {
           throw new BizziError('conflict', 'session was stopped while starting');
         }
         rt.handle = handle;
+        this.#recordAgent(rt, handle, spawned);
         const ref = safeRef(handle);
-        if (ref && ref !== rt.info.agentSessionRef) this.#append(rt, { type: 'session.info', data: { agentSessionRef: ref } });
+        if (ref && ref !== rt.info.agentSessionRef && !restart) this.#append(rt, { type: 'session.info', data: { agentSessionRef: ref } });
         return handle;
       },
       (err: unknown) => {
         if (rt.starting === p) rt.starting = undefined;
         logger.log('warn', 'adapter start failed', { err });
-        if (gen === rt.generation && !this.#closed) {
+        if (gen === rt.generation && !this.#closed && !restart) {
           this.#append(rt, { type: 'error', data: { message: `failed to start ${rt.info.agent}: ${errorMessage(err)}`, fatal: true } });
           this.#append(rt, { type: 'session.status', data: { status: 'failed', reason: errorMessage(err) } });
         }
@@ -824,6 +968,160 @@ export class Sessions {
     );
     rt.starting = p;
     return p;
+  }
+
+  /**
+   * Record the version and real executable path of the process just spawned (updates.md §2). Before
+   * the first probe the registry is asked in the background; the path is kept only if it exists.
+   */
+  #recordAgent(rt: Runtime, handle: AdapterSession, spawned: AgentListing | undefined): void {
+    const apply = (l: AgentListing | undefined) => {
+      if (rt.handle !== handle || rt.deleted || this.#closed || !this.#d.store.isOpen) return;
+      const version = l?.installed ? l.version : undefined;
+      const candidate = l?.installed ? (l.realPath ?? l.path) : undefined;
+      const path = candidate && existsSync(candidate) ? candidate : undefined;
+      if (rt.state.agentPath !== path) {
+        rt.state.agentPath = path;
+        this.#persist(rt);
+      }
+      if (rt.info.agentVersion !== version) {
+        if (version) rt.info.agentVersion = version;
+        else delete rt.info.agentVersion;
+        this.#changed(rt, new Date().toISOString());
+      }
+    };
+    if (spawned) {
+      apply(spawned);
+      return;
+    }
+    this.#d.registry.list().then(
+      (agents) => apply(agents.find((a) => a.agent === rt.info.agent)),
+      (err: unknown) => this.#log.log('debug', 'probe for the agent version failed', { sessionId: rt.info.id, err }),
+    );
+  }
+
+  /** Why the agent process can't be replaced right now (updates.md §4 safe points). */
+  #unsafe(rt: Runtime): string | undefined {
+    if (rt.deleted || rt.stopping) return 'the session is stopping';
+    if (TERMINAL_STATUSES.includes(rt.info.status)) return `the session has ${rt.info.status}`;
+    if (rt.restarting) return 'a restart is already in progress';
+    if (rt.state.queued) return 'the helper is queued';
+    if (rt.starting) return 'the agent is starting';
+    if (!rt.handle) return 'the agent is not running';
+    // Adapters don't report background work (background shells, terminals, subagents) yet. Such
+    // work runs inside a turn today, so "no turn in flight" stands in for "no background work".
+    if (rt.state.currentTurnId || rt.reservedTurn) return 'a turn is in progress';
+    if (rt.pendingApprovals.size > 0) return 'an approval is pending';
+    if (rt.pendingQuestions.size > 0) return 'a question is waiting for an answer';
+    if (rt.info.status !== 'idle' && rt.info.status !== 'waiting_input') return `the session is ${rt.info.status}`;
+    return undefined;
+  }
+
+  #restartBlocker(rt: Runtime): string | undefined {
+    if (!this.#caps(rt).resume) return `${rt.info.agent} ${rt.info.mode} sessions cannot be resumed, so a restart would lose the conversation`;
+    if (!rt.info.agentSessionRef) return 'the session has no agent conversation to resume yet';
+    return undefined;
+  }
+
+  /** Wait (bounded) for an agent restart; a send queued behind a failed restart is refused. */
+  async #waitForRestart(rt: Runtime): Promise<void> {
+    const restarting = rt.restarting;
+    if (!restarting) return;
+    let timer: NodeJS.Timeout | undefined;
+    const timedOut = await Promise.race([
+      restarting.then(() => false),
+      new Promise<boolean>((r) => {
+        timer = setTimeout(() => r(true), this.#d.restartWaitMs ?? RESTART_WAIT_MS);
+      }),
+    ]);
+    clearTimeout(timer);
+    if (timedOut) throw new BizziError('conflict', 'the agent is restarting; try again shortly');
+    if (rt.info.status === 'failed') throw new BizziError('agent_unavailable', 'the agent restart failed; see the session timeline');
+  }
+
+  /** True once the session can't be restarted any more (stopped, deleted, node shut down). */
+  #gone(rt: Runtime): boolean {
+    return rt.deleted || rt.stopping || this.#closed || !this.#d.store.isOpen || rt.info.status === 'ended';
+  }
+
+  /** updates.md §5 steps 1–6. The caller holds `rt.restarting`. */
+  async #restart(rt: Runtime, reason: string | undefined): Promise<RestartOutcome> {
+    const agent = rt.info.agent;
+    const oldRef = rt.info.agentSessionRef!;
+    const fromVersion = rt.info.agentVersion;
+    const versions = (to: string | undefined) => ({ ...(fromVersion ? { fromVersion } : {}), ...(to ? { toVersion: to } : {}) });
+
+    // 1. Precheck the installed binary: it runs (`--version`) and its login still works. A broken
+    //    update must not take the session down, so the old process keeps running.
+    let probe: AgentListing | undefined;
+    try {
+      probe = (await this.#d.registry.list(true)).find((a) => a.agent === agent);
+    } catch (err) {
+      this.#log.log('warn', 'probe before restart failed', { sessionId: rt.info.id, err });
+    }
+    if (this.#gone(rt)) return { ok: false, aborted: true, ...versions(probe?.version), error: 'the session stopped' };
+    const problem = precheckProblem(probe);
+    if (problem) {
+      rt.restartFailedFor = installKey(probe);
+      const error = `not restarting on ${probe?.version ? `${agent} ${probe.version}` : 'the installed version'}: ${problem}`;
+      this.#log.log('warn', 'restart precheck failed', { sessionId: rt.info.id, agent, problem });
+      this.#append(rt, {
+        type: 'error',
+        data: { message: `${error}. The session keeps running${fromVersion ? ` on ${fromVersion}` : ''}.`, code: 'restart_precheck' },
+      });
+      return { ok: false, precheck: true, ...versions(probe?.version), error };
+    }
+    const toVersion = probe!.version;
+
+    // 2. Announce, 3. stop the old process gracefully.
+    this.#append(rt, { type: 'session.restarting', data: { ...versions(toVersion), ...(reason ? { reason } : {}) } });
+    await this.#stopHandle(rt);
+    const aborted = (): RestartOutcome => {
+      const error = 'the session stopped during the restart';
+      if (!rt.deleted && !this.#closed && this.#d.store.isOpen) {
+        this.#append(rt, { type: 'session.restarted', data: { ...versions(toVersion), ok: false, error } });
+      }
+      return { ok: false, aborted: true, ...versions(toVersion), error };
+    };
+    if (this.#gone(rt)) return aborted();
+
+    // 4. Spawn the installed version and resume. The prepareStart chain re-injects MCP servers and
+    //    instructions; model, effort and permission mode come from the session info.
+    let handle: AdapterSession;
+    try {
+      handle = await this.#ensureStarted(rt, { resumeRef: oldRef }, true);
+    } catch (err) {
+      if (this.#gone(rt)) return aborted();
+      // TODO(updates.md §5): fall back to the previous version while it's still on disk. Needs an
+      // adapter hook to choose the executable.
+      return this.#restartFailed(rt, oldRef, versions(toVersion), `could not start ${agent}${toVersion ? ` ${toVersion}` : ''}: ${errorMessage(err)}`);
+    }
+    if (this.#gone(rt)) return aborted();
+
+    // 5. Verify the resume: the agent must continue the same conversation. TODO: deeper checks
+    //    (e.g. the resumed conversation's message count) need an adapter hook.
+    const ref = safeRef(handle) ?? rt.info.agentSessionRef;
+    if (ref !== oldRef) {
+      await this.#stopHandle(rt);
+      return this.#restartFailed(rt, oldRef, versions(toVersion), `the agent resumed a different conversation (${ref ?? 'none'} instead of ${oldRef})`);
+    }
+
+    // 6. Done. Context usage is re-read by the adapter on its next report (usage.md §1).
+    rt.restartFailedFor = undefined;
+    const outcome = versions(rt.info.agentVersion ?? toVersion);
+    this.#append(rt, { type: 'session.restarted', data: { ...outcome, ok: true } });
+    this.#log.log('info', 'agent restarted', { sessionId: rt.info.id, agent, ...outcome });
+    return { ok: true, ...outcome };
+  }
+
+  /** A failed spawn or resume: mark the session failed, keep (and show) the old ref, never retry automatically. */
+  #restartFailed(rt: Runtime, oldRef: string, versions: { fromVersion?: string; toVersion?: string }, error: string): RestartOutcome {
+    rt.restartFailedFor = installKey(this.#d.registry.lastProbe(rt.info.agent));
+    this.#log.log('warn', 'agent restart failed', { sessionId: rt.info.id, agent: rt.info.agent, error });
+    if (rt.info.agentSessionRef !== oldRef) this.#append(rt, { type: 'session.info', data: { agentSessionRef: oldRef } });
+    this.#append(rt, { type: 'session.restarted', data: { ...versions, ok: false, error } });
+    this.#append(rt, { type: 'session.status', data: { status: 'failed', reason: `restart failed: ${error}` } });
+    return { ok: false, ...versions, error };
   }
 
   async #stopHandle(rt: Runtime): Promise<void> {
@@ -1164,6 +1462,7 @@ export class Sessions {
     if (rt.state.spent) state.spent = rt.state.spent;
     if (rt.state.budgetBlocked) state.budgetBlocked = rt.state.budgetBlocked;
     if (rt.state.queued) state.queued = true;
+    if (rt.state.agentPath) state.agentPath = rt.state.agentPath;
     this.#d.store.putSession({ info: rt.info, state });
   }
 }

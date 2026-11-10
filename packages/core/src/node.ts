@@ -23,6 +23,7 @@ import { nullLogger } from './logger.ts';
 import { buildMachineInfo } from './machine.ts';
 import { parseBudget } from './budget.ts';
 import { OrchestrationSettingsStore, Orchestrator } from './orchestration.ts';
+import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
 import { Store } from './store.ts';
@@ -95,7 +96,6 @@ const UNIMPLEMENTED = [
   'devices.list',
   'device.revoke',
   // Protocol 1.2 additions; implemented by later phases or by extensions.
-  'session.restart',
   'agent.migrate',
   'agent.policy.set',
   'usage.list',
@@ -150,6 +150,8 @@ export interface BizziNode {
   readonly usage: UsageTracker;
   /** Agent-to-agent helpers and their guardrails (spec §12). */
   readonly orchestration: Orchestrator;
+  /** Stale agent processes and restart policies (updates.md). */
+  readonly restarts: Restarts;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -213,8 +215,9 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     });
     sessions.load();
     const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger });
+    const restarts = new Restarts({ sessions, registry, bus, logger });
     for (const ext of opts.extensions ?? []) if (ext.prepareStart) startHooks.push(ext.prepareStart);
-    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration);
+    node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration, restarts);
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
     const n = node;
@@ -255,6 +258,7 @@ class Node implements BizziNode {
   /** Assigned by createNode right after construction. */
   usage!: UsageTracker;
   readonly orchestration: Orchestrator;
+  readonly restarts: Restarts;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
   readonly #builtins: ReadonlySet<string>;
@@ -271,6 +275,7 @@ class Node implements BizziNode {
     workspaces: Workspaces,
     sessions: Sessions,
     orchestration: Orchestrator,
+    restarts: Restarts,
   ) {
     this.version = version;
     this.machine = machine;
@@ -281,6 +286,7 @@ class Node implements BizziNode {
     this.workspaces = workspaces;
     this.sessions = sessions;
     this.orchestration = orchestration;
+    this.restarts = restarts;
     const implemented = this.#implemented();
     this.#builtins = new Set(Object.keys(implemented));
     this.#handlers = { ...this.#unimplemented(), ...implemented };
@@ -335,6 +341,7 @@ class Node implements BizziNode {
           }
         }
         this.orchestration.close();
+        this.restarts.close();
         await this.sessions.close();
         await Promise.all(
           this.registry.adapters.map(async (a) => {
@@ -508,7 +515,13 @@ class Node implements BizziNode {
           const v = optString(p, k);
           if (v !== undefined) params[k] = v;
         }
+        // An empty object (or null) clears the budget.
+        if (p.budget !== undefined) params.budget = parseBudget(p.budget) ?? {};
         return { session: await s.set(params) };
+      },
+      'session.restart': (p) => {
+        this.restarts.request(reqString(p, 'sessionId'));
+        return {};
       },
       'approval.respond': async (p) => {
         const decision = oneOf(p, 'decision', ['allow', 'allow_always', 'deny'] as const);
