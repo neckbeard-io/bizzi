@@ -1,16 +1,29 @@
-import { useState } from 'react';
-import type { FormEvent, ReactNode } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
+import type { ReactNode } from 'react';
 import { shallowEqual } from '@bizzi/client';
 import type { WorkspaceInfo } from '@bizzi/protocol';
-import { useBizzi, useStore } from '../app/context.tsx';
-import { navigate, useAction, useIsWide } from '../app/hooks.ts';
+import { useBizzi } from '../app/context.tsx';
+import { navigate, useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
-import { Badge, Button, Card, Checkbox, Empty, ErrorText, Field, Input, Spinner } from '../components/ui.tsx';
+import { Badge, Button, Card, Checkbox, Empty, Spinner } from '../components/ui.tsx';
+import { pickerRequestFromHash } from '../lib/picker.ts';
 import { routeHref } from '../lib/router.ts';
 import { MachineTree } from './sidebar/MachineTree.tsx';
+import { WorkspacePicker } from './workspaces/WorkspacePicker.tsx';
+
+function subscribeHash(cb: () => void): () => void {
+  window.addEventListener('hashchange', cb);
+  return () => window.removeEventListener('hashchange', cb);
+}
+
+/** `#/workspaces?add=1[&machine=…][&path=…]` opens the picker (deep link for any "Add workspace" entry point). */
+function usePickerRequest(): { machineId?: string; path?: string } | null {
+  const hash = useSyncExternalStore(subscribeHash, () => window.location.hash, () => '');
+  return useMemo(() => pickerRequestFromHash(hash), [hash]);
+}
 
 export function WorkspacesView(): ReactNode {
   const machineId = useTargetMachineId();
@@ -29,6 +42,11 @@ export function WorkspacesView(): ReactNode {
   );
   const otherCount = useBizzi((s) => Object.values(s.workspaces ?? {}).filter((w) => machineId && w.machineId !== machineId).length);
   const [adding, setAdding] = useState(false);
+  const request = usePickerRequest();
+  const closePicker = (): void => {
+    setAdding(false);
+    if (request) navigate({ name: 'workspaces' }, { replace: true });
+  };
 
   return (
     <Page
@@ -37,7 +55,7 @@ export function WorkspacesView(): ReactNode {
           title="Workspaces"
           subtitle={machine ? `Directories on ${machine.name} where agents work` : 'Directories where agents work'}
           actions={
-            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => setAdding((a) => !a)}>
+            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => setAdding(true)}>
               Add workspace
             </Button>
           }
@@ -45,7 +63,7 @@ export function WorkspacesView(): ReactNode {
       }
     >
       <OfflineMachineBanner machineId={machineId} className="mb-3" />
-      {adding && online ? <AddWorkspaceForm machineId={machineId} onDone={() => setAdding(false)} /> : null}
+      {adding || request ? <WorkspacePicker machineId={request?.machineId ?? machineId} {...(request?.path ? { initialPath: request.path } : {})} onClose={closePicker} /> : null}
       {!wide ? (
         // Phone: the sidebar's machine → workspace structure, rows 1–2 only (spec §11.1).
         <MachineTree variant="phone" className="-mx-2" />
@@ -105,52 +123,5 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): Re
         </div>
       </Card>
     </a>
-  );
-}
-
-function AddWorkspaceForm(props: { machineId: string | null; onDone: () => void }): ReactNode {
-  const store = useStore();
-  const [path, setPath] = useState('');
-  const [name, setName] = useState('');
-  const [create, setCreate] = useState(false);
-  const action = useAction(async () => {
-    const params: { machineId?: string; path: string; name?: string; create?: boolean } = { path: path.trim() };
-    if (props.machineId) params.machineId = props.machineId;
-    if (name.trim()) params.name = name.trim();
-    if (create) params.create = true;
-    return store.createWorkspace(params);
-  });
-  const submit = async (e: FormEvent): Promise<void> => {
-    e.preventDefault();
-    const ws = await action.run();
-    if (ws) {
-      props.onDone();
-      navigate({ name: 'workspace', workspaceId: ws.id });
-    }
-  };
-  return (
-    <Card className="mb-4 p-4">
-      <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-[2fr_1fr]">
-        <Field label="Path on this machine">
-          <Input value={path} onChange={(e) => setPath(e.target.value)} placeholder="/Users/you/src/project" className="font-mono" autoFocus required spellCheck={false} autoCapitalize="off" />
-        </Field>
-        <Field label="Name (optional)">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="defaults to the folder name" />
-        </Field>
-        <div className="flex flex-wrap items-center gap-3 sm:col-span-2">
-          <Checkbox checked={create} onChange={setCreate} label="Create the directory if it does not exist" />
-          <div className="flex-1" />
-          <Button variant="ghost" onClick={props.onDone}>
-            Cancel
-          </Button>
-          <Button type="submit" variant="primary" busy={action.busy} disabled={!path.trim()}>
-            Add
-          </Button>
-        </div>
-        <div className="sm:col-span-2">
-          <ErrorText error={action.error} />
-        </div>
-      </form>
-    </Card>
   );
 }
