@@ -4,6 +4,7 @@ export {
   createAdapters,
   formatPtyRef,
   parseResumeRef,
+  resolveDetectorSet,
   type CreateAdaptersOptions,
   type SupervisorOptions,
   type TerminalAdapterOptions,
@@ -30,6 +31,43 @@ export {
   type PromptDetector,
   type PromptKind,
 } from './activity.ts';
+export {
+  DETECTORS_FILE_NAME,
+  DETECTOR_SCHEMA,
+  SHIPPED_DETECTORS_PATH,
+  compileDetector,
+  detectorsDisabledByEnv,
+  loadDetectorSet,
+  mergeDetectors,
+  overridePath,
+  shippedDetectors,
+  validateDetectorFile,
+  type DetectorFile,
+  type DetectorLoadOptions,
+  type DetectorSet,
+  type DetectorSpec,
+  type PatternSpec,
+  type ValidationResult,
+} from './detectors.ts';
+export {
+  explainSessionStatus,
+  formatStatusProvenance,
+  type ExplainableSession,
+  type StatusPrompt,
+  type StatusProvenance,
+} from './explain.ts';
+export { MAX_OSC7501_LENGTH, OscScanner, type OscEvent, type OscScannerOptions } from './osc.ts';
+export {
+  ProgramStatusTracker,
+  parseProgramStatus,
+  summarizeRecord,
+  type BlockedKind,
+  type ParseResult,
+  type ProgramState,
+  type ProgramStatusRecord,
+  type ProgramStatusReport,
+  type ProgramStatusSummary,
+} from './program-status.ts';
 export { stripAnsi } from './ansi.ts';
 export { LocalPtyBackend, TERM_NAME, type ExitInfo, type PtyBackend, type PtySpawnOptions } from './backend.ts';
 export { DEFAULT_COALESCE_BYTES, DEFAULT_COALESCE_MS, OutputCoalescer } from './coalescer.ts';

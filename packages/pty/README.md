@@ -57,15 +57,107 @@ Options that can't be mapped are logged and ignored.
 - **stop():** sends SIGHUP, then SIGKILL; it is idempotent.
 - **detach():** not part of the contract. It disconnects without killing, so the session can be reattached later.
 
-## Activity heuristics
+## Session status
+
+A terminal session's `session.status` comes from three sources, in this order of precedence:
+
+1. **OSC 7501 reports** from the program itself, while it has live records reported since bizzi last typed a prompt with `send()`.
+2. **Prompt detectors** on the quiet timer.
+3. **The quiet timer** alone.
+
+Every `session.status` the adapter emits carries `source`:
+
+| source | meaning |
+|---|---|
+| `osc7501` | the program's own OSC 7501 report |
+| `osc133` | an OSC 133;A (new prompt) dropped the last working/blocked records |
+| `detector:<id>` | a prompt detector matched when output went quiet |
+| `activity:idle` | output went quiet and no detector matched |
+| `activity:output` | output resumed while no turn was in flight |
+| `process` | the process exited |
+
+**Explain:** `TerminalSession.statusProvenance()` returns the full record for the current status: source, time, and either the deciding OSC record (`id`, `state`, `kind`, `app`, `title`, `msg`, `progress`, number of live records) or the detector (`id`, `kind`, `note`, `origin`, matched `excerpt`). `explainSessionStatus(session)` is a safe wrapper the core can call with any `AdapterSession`; it returns `undefined` for sessions that can't explain themselves. `formatStatusProvenance(p)` renders one line for logs or a tooltip. Neither adds a protocol method; on the wire the short form is `session.status.source`. `programStatusRecords()` lists the live OSC records.
+
+### OSC 7501 (program status protocol)
+
+The format comes from Rex ("Program Status Protocol"); herdr-core reads it too. See docs/landscape.md §4.1. `src/osc.ts` is a streaming scanner: it keeps state between PTY reads, so a report split across chunks (even one byte at a time) is still seen whole. It runs on the decoded output before the activity monitor, so a report applies before the heuristics see the chunk. The raw bytes still go to clients unchanged, and `stripAnsi` still removes the sequences from the text the detectors see.
+
+`ESC ] 7501 ; key=value:key=value ST`, where ST is `ESC \` or BEL. An ESC followed by anything else, CAN or SUB aborts the sequence. Other OSCs (titles, OSC 8 links, OSC 52 clipboard) are skipped without being buffered. The 8-bit C1 forms aren't recognised.
+
+| key | meaning |
+|---|---|
+| `state` | required: `idle`, `working`, `done`, `blocked`, `error`, or `clear` |
+| `id` | optional record name; `/` nests (`build/tests` is a child of `build`). No id = the root record |
+| `kind` | blocked only: `permission`, `question`, `auth` |
+| `app` | program name (kept, max 128 chars) |
+| `title`, `msg` | base64 UTF-8 (padded or unpadded) |
+| `progress` | working/blocked only: `0`–`100` (optionally with `%`) or `n/m` |
+
+Rules (`src/program-status.ts`):
+
+- A report replaces its record. `state=clear` removes a record and its nested children; clearing the root (no id) removes every record.
+- Malformed pairs (no `=`, bad key) are skipped. The whole report is discarded when the body is over 4096 characters (`MAX_OSC7501_LENGTH`), when `state` is missing or unknown, when the id is over 256 characters, or when `title`/`msg` is bad base64 or bad UTF-8. Discarded reports are logged at debug level.
+- working/blocked records drop on OSC 133;A (a new prompt) and every record drops when the process exits. If a 133;A leaves no records, the session reports `waiting_input` (source `osc133`).
+- With several records, the most urgent one decides: blocked > working > error > done > idle, and the newest wins a tie.
+- **`?` queries** (`7501;?`) are ignored. Answering would mean writing a reply into the program's stdin, and the reply format isn't specified anywhere bizzi can verify, so it doesn't.
+
+Mapping to `session.status` (the reason is `msg`, else `title`, else the state):
+
+| report | status | prompt | turn in flight |
+|---|---|---|---|
+| `working` | `running` | | kept |
+| `blocked`, `kind=permission` | `waiting_approval` | `approval` | kept |
+| `blocked`, `kind=question` | `waiting_input` | `question` | kept |
+| `blocked`, `kind=auth` | `waiting_input` | `login` | kept |
+| `blocked`, no or unknown kind | `waiting_input` | `input` | kept |
+| `idle` | `waiting_input` | `input` | completed (`end_turn`) |
+| `done` | `idle` | | completed (`end_turn`) |
+| `error` | `waiting_input`, reason `error: <msg>` | `input` | completed (`error`, with the message) |
+
+`error` deliberately doesn't map to `failed`, although landscape.md §4.1 suggests it. The core treats `failed` as terminal: it closes the session and stops the adapter, which would kill an agent that is still alive and waiting for the next prompt.
+
+While the program's records are authoritative, the quiet timer neither completes turns nor emits statuses, and detectors don't run, so a long silent tool call that the program reports as `working` stays `running`. If bizzi sends a prompt and the program doesn't report again, its old records are stale and the heuristics take over until the next report. Unchanged statuses (same status, prompt, reason and source) aren't emitted again, but the provenance still tracks the latest report (e.g. `progress`). `programStatus: false` turns parsing off.
+
+### Activity heuristics
 
 `ActivityMonitor`:
 
 1. A burst starts with the first output after a quiet period. Small output within 150 ms of user keystrokes counts as echo and doesn't start a burst. `send()` starts a burst explicitly.
-2. When output has been quiet for `idleMs` (default 3000 ms), the adapter completes the in-flight turn and then emits `session.status { status: 'waiting_input', reason }`.
-3. If output resumes while no turn is in flight, it emits `session.status running` (reason `terminal output`).
+2. When output has been quiet for `idleMs` (default 3000 ms), the adapter completes the in-flight turn and then emits `session.status { status: 'waiting_input', reason, source }`. When a detector matched, `prompt` is the detector's kind.
+3. If output resumes while no turn is in flight, it emits `session.status running` (reason `terminal output`, source `activity:output`).
 
-Detectors run on the ANSI-stripped text of the current burst. Cursor moves are mapped to whitespace so that words drawn with `CSI n G` (Claude's renderer) still match. When a detector matches, the quiet period shrinks to `settleMs` (500 ms), and the reason becomes `approval:<id>` or `input:<id>`. Pass your own list with the `detectors` option; `regexDetector()` helps build them.
+Detectors run on the ANSI-stripped text of the current burst. Cursor moves are mapped to whitespace so that words drawn with `CSI n G` (Claude's renderer) still match. When a detector matches, the quiet period shrinks to `settleMs` (500 ms), and the reason becomes `<kind>:<id>` (e.g. `approval:claude-permission`). Blocking kinds are tried first: approval, login, question, then input. Pass your own list with the `detectors` option (this skips file loading); `regexDetector()` helps build them.
+
+### Detectors as data
+
+The shipped set is `data/detectors.json`, validated when the package loads (a broken shipped file throws). Schema 1:
+
+```json
+{
+  "schema": 1,
+  "version": "2026.11.10",
+  "mode": "merge",
+  "detectors": [
+    {
+      "id": "claude-permission",
+      "prompt": "approval",
+      "agents": ["claude"],
+      "patterns": [{ "phrases": ["Do you want to proceed?"] }, { "regex": "\\[y/N\\]\\s*$", "flags": "i", "scope": "last-line" }],
+      "note": "where the wording came from and whether it was verified"
+    }
+  ]
+}
+```
+
+- `prompt` is `approval`, `input`, `question` or `login`. `agents` is optional; omitted means every agent.
+- A detector matches when any of its patterns does. Phrases are case-insensitive and tolerate missing or extra whitespace between words. A regex takes `flags` from `i m s u v` (no `g`/`y`, which make matching stateful) and `scope` `burst` (default) or `last-line`.
+- `note` is the provenance. It ends up in `statusProvenance().detector.note`, next to `origin` (`builtin@<version>` or the override file's path).
+
+**Node override:** `<data dir>/detectors.json`, using the same schema. The data dir is the `dataDir` option, else `$BIZZI_DATA_DIR`, else `~/.bizzi` (the CLI's default). `detectorsFile` or `$BIZZI_DETECTORS_FILE` names a file directly. By default the override merges by id: the same id replaces the shipped detector in place, a new id is appended, and `{ "id": "…", "disabled": true }` removes one. `"mode": "replace"` uses only the override's detectors. A missing file is fine. An unreadable or invalid file is ignored with a warning, and invalid entries are dropped with a warning. Warnings are logged when the first session starts, since the adapter loads its set once. The CLI's `--data-dir` flag doesn't reach the adapters (`createAdapters()` takes no arguments there), so a non-default data dir needs `BIZZI_DATA_DIR`.
+
+**Off switch:** `BIZZI_DETECTORS=off` (also `0`, `false`, `none`), or the `detectorsEnabled: false` option, runs no detectors. Only OSC 7501 and the plain quiet timer remain. This suits offline or air-gapped users who don't want guessed wording.
+
+`loadDetectorSet()`, `validateDetectorFile()`, `mergeDetectors()` and `resolveDetectorSet(adapterOptions)` are exported. `DEFAULT_DETECTORS` is the compiled shipped set.
 
 | id | agent | kind | pattern | status |
 |---|---|---|---|---|
@@ -79,7 +171,7 @@ Detectors run on the ANSI-stripped text of the current burst. Cursor moves are m
 | press-enter | all | input | "Press Enter to continue" | generic |
 | shell-prompt | shell | input | last line ends with `$ % # > ❯ ➜` | generic |
 
-The approval detectors only affect the `waiting_input` reason. They never emit `approval.requested`, because there is no structured way to answer one.
+The approval detectors only set the `waiting_input` reason and `prompt: 'approval'`. They never emit `approval.requested`, because there is no structured way to answer one. Unlike an OSC 7501 `blocked/permission` report, a detector guess doesn't switch the status to `waiting_approval`.
 
 ## PTY supervisor (implemented)
 
@@ -102,11 +194,12 @@ With `supervisor` enabled (the default on POSIX), each session's PTY is owned by
 
 ## Tests
 
-`npm test -w @bizzi/pty` runs offline. It covers the ring buffer, the coalescer, ANSI stripping, the detectors and the idle monitor, then spawns `bash` through the adapter: output, input, resize, exit code, `send()` turns, interrupt, stop and probe. The supervisor tests cover detach and reattach, a node killed with SIGKILL followed by missed-output replay, an exit while detached, and a lost supervisor. `BIZZI_LIVE=1` also starts each installed agent's TUI in a PTY.
+`npm test -w @bizzi/pty` runs offline. It covers the ring buffer, the coalescer, ANSI stripping, the detectors and the idle monitor. `osc.test.ts` covers the OSC scanner (every split point, BEL vs `ESC \`, aborts, oversize), report parsing (bad base64 and UTF-8, malformed pairs, clear, nested ids, queries) and the record tracker. `detectors.test.ts` covers shipped-file validation, override merge/replace/disable, invalid files, `BIZZI_DETECTORS_FILE` and the off switch. `program-status.test.ts` drives a `TerminalSession` over a fake PTY backend: status mapping, precedence over detectors, stale records, 133;A, exit, and provenance. It also runs a real bash emitting 7501. The adapter tests then spawn `bash` through the adapter: output, input, resize, exit code, `send()` turns, interrupt, stop and probe. The supervisor tests cover detach and reattach, a node killed with SIGKILL followed by missed-output replay, an exit while detached, and a lost supervisor. `BIZZI_LIVE=1` also starts each installed agent's TUI in a PTY.
 
 ## Proposed protocol changes
 
-1. **`session.status` from adapters:** allow terminal adapters to emit `running`. Today the comment allows only `failed`, `ended` and `waiting_input`, but raw typing in a terminal has no `turn.started` to flip the status back.
-2. **Terminal approval hint:** add an optional `hint` to `session.status` (`'approval' | 'input' | 'login'`), or a dedicated `term.prompt` event, so UIs can surface "the TUI is asking for approval" without a structured `approval.requested`. Today it's encoded in `reason`.
-3. **Reattach semantics:** document `agentSessionRef` for terminal sessions as an opaque reattach token (`pty:<id>[:<native>]`), rather than strictly "the agent's own id". Alternatively, add a separate `reattachRef` to `session.info`.
-4. **Scrollback snapshots:** add a method or event for scrollback snapshots (e.g. `term.snapshot`, or `term.open { since }` from spec §5.2). A client joining a long session could then fetch the 2 MiB ring instead of replaying every `term.output` event.
+Items 1 and 2 from earlier versions of this list (adapters emitting `running`, and a terminal prompt hint) landed as `session.status.prompt` and `source` in protocol 1.2.
+
+1. **Explain method:** `session.explain` could return `explainSessionStatus()` for the "explain" view. Today only the short `source` string goes over the wire.
+2. **Reattach semantics:** document `agentSessionRef` for terminal sessions as an opaque reattach token (`pty:<id>[:<native>]`), rather than strictly "the agent's own id". Alternatively, add a separate `reattachRef` to `session.info`.
+3. **Scrollback snapshots:** add a method or event for scrollback snapshots (e.g. `term.snapshot`, or `term.open { since }` from spec §5.2). A client joining a long session could then fetch the 2 MiB ring instead of replaying every `term.output` event.
