@@ -1,6 +1,7 @@
 import type {
   AgentKind,
   ApprovalResolution,
+  ContextUsage,
   ApprovalRequest,
   InputBlock,
   PlanItem,
@@ -127,6 +128,23 @@ export interface SubagentItem extends ItemBase {
   status: 'running' | 'ok' | 'error' | 'cancelled';
 }
 
+/** The agent process was replaced at a safe point (updates.md §5); rendered as a divider "restarted on <version>". */
+export interface RestartItem extends ItemBase {
+  kind: 'restart';
+  state: 'restarting' | 'ok' | 'failed';
+  fromVersion?: string;
+  toVersion?: string;
+  reason?: string;
+  error?: string;
+}
+
+/** The agent compacted its context (usage.md §1.2). */
+export interface CompactItem extends ItemBase {
+  kind: 'compact';
+  before?: number;
+  after?: number;
+}
+
 export interface RawItem extends ItemBase {
   kind: 'raw';
   agent: AgentKind;
@@ -146,6 +164,8 @@ export type TimelineItem =
   | ErrorItem
   | StatusItem
   | SubagentItem
+  | RestartItem
+  | CompactItem
   | RawItem;
 
 export type TimelineItemKind = TimelineItem['kind'];
@@ -183,6 +203,8 @@ export interface Timeline {
   /** Status derived from the session's own events (null until one is seen). */
   status: SessionStatus | null;
   statusReason?: string;
+  /** What produced the current status (`session.status.source`, e.g. 'osc7501', 'detector:claude-permission'). */
+  statusSource?: string;
   /** What the session waits on (approval / input / login), null when it doesn't wait. */
   prompt: SessionPrompt | null;
   info: SessionInfoPatch;
@@ -196,6 +218,12 @@ export interface Timeline {
   files: Readonly<Record<string, FileChange>>;
   terminalExit: { exitCode: number | null; signal?: string } | null;
   login: LoginState | null;
+  /** Latest context-window occupancy (`context.updated`); null = "context unknown". */
+  context: ContextUsage | null;
+  /** Version the agent process runs on after the last successful restart (`session.restarted`). */
+  agentVersion?: string;
+  /** Item id of a restart still in progress. */
+  restartItemId: string | null;
 }
 
 export function emptyTimeline(sessionId: string): Timeline {
@@ -215,6 +243,8 @@ export function emptyTimeline(sessionId: string): Timeline {
     files: {},
     terminalExit: null,
     login: null,
+    context: null,
+    restartItemId: null,
   };
 }
 
@@ -311,6 +341,7 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
     case 'session.status': {
       tl.status = ev.data.status;
       tl.statusReason = ev.data.reason;
+      tl.statusSource = ev.data.source;
       tl.prompt =
         ev.data.prompt ?? (ev.data.status === 'waiting_approval' ? 'approval' : ev.data.status === 'waiting_input' ? 'input' : null);
       if (ev.data.status === 'failed' || ev.data.status === 'ended' || ev.data.status === 'paused') {
@@ -557,13 +588,42 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (tl.prompt === 'login') tl.prompt = null;
       return;
     }
-    case 'context.updated':
-    case 'context.compacted':
-    case 'account.usage':
-    case 'session.restarting':
-    case 'session.restarted':
-      // Protocol 1.2: rendered by later phases.
+    case 'context.updated': {
+      tl.context = ev.data;
       return;
+    }
+    case 'context.compacted': {
+      const item: CompactItem = { ...base(d, `compact:${ev.seq}`, ev), kind: 'compact' };
+      if (ev.data.before !== undefined) item.before = ev.data.before;
+      if (ev.data.after !== undefined) item.after = ev.data.after;
+      d.put(item);
+      if (tl.context && ev.data.after !== undefined) tl.context = { ...tl.context, used: ev.data.after };
+      return;
+    }
+    case 'account.usage':
+      // Per-login usage; the store keeps it globally (and the core republishes it on the global channel).
+      return;
+    case 'session.restarting': {
+      const item: RestartItem = { ...base(d, `restart:${ev.seq}`, ev), kind: 'restart', state: 'restarting' };
+      if (ev.data.fromVersion !== undefined) item.fromVersion = ev.data.fromVersion;
+      if (ev.data.toVersion !== undefined) item.toVersion = ev.data.toVersion;
+      if (ev.data.reason !== undefined) item.reason = ev.data.reason;
+      d.put(item);
+      tl.restartItemId = item.id;
+      return;
+    }
+    case 'session.restarted': {
+      const prev = tl.restartItemId ? d.get(tl.restartItemId) : undefined;
+      const item: RestartItem = prev && prev.kind === 'restart' ? { ...prev } : { ...base(d, `restart:${ev.seq}`, ev), kind: 'restart', state: 'restarting' };
+      item.state = ev.data.ok ? 'ok' : 'failed';
+      if (ev.data.fromVersion !== undefined) item.fromVersion = ev.data.fromVersion;
+      if (ev.data.toVersion !== undefined) item.toVersion = ev.data.toVersion;
+      if (ev.data.error !== undefined) item.error = ev.data.error;
+      d.put(item);
+      tl.restartItemId = null;
+      if (ev.data.ok && ev.data.toVersion !== undefined) tl.agentVersion = ev.data.toVersion;
+      return;
+    }
     default: {
       const unknown: never = ev;
       void unknown;

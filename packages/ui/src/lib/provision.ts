@@ -1,5 +1,5 @@
 // Pure helpers for the provisioning UI (agent install / update / uninstall, login, API keys).
-import type { InstallJob } from '@bizzi/client';
+import type { InstallJob, JobAction } from '@bizzi/client';
 import type { AgentKind, AgentListing, InstallAction, InstallPlan } from '@bizzi/protocol';
 
 export interface AgentActions {
@@ -31,13 +31,14 @@ export function agentActions(a: AgentListing): AgentActions {
   };
 }
 
-const VERBS: Record<InstallAction, { present: string; progressive: string; past: string }> = {
+const VERBS: Record<JobAction, { present: string; progressive: string; past: string }> = {
   install: { present: 'Install', progressive: 'Installing', past: 'Installed' },
+  migrate: { present: 'Switch install method of', progressive: 'Switching install method of', past: 'Switched install method of' },
   update: { present: 'Update', progressive: 'Updating', past: 'Updated' },
   uninstall: { present: 'Uninstall', progressive: 'Uninstalling', past: 'Uninstalled' },
 };
 
-export function actionVerb(action: InstallAction | null, tense: 'present' | 'progressive' | 'past'): string {
+export function actionVerb(action: JobAction | null, tense: 'present' | 'progressive' | 'past'): string {
   return VERBS[action ?? 'install'][tense];
 }
 

@@ -1,5 +1,6 @@
 import { BizziError, GLOBAL_CHANNEL, parseChannel, sessionChannel } from '@bizzi/protocol';
 import type {
+  AccountUsage,
   AgentCapabilities,
   AgentKind,
   AgentListing,
@@ -23,10 +24,14 @@ import type {
   MachineTarget,
   MethodParams,
   MethodResult,
+  OrchestrationSettings,
   QuestionAnswers,
+  RestartPolicy,
   SecretInfo,
   SessionEvent,
   SessionInfo,
+  UpdatePolicy,
+  WidgetValue,
   WorkspaceInfo,
 } from '@bizzi/protocol';
 import { base64ToBytes, stringToBase64 } from './base64.ts';
@@ -37,14 +42,17 @@ import { TerminalStreams } from './terminal.ts';
 import { emptyTimeline, reduceTimeline } from './timeline.ts';
 import type { ApprovalItem, QuestionItem, SessionPrompt, Timeline } from './timeline.ts';
 
-/** One provisioning run (`agent.install`), fed by `install.progress` events with its jobId. */
+/** What a provisioning job does: an install action, or switching the install method (`agent.migrate`). */
+export type JobAction = InstallAction | 'migrate';
+
+/** One provisioning run (`agent.install` / `agent.migrate`), fed by `install.progress` events with its jobId. */
 export interface InstallJob {
   jobId: string;
   /** Machine the job runs on; null when it was started elsewhere (global events carry no machine id). */
   machineId: string | null;
   agent: AgentKind;
   tool?: string;
-  action: InstallAction | null;
+  action: JobAction | null;
   plan: InstallPlan | null;
   stage: string;
   message?: string;
@@ -89,6 +97,33 @@ export interface BizziState {
   knowledgeRev: number;
   /** Last gap per channel (shown as "some events may be missing"). */
   gaps: Readonly<Record<string, GapInfo>>;
+  /** Per-login usage (usage.md §3), keyed by `accountKey()`. */
+  accounts: Readonly<Record<string, AccountUsage>>;
+  /** 'unsupported' when the server has no `usage.list` yet (accounts may still arrive as events). */
+  usageState: 'loading' | 'ok' | 'unsupported';
+  /** Node-run widget values (usage.md §4), keyed by `widgetKey()`. */
+  widgets: Readonly<Record<string, WidgetValue>>;
+  /** Repo state per workspace (`git.status`), loaded on demand for the sidebar. */
+  gitStatus: Readonly<Record<string, GitSummary>>;
+}
+
+/** What the sidebar shows of a workspace's `git.status` (spec §11.1 row 1 and row 3). */
+export interface GitSummary {
+  isRepo: boolean;
+  branch?: string;
+  ahead: number;
+  behind: number;
+  dirty: boolean;
+  /** ms epoch of the load. */
+  loadedAt: number;
+}
+
+export function accountKey(a: { agent: AgentKind; accountId: string }): string {
+  return `${a.agent}:${a.accountId}`;
+}
+
+export function widgetKey(w: { machineId: string; id: string }): string {
+  return `${w.machineId}:${w.id}`;
 }
 
 /** What survives a reload, so offline machines still show their last known state. */
@@ -194,6 +229,11 @@ export class BizziStore {
   private cached: { machines: unknown; agents: unknown; workspaces: unknown; sessions: unknown; selected: unknown } | null = null;
   private knowledgeTimer: ReturnType<typeof setTimeout> | null = null;
   private disposed = false;
+  /** session.markSeen bookkeeping: highest seq sent per session, sessions with a request in flight. */
+  private readonly seenSent = new Map<string, number>();
+  private readonly seenInflight = new Set<string>();
+  private seenUnsupported = false;
+  private readonly gitInflight = new Set<string>();
 
   /** Number of notifications sent (handy for perf tests). */
   notifications = 0;
@@ -228,6 +268,10 @@ export class BizziStore {
       knowledgeSettings: null,
       knowledgeRev: 0,
       gaps: {},
+      accounts: {},
+      usageState: 'loading',
+      widgets: {},
+      gitStatus: {},
     };
     this.hydrate();
     this.unsubs.push(
@@ -323,7 +367,7 @@ export class BizziStore {
   }
 
   private upsertSession(s: SessionInfo): void {
-    this.patch({ sessions: { ...this.state.sessions, [s.id]: s } });
+    this.patch({ sessions: { ...this.state.sessions, [s.id]: keepSeen(this.state.sessions[s.id], s) } });
     this.maybeWatch(s);
   }
 
@@ -486,6 +530,7 @@ export class BizziStore {
     const timelines = { ...this.state.timelines };
     let sessions: Record<string, SessionInfo> | null = null;
     for (const [sid, evs] of bySession) {
+      for (const ev of evs) if (ev.type === 'account.usage') this.upsertAccount(ev.data);
       const prev = timelines[sid] ?? emptyTimeline(sid);
       const next = reduceTimeline(prev, evs);
       timelines[sid] = next;
@@ -502,6 +547,9 @@ export class BizziStore {
           if (i.effort !== undefined) patched.effort = i.effort;
           if (i.title !== undefined) patched.title = i.title;
           if (i.agentSessionRef !== undefined) patched.agentSessionRef = i.agentSessionRef;
+        }
+        if (next.agentVersion !== prev.agentVersion && next.agentVersion !== undefined) {
+          patched = { ...(patched ?? info), agentVersion: next.agentVersion };
         }
         if (patched) {
           if (!sessions) sessions = { ...this.state.sessions };
@@ -556,7 +604,30 @@ export class BizziStore {
         this.patch({ devices: { ...(this.state.devices ?? {}), [d.id]: d } });
         return;
       }
+      case 'account.usage':
+        this.upsertAccount(ev.data.usage);
+        return;
+      case 'widget.updated': {
+        const w = ev.data.widget;
+        this.patch({ widgets: { ...this.state.widgets, [widgetKey(w)]: w } });
+        return;
+      }
+      case 'widget.removed': {
+        const key = widgetKey({ machineId: ev.data.machineId, id: ev.data.widgetId });
+        if (key in this.state.widgets) this.patch({ widgets: withoutKey(this.state.widgets, key) });
+        return;
+      }
     }
+  }
+
+  /** Newest observation per login wins; the machine lists are merged. */
+  private upsertAccount(a: AccountUsage): void {
+    const key = accountKey(a);
+    const prev = this.state.accounts[key];
+    let next: AccountUsage;
+    if (!prev || a.observedAt >= prev.observedAt) next = prev ? { ...a, machines: mergeLists(a.machines, prev.machines) } : a;
+    else next = { ...prev, machines: mergeLists(prev.machines, a.machines) };
+    this.patch({ accounts: { ...this.state.accounts, [key]: next } });
   }
 
   private applyProgress(data: GlobalEventMap['install.progress'], ts: string): void {
@@ -615,7 +686,7 @@ export class BizziStore {
     }
     const tasks: Promise<unknown>[] = this.reachableMachines().map((id) => this.loadMachine(id));
     if (this.isHub()) tasks.push(this.loadDevices());
-    tasks.push(this.loadKnowledgeMeta());
+    tasks.push(this.loadKnowledgeMeta(), this.loadUsage(), this.loadWidgets());
     const results = await Promise.allSettled(tasks);
     for (const r of results) {
       if (r.status === 'rejected') this.logger.log('warn', 'initial load failed', { error: String(r.reason) });
@@ -670,9 +741,59 @@ export class BizziStore {
       const replaced = opts.workspaceId ? s.workspaceId === opts.workspaceId : !t.machineId || s.machineId === t.machineId;
       if (!replaced) rec[s.id] = s;
     }
-    for (const s of sessions) rec[s.id] = s;
+    for (const s of sessions) rec[s.id] = keepSeen(this.state.sessions[s.id], s);
     this.patch({ sessions: rec });
     for (const s of sessions) this.maybeWatch(s);
+  }
+
+  /** Per-login usage; servers without `usage.list` leave `usageState` 'unsupported' (accounts may still come as events). */
+  async loadUsage(): Promise<void> {
+    try {
+      const { accounts } = await this.client.request('usage.list', {});
+      for (const a of accounts) this.upsertAccount(a);
+      this.patch({ usageState: 'ok' });
+    } catch (e) {
+      if (isUnsupported(e)) this.patch({ usageState: 'unsupported' });
+      else throw e;
+    }
+  }
+
+  /** Every widget this connection can see (a hub answers for all online machines). */
+  async loadWidgets(): Promise<void> {
+    let widgets: WidgetValue[];
+    try {
+      ({ widgets } = await this.client.request('widgets.list', {}));
+    } catch (e) {
+      if (isUnsupported(e)) return;
+      throw e;
+    }
+    const rec: Record<string, WidgetValue> = {};
+    for (const w of widgets) rec[widgetKey(w)] = w;
+    this.patch({ widgets: rec });
+  }
+
+  async refreshWidget(machineId: string, widgetId: string): Promise<WidgetValue> {
+    const { widget } = await this.client.request('widget.refresh', { machineId, widgetId });
+    this.patch({ widgets: { ...this.state.widgets, [widgetKey(widget)]: widget } });
+    return widget;
+  }
+
+  /**
+   * Repo state of a workspace for the sidebar. Skipped while a load is in flight or the last one is
+   * younger than `maxAgeMs`; failures (offline machine) keep the previous value.
+   */
+  async loadGitStatus(workspaceId: string, maxAgeMs = 30_000): Promise<void> {
+    const prev = this.state.gitStatus[workspaceId];
+    if (this.gitInflight.has(workspaceId) || (prev && Date.now() - prev.loadedAt < maxAgeMs)) return;
+    this.gitInflight.add(workspaceId);
+    try {
+      const r = await this.client.request('git.status', { workspaceId });
+      const g: GitSummary = { isRepo: r.isRepo, ahead: r.ahead ?? 0, behind: r.behind ?? 0, dirty: r.files.length > 0, loadedAt: Date.now() };
+      if (r.branch !== undefined) g.branch = r.branch;
+      this.patch({ gitStatus: { ...this.state.gitStatus, [workspaceId]: g } });
+    } finally {
+      this.gitInflight.delete(workspaceId);
+    }
   }
 
   async loadDevices(): Promise<void> {
@@ -717,6 +838,20 @@ export class BizziStore {
     await this.client.request('workspace.remove', { workspaceId });
     if (!this.state.workspaces) return;
     this.patch({ workspaces: withoutKey(this.state.workspaces, workspaceId) });
+  }
+
+  /** `git worktree add` + a workspace of kind 'worktree' under the repo workspace. */
+  async createWorktree(params: MethodParams<'worktree.create'>): Promise<WorkspaceInfo> {
+    const { workspace } = await this.client.request('worktree.create', params);
+    this.patch({ workspaces: { ...this.state.workspaces, [workspace.id]: workspace } });
+    return workspace;
+  }
+
+  /** Removes the worktree and its workspace (never the branch). Fails with `conflict` on uncommitted changes unless `force`. */
+  async removeWorktree(workspaceId: string, force = false): Promise<void> {
+    await this.client.request('worktree.remove', force ? { workspaceId, force: true } : { workspaceId });
+    if (!this.state.workspaces) return;
+    this.patch({ workspaces: withoutKey(this.state.workspaces, workspaceId), gitStatus: withoutKey(this.state.gitStatus, workspaceId) });
   }
 
   async createSession(params: MethodParams<'session.create'>): Promise<SessionInfo> {
@@ -819,6 +954,49 @@ export class BizziStore {
     await this.client.request('session.stop', { sessionId });
   }
 
+  /** Restart the agent process on the installed version at the next safe point (updates.md §5). */
+  async restartSession(sessionId: string): Promise<void> {
+    await this.client.request('session.restart', { sessionId });
+  }
+
+  /**
+   * Record that the user has seen a session through `seq` (default: everything loaded). Applied locally at
+   * once (so "done, not yet seen" clears), sent as `session.markSeen` with at most one request in flight per
+   * session. Never moves backwards. Servers without the method keep the local value only.
+   */
+  markSeen(sessionId: string, seq?: number): void {
+    const s = this.state.sessions[sessionId];
+    if (!s) return;
+    const target = seq ?? Math.max(s.lastSeq, this.state.timelines[sessionId]?.lastSeq ?? 0);
+    if (target <= (s.seenThrough ?? 0)) return;
+    this.patch({ sessions: { ...this.state.sessions, [sessionId]: { ...s, seenThrough: target } } });
+    this.sendSeen(sessionId);
+  }
+
+  private sendSeen(sessionId: string): void {
+    if (this.seenUnsupported || this.seenInflight.has(sessionId) || !this.client.isOpen()) return;
+    const want = this.state.sessions[sessionId]?.seenThrough ?? 0;
+    if (want <= (this.seenSent.get(sessionId) ?? 0)) return;
+    this.seenInflight.add(sessionId);
+    this.seenSent.set(sessionId, want);
+    this.client
+      .request('session.markSeen', { sessionId, seq: want })
+      .then(
+        ({ seenThrough }) => {
+          const cur = this.state.sessions[sessionId];
+          if (cur && seenThrough > (cur.seenThrough ?? 0)) this.patch({ sessions: { ...this.state.sessions, [sessionId]: { ...cur, seenThrough } } });
+        },
+        (e: unknown) => {
+          if (isUnsupported(e)) this.seenUnsupported = true;
+          else this.logger.log('debug', 'session.markSeen failed', { sessionId, error: String(e) });
+        },
+      )
+      .finally(() => {
+        this.seenInflight.delete(sessionId);
+        this.sendSeen(sessionId);
+      });
+  }
+
   async setSession(sessionId: string, opts: { model?: string; permissionMode?: string; effort?: string }): Promise<SessionInfo> {
     const { session } = await this.client.request('session.set', { sessionId, ...opts });
     this.upsertSession(session);
@@ -876,24 +1054,55 @@ export class BizziStore {
     const { machineId, ...rest } = params;
     const t = this.target(machineId);
     const { jobId, plan } = await this.client.request('agent.install', { ...t, ...rest });
+    return this.registerJob(jobId, t.machineId ?? null, params.agent, params.action, plan);
+  }
+
+  /**
+   * Switch an adopted install to the preferred method (spec §7). `dryRun` only returns the plan; otherwise
+   * the job's progress lands in `jobs[jobId]` like an install.
+   */
+  async migrateAgent(params: { machineId?: string | null; agent: AgentKind; toMethod?: string; dryRun?: boolean }): Promise<{ plan: InstallPlan; job: InstallJob | null }> {
+    const { machineId, ...rest } = params;
+    const t = this.target(machineId);
+    const { jobId, plan } = await this.client.request('agent.migrate', { ...t, ...rest });
+    if (params.dryRun) return { plan, job: null };
+    return { plan, job: this.registerJob(jobId, t.machineId ?? null, params.agent, 'migrate', plan) };
+  }
+
+  /** Update / restart policy for one agent on one machine (updates.md §6). */
+  async setAgentPolicy(params: { machineId?: string | null; agent: AgentKind; update?: UpdatePolicy; restart?: RestartPolicy }): Promise<AgentListing> {
+    const { machineId, ...rest } = params;
+    const t = this.target(machineId);
+    const { agent } = await this.client.request('agent.policy.set', { ...t, ...rest });
+    const key = t.machineId ?? '';
+    const list = this.state.agents[key];
+    if (list) this.patch({ agents: { ...this.state.agents, [key]: list.map((a) => (a.agent === agent.agent ? agent : a)) } });
+    return agent;
+  }
+
+  private registerJob(jobId: string, machineId: string | null, agent: AgentKind, action: JobAction, plan: InstallPlan): InstallJob {
     const now = new Date().toISOString();
     const prev = this.state.jobs[jobId];
     const job: InstallJob = prev
-      ? { ...prev, machineId: t.machineId ?? null, action: params.action, plan }
-      : {
-          jobId,
-          machineId: t.machineId ?? null,
-          agent: params.agent,
-          action: params.action,
-          plan,
-          stage: 'starting',
-          done: false,
-          log: [],
-          startedAt: now,
-          updatedAt: now,
-        };
+      ? { ...prev, machineId, action, plan }
+      : { jobId, machineId, agent, action, plan, stage: 'starting', done: false, log: [], startedAt: now, updatedAt: now };
     this.patch({ jobs: { ...this.state.jobs, [jobId]: job } });
     return job;
+  }
+
+  // ---------------------------------------------------------------- orchestration (spec §12.2)
+
+  async getOrchestrationSettings(params: { machineId?: string | null; workspaceId?: string } = {}): Promise<OrchestrationSettings> {
+    const t = this.target(params.machineId);
+    const { settings } = await this.client.request('orchestration.settings.get', params.workspaceId ? { ...t, workspaceId: params.workspaceId } : t);
+    return settings;
+  }
+
+  async setOrchestrationSettings(params: { machineId?: string | null; workspaceId?: string; settings: Partial<OrchestrationSettings> }): Promise<OrchestrationSettings> {
+    const t = this.target(params.machineId);
+    const base = params.workspaceId ? { ...t, workspaceId: params.workspaceId } : t;
+    const { settings } = await this.client.request('orchestration.settings.set', { ...base, settings: params.settings });
+    return settings;
   }
 
   dismissJob(jobId: string): void {
@@ -984,6 +1193,23 @@ export class BizziStore {
     const d = this.state.devices?.[deviceId];
     if (d) this.patch({ devices: { ...this.state.devices, [deviceId]: { ...d, revoked: true } } });
   }
+}
+
+function isUnsupported(e: unknown): boolean {
+  return e instanceof BizziError && e.code === 'unsupported';
+}
+
+function mergeLists(a: readonly string[], b: readonly string[]): string[] {
+  const out = [...a];
+  for (const x of b) if (!out.includes(x)) out.push(x);
+  return out;
+}
+
+/** A fresh copy of a session from the server never moves `seenThrough` backwards. */
+function keepSeen(prev: SessionInfo | undefined, next: SessionInfo): SessionInfo {
+  const p = prev?.seenThrough;
+  if (p === undefined || (next.seenThrough !== undefined && next.seenThrough >= p)) return next;
+  return { ...next, seenThrough: p };
 }
 
 function toInput(input: string | InputBlock[]): InputBlock[] {
