@@ -5,12 +5,12 @@ import type { WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction, useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
-import { MachineSwitcher } from '../components/MachineSwitcher.tsx';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Checkbox, Empty, ErrorText, Field, Input, Spinner } from '../components/ui.tsx';
 import { routeHref } from '../lib/router.ts';
+import { MachineTree } from './sidebar/MachineTree.tsx';
 
 export function WorkspacesView(): ReactNode {
   const machineId = useTargetMachineId();
@@ -44,10 +44,12 @@ export function WorkspacesView(): ReactNode {
         />
       }
     >
-      {!wide && hub ? <MachineSwitcher className="mb-3" /> : null}
       <OfflineMachineBanner machineId={machineId} className="mb-3" />
       {adding && online ? <AddWorkspaceForm machineId={machineId} onDone={() => setAdding(false)} /> : null}
-      {!loaded ? (
+      {!wide ? (
+        // Phone: the sidebar's machine → workspace structure, rows 1–2 only (spec §11.1).
+        <MachineTree variant="phone" className="-mx-2" />
+      ) : !loaded ? (
         <div className="flex justify-center py-10 text-muted">
           <Spinner />
         </div>
@@ -62,7 +64,7 @@ export function WorkspacesView(): ReactNode {
           ))}
         </div>
       )}
-      {otherCount > 0 ? (
+      {wide && otherCount > 0 ? (
         <div className="mt-4">
           <Checkbox checked={showAll} onChange={setShowAll} label={`Show workspaces on other machines (${otherCount})`} />
         </div>

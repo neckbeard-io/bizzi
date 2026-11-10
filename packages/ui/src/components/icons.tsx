@@ -47,6 +47,9 @@ const PATHS = {
   wifiOff: 'M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 5-2.7M14 10.3A10 10 0 0 1 19 13M2 9.5a15 15 0 0 1 4.3-2.8M12 20h.01',
   edit: 'M4 20h4L19 9l-4-4L4 16zM14 6l4 4',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM21 21l-5-5',
+  branch: 'M6 3v12M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 9a9 9 0 0 1-9 9',
+  gauge: 'M4 16a8 8 0 1 1 16 0M12 16l4-5M8 20h8',
+  tree: 'M5 4h5v4H5zM14 10h5v4h-5zM14 17h5v4h-5zM7.5 8v11h6.5M7.5 12h6.5',
 } as const;
 
 export type IconName = keyof typeof PATHS;

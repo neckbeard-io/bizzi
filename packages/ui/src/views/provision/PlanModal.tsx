@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { AgentKind, InstallAction, InstallPlan } from '@bizzi/protocol';
+import type { JobAction } from '@bizzi/client';
+import type { AgentKind, InstallPlan } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
@@ -10,10 +11,11 @@ import { JobProgress } from './JobProgress.tsx';
 
 /**
  * Preview what an install / update / uninstall will run (agent.plan), then run it (agent.install) and
- * follow its install.progress events. Closing the dialog never stops the job; its card keeps showing it.
+ * follow its install.progress events. `migrate` previews with `agent.migrate` dry-run and runs `agent.migrate`
+ * (spec §7: switch to the preferred install method). Closing the dialog never stops the job.
  */
-export function PlanModal(props: { machineId: string | null; machineName: string; agent: AgentKind; action: InstallAction; onClose: () => void }): ReactNode {
-  const { machineId, agent, action, onClose } = props;
+export function PlanModal(props: { machineId: string | null; machineName: string; agent: AgentKind; action: JobAction; method?: string; onClose: () => void }): ReactNode {
+  const { machineId, agent, action, onClose, method } = props;
   const store = useStore();
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<unknown>(null);
@@ -22,16 +24,26 @@ export function PlanModal(props: { machineId: string | null; machineName: string
 
   useEffect(() => {
     let live = true;
-    store.planAgent({ machineId, agent, action }).then(
+    const preview =
+      action === 'migrate'
+        ? store.migrateAgent({ machineId, agent, dryRun: true, ...(method ? { toMethod: method } : {}) }).then((r) => r.plan)
+        : store.planAgent({ machineId, agent, action, ...(method ? { method } : {}) });
+    preview.then(
       (p) => live && setPlan(p),
       (e: unknown) => live && setPlanError(e),
     );
     return () => {
       live = false;
     };
-  }, [store, machineId, agent, action]);
+  }, [store, machineId, agent, action, method]);
 
   const run = useAction(async () => {
+    if (action === 'migrate') {
+      const { job: j, plan: p } = await store.migrateAgent({ machineId, agent, ...(method ?? plan?.method ? { toMethod: method ?? plan?.method } : {}) });
+      if (j) setJobId(j.jobId);
+      setPlan(p);
+      return;
+    }
     const j = await store.installAgent({ machineId, agent, action, ...(plan?.method ? { method: plan.method } : {}) });
     setJobId(j.jobId);
     if (j.plan) setPlan(j.plan);
@@ -62,7 +74,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
               Cancel
             </Button>
             <Button variant={action === 'uninstall' ? 'danger' : 'primary'} icon={action === 'uninstall' ? 'trash' : 'download'} disabled={!plan} busy={run.busy} onClick={() => void run.run()}>
-              {verb}
+              {action === 'migrate' ? `Switch to ${plan?.method ?? method ?? 'the preferred method'}` : verb}
             </Button>
           </>
         )

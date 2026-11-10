@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { parseHash, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { loadString, saveString } from '../lib/storage.ts';
@@ -102,4 +102,50 @@ export function useAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>
     [fn],
   );
   return { run, busy, error, reset: () => setError(null) };
+}
+
+/**
+ * Long-press (phone) handlers: `onLongPress` after `ms` without moving; the click that follows is swallowed,
+ * and the context menu is suppressed so a long-press doesn't also open it.
+ */
+export function useLongPress(onLongPress: () => void, ms = 500): {
+  onPointerDown: (e: { clientX: number; clientY: number }) => void;
+  onPointerUp: () => void;
+  onPointerLeave: () => void;
+  onPointerMove: (e: { clientX: number; clientY: number }) => void;
+  onClickCapture: (e: { preventDefault: () => void; stopPropagation: () => void }) => void;
+  onContextMenu: (e: { preventDefault: () => void }) => void;
+} {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fired = useRef(false);
+  const start = useRef<{ x: number; y: number } | null>(null);
+  const cancel = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  }, []);
+  useEffect(() => cancel, [cancel]);
+  return {
+    onPointerDown: (e) => {
+      fired.current = false;
+      start.current = { x: e.clientX, y: e.clientY };
+      cancel();
+      timer.current = setTimeout(() => {
+        fired.current = true;
+        onLongPress();
+      }, ms);
+    },
+    onPointerUp: cancel,
+    onPointerLeave: cancel,
+    onPointerMove: (e) => {
+      const s = start.current;
+      if (s && Math.abs(e.clientX - s.x) + Math.abs(e.clientY - s.y) > 10) cancel();
+    },
+    onClickCapture: (e) => {
+      if (!fired.current) return;
+      fired.current = false;
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    onContextMenu: (e) => e.preventDefault(),
+  };
 }
