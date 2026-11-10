@@ -17,6 +17,7 @@
     "@bizzi/core": "*",
     "@bizzi/hub": "*",
     "@bizzi/knowledge": "*",
+    "@bizzi/orchestration": "*",
     "@bizzi/protocol": "*",
     "@bizzi/pty": "*",
     "@bizzi/services": "*",

@@ -4,11 +4,12 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer } from '@bizzi/core';
+import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
 import { loadAdapters } from './adapters.ts';
 import { createKnowledgeRuntime } from './knowledge.ts';
 import { startHubLink } from './link.ts';
+import { loadOrchestration } from './orchestration.ts';
 import { loadServices } from './services.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
 
@@ -22,6 +23,7 @@ export const SERVE_HELP = `Usage: bizzi serve [options]
   --fake               add scripted fake adapters (for manual testing)
   --no-knowledge       don't inject rules, memory or the bizzi-memory MCP server
   --no-services        don't load @bizzi/services (agent install/login, secrets, knowledge methods)
+  --no-agents-mcp      don't serve or inject the bizzi-agents MCP tools (agent-to-agent helpers)
   --log-level <level>  debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
   --connect <url>      link to a hub (default: $BIZZI_HUB_URL, else the URL saved by "bizzi pair");
                        with no saved credential, $BIZZI_PAIR_CODE pairs on first start
@@ -56,6 +58,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
       fake: { type: 'boolean', default: false },
       'no-knowledge': { type: 'boolean', default: false },
       'no-services': { type: 'boolean', default: false },
+      'no-agents-mcp': { type: 'boolean', default: false },
       'log-level': { type: 'string' },
       connect: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
@@ -98,6 +101,10 @@ export async function serve(argv: string[], version: string): Promise<void> {
   const services = values['no-services'] ? undefined : await loadServices({ dataDir, logger, ...(knowledge ? { knowledge } : {}) });
   // ---- end services
 
+  // ---- agent-to-agent MCP tools (@bizzi/orchestration), on a loopback port of their own
+  const orchestration = values['no-agents-mcp'] ? undefined : await loadOrchestration(logger);
+  const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : [])];
+
   const node = await createNode({
     dataDir,
     machineName: values.name,
@@ -105,7 +112,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
     logger,
     version,
     ...(knowledge ? { prepareStart: knowledge.prepareStart } : {}),
-    ...(services ? { extensions: services.extensions } : {}),
+    ...(extensions.length > 0 ? { extensions } : {}),
   });
   let server: BizziServer;
   try {
