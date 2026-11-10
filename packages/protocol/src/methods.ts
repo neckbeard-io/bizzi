@@ -3,6 +3,7 @@ import type {
   AccountUsage,
   AgentKind,
   AgentProbe,
+  ContextBaseline,
   ApprovalDecision,
   DeviceInfo,
   DeviceKind,
@@ -114,6 +115,8 @@ export interface Methods {
       /** Terminal mode only: run this command (argv) instead of the agent's TUI. */
       command?: string[];
       budget?: SessionBudget;
+      /** Fan-out group id (spec §12), stored on the session; at most 128 characters. */
+      group?: string;
     };
     result: { session: SessionInfo };
   };
@@ -200,6 +203,11 @@ export interface Methods {
   /** On a hub without machineId: every online machine's widgets. */
   'widgets.list': { params: MachineTarget; result: { widgets: WidgetValue[] } };
   'widget.refresh': { params: MachineTarget & { widgetId: string }; result: { widget: WidgetValue } };
+  /**
+   * Learned starting context per agent, model and workspace (usage.md §2). `workspaceId` narrows to one
+   * workspace; on a hub without machineId or workspaceId: every online machine's baselines.
+   */
+  'baselines.list': { params: MachineTarget & { workspaceId?: string }; result: { baselines: ContextBaseline[] } };
 
   // ---- orchestration (spec §12)
   'orchestration.settings.get': {

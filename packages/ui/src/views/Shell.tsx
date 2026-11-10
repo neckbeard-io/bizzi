@@ -21,6 +21,7 @@ import { UsageBar } from './usage/Usage.tsx';
 const SessionView = lazy(() => import('./session/SessionView.tsx').then((m) => ({ default: m.SessionView })));
 const LoginView = lazy(() => import('./provision/LoginView.tsx').then((m) => ({ default: m.LoginView })));
 const KnowledgeView = lazy(() => import('./knowledge/KnowledgeView.tsx').then((m) => ({ default: m.KnowledgeView })));
+const FanoutView = lazy(() => import('./fanout/FanoutView.tsx').then((m) => ({ default: m.FanoutView })));
 const SettingsView = lazy(() => import('./settings/SettingsView.tsx').then((m) => ({ default: m.SettingsView })));
 
 export function Shell(props: { onFatal: (message: string) => void }): ReactNode {
@@ -92,6 +93,8 @@ function RouteView(props: { route: Route }): ReactNode {
       return <WorkspaceView workspaceId={r.workspaceId} />;
     case 'session':
       return <SessionView key={r.sessionId} sessionId={r.sessionId} tab={r.tab} />;
+    case 'fanout':
+      return <FanoutView key={r.group} group={r.group} />;
     case 'login':
       return <LoginView key={r.sessionId} sessionId={r.sessionId} />;
     case 'inbox':
@@ -135,7 +138,7 @@ function ConnectionBanner(): ReactNode {
 
 const NAV: { route: Route; label: string; short?: string; icon: IconName; match: Route['name'][] }[] = [
   { route: { name: 'machine' }, label: 'Machine', icon: 'machine', match: ['machine', 'machines', 'login'] },
-  { route: { name: 'workspaces' }, label: 'Workspaces', short: 'Work', icon: 'folder', match: ['workspaces', 'workspace', 'session'] },
+  { route: { name: 'workspaces' }, label: 'Workspaces', short: 'Work', icon: 'folder', match: ['workspaces', 'workspace', 'session', 'fanout'] },
   { route: { name: 'inbox' }, label: 'Inbox', icon: 'inbox', match: ['inbox'] },
   { route: { name: 'knowledge' }, label: 'Knowledge', short: 'Memory', icon: 'book', match: ['knowledge'] },
   { route: { name: 'settings', section: 'general' }, label: 'Settings', icon: 'settings', match: ['settings'] },

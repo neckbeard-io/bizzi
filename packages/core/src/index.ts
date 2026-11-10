@@ -58,4 +58,5 @@ export {
   usageKey,
   type UsageTrackerOptions,
 } from './usage.ts';
+export { BASELINE_SAMPLES, BaselineTracker, baselinesExtension, median, type BaselineTrackerOptions } from './baselines.ts';
 export { MAX_THEME_BYTES, MAX_THEME_NAME, MAX_THEMES, ThemeTable, parseThemeSave, type ThemeSave } from './themes.ts';

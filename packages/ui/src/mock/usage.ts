@@ -2,9 +2,10 @@
 import { BizziError, DEFAULT_ORCHESTRATION_SETTINGS, GLOBAL_CHANNEL } from '@bizzi/protocol';
 import type { AccountUsage, OrchestrationSettings, WidgetValue } from '@bizzi/protocol';
 import { MACHINE, mockAccounts, mockWidgets } from './fixtures.ts';
+import { mockBaselines } from './fanout.ts';
 import type { MockHost, MockModule } from './host.ts';
 
-const METHODS = new Set(['usage.list', 'widgets.list', 'widget.refresh', 'orchestration.settings.get', 'orchestration.settings.set']);
+const METHODS = new Set(['baselines.list', 'usage.list', 'widgets.list', 'widget.refresh', 'orchestration.settings.get', 'orchestration.settings.set']);
 
 export class MockUsage implements MockModule {
   private readonly host: MockHost;
@@ -37,6 +38,23 @@ export class MockUsage implements MockModule {
 
   async handle(method: string, params: Record<string, unknown>): Promise<unknown> {
     switch (method) {
+      case 'baselines.list': {
+        // Like a hub: by workspace (a worktree answers with its repo's), by machine, or every online machine.
+        const all = mockBaselines();
+        if (typeof params.workspaceId === 'string') {
+          const ws = this.host.workspaces().find((w) => w.id === params.workspaceId);
+          if (!ws) throw new BizziError('not_found', 'no such workspace');
+          this.host.requireOnline(ws.machineId);
+          const root = ws.kind === 'worktree' && ws.parentWorkspaceId ? ws.parentWorkspaceId : ws.id;
+          return { baselines: all.filter((b) => b.workspaceId === root) };
+        }
+        if (typeof params.machineId === 'string' && params.machineId) {
+          const m = this.host.requireOnline(params.machineId);
+          return { baselines: all.filter((b) => b.machineId === m.id) };
+        }
+        const online = new Set(this.host.machines().filter((m) => m.online).map((m) => m.id));
+        return { baselines: all.filter((b) => online.has(b.machineId)) };
+      }
       case 'usage.list':
         return { accounts: [...this.accounts.values()].map((a) => ({ ...a })) };
       case 'widgets.list': {

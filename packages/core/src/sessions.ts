@@ -416,6 +416,7 @@ export class Sessions {
     }
     const info = this.#newInfo(ws.id, p.agent, mode);
     if (p.title) info.title = p.title;
+    if (p.group) info.group = p.group;
     if (p.model) info.model = p.model;
     if (p.permissionMode) info.permissionMode = p.permissionMode;
     if (p.effort) info.effort = p.effort;
