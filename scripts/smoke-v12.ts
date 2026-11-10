@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pairWithHub, requestToken, type PairedDevice } from '@bizzi/hub';
-import { check, Client, Procs, step, until } from './smoke-lib.ts';
+import { check, Client, Procs, step, until, validateTraffic } from './smoke-lib.ts';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'bizzi-v12smoke-')));
 const procs = new Procs();
@@ -213,6 +213,14 @@ try {
     return session.status === 'ended' || session.status === 'failed';
   }, 'child helper stopped with its parent');
   step('session.stop on the parent cascades to its child helper');
+
+  // ---- everything both devices sent and received matches docs/protocol.schema.json
+  const schema = JSON.parse(readFileSync(new URL('../docs/protocol.schema.json', import.meta.url), 'utf8'));
+  const frames = [...a.traffic, ...b.traffic];
+  const problems = validateTraffic(schema, frames);
+  for (const p of problems) console.error(`  schema: ${p}`);
+  check(problems.length === 0, `${problems.length} frame(s) don't match docs/protocol.schema.json`);
+  step(`${frames.length} frames match docs/protocol.schema.json`);
 
   a.close();
   b.close();

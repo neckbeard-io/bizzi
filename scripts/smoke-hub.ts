@@ -10,7 +10,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pairWithHub, requestToken } from '@bizzi/hub';
-import { Client, Procs, step } from './smoke-lib.ts';
+import { Client, Procs, step, validateTraffic } from './smoke-lib.ts';
 
 const agent = process.argv[2] ?? 'fake';
 const model = process.argv[3];
@@ -87,7 +87,13 @@ try {
   late.close();
   client.close();
 
-  ok = (turn as any).stopReason === 'end_turn' && offlineCode === 'machine_offline' && replayed.includes('turn.completed');
+  // Everything the device sent and received matches the published schema.
+  const schema = JSON.parse(readFileSync(new URL('../docs/protocol.schema.json', import.meta.url), 'utf8'));
+  const problems = validateTraffic(schema, [...client.traffic, ...late.traffic]);
+  for (const p of problems) console.error(`  schema: ${p}`);
+  step(`traffic vs docs/protocol.schema.json: ${problems.length ? `${problems.length} problem(s)` : 'ok'}`);
+
+  ok = problems.length === 0 && (turn as any).stopReason === 'end_turn' && offlineCode === 'machine_offline' && replayed.includes('turn.completed');
 } catch (err) {
   console.error(err);
 } finally {
