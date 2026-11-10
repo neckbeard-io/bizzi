@@ -74,10 +74,14 @@ export class FakeQuery implements ClaudeQuery {
   }
 }
 
-export function fakeQueryFn(script: Script): { queryFn: QueryFn; last: () => FakeQuery } {
+export function fakeQueryFn(script: Script, extend?: (fq: FakeQuery) => void): { queryFn: QueryFn; last: () => FakeQuery } {
   let last: FakeQuery | undefined;
   return {
-    queryFn: (params) => (last = new FakeQuery(params, script)),
+    queryFn: (params) => {
+      last = new FakeQuery(params, script);
+      extend?.(last);
+      return last;
+    },
     last: () => last!,
   };
 }
