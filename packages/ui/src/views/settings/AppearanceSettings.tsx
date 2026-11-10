@@ -1,8 +1,9 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useBizzi, useStore } from '../../app/context.tsx';
-import { useAction } from '../../app/hooks.ts';
-import { deleteCustomTheme, saveCustomTheme, themeIdTaken, themeStore, useCustomThemes, useThemeState } from '../../app/theme.ts';
+import { useAction, useIsWide } from '../../app/hooks.ts';
+import { sidebarStore, useSidebarPref } from '../../app/sidebar.ts';
+import { deleteCustomTheme, saveCustomTheme, themeIdTaken, themeStore, useThemeState } from '../../app/theme.ts';
 import type { DensityPref } from '../../app/theme.ts';
 import { Icon } from '../../components/icons.tsx';
 import { SectionTitle } from '../../components/layout.tsx';
@@ -25,12 +26,16 @@ const GROUP_LABEL: Record<ThemeGroup, string> = {
 
 type Entry = { id: string; theme: Theme | null; name: string; group: ThemeGroup; failures?: string[] };
 
-/** Appearance settings (docs/theming.md): theme, mode and density are per device; custom themes live on the hub. */
+/**
+ * Appearance settings (docs/theming.md §5): the theme and density are one choice for every device (stored on
+ * the server); the mode and the sidebar width are per device. Custom themes live on the server.
+ */
 export function AppearanceSettings(): ReactNode {
   const store = useStore();
-  const connected = useBizzi((s) => s.connection.state === 'open');
-  useCustomThemes(store, connected);
+  const synced = useBizzi((s) => s.connection.state === 'open');
   const s = useThemeState();
+  const wide = useIsWide();
+  const sidebar = useSidebarPref();
   const [importing, setImporting] = useState<{ result: ImportResult; fileName: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -55,7 +60,9 @@ export function AppearanceSettings(): ReactNode {
       <SectionTitle>Appearance</SectionTitle>
       <Card className="grid gap-3 p-4">
         <div className="flex flex-wrap items-center gap-3">
-          <span className="flex-1 text-sm">Mode</span>
+          <span className="flex-1 text-sm">
+            Mode <span className="text-xs text-muted">· this device</span>
+          </span>
           <Segmented<ModePref>
             value={s.mode}
             onChange={(m) => themeStore.setMode(m)}
@@ -68,7 +75,7 @@ export function AppearanceSettings(): ReactNode {
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <span className="flex-1 text-sm">
-            Density
+            Density <span className="text-xs text-muted">· every device</span>
             {s.phone && s.effectiveDensity !== (s.density === 'theme' ? (s.resolved.layout.density ?? 'comfortable') : s.density) ? (
               <span className="ml-2 text-xs text-muted">(at least comfortable on a phone)</span>
             ) : null}
@@ -84,10 +91,26 @@ export function AppearanceSettings(): ReactNode {
             ]}
           />
         </div>
+        {wide ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex-1 text-sm">
+              Sidebar width <span className="text-xs text-muted">· this device; drag its edge to set a width</span>
+            </span>
+            <Segmented<'auto' | 'manual'>
+              value={sidebar.mode}
+              onChange={(m) => sidebarStore.setAuto(m === 'auto', document.querySelector<HTMLElement>('[data-sidebar]')?.offsetWidth ?? sidebar.width)}
+              items={[
+                { value: 'auto', label: 'Fit automatically' },
+                { value: 'manual', label: 'Fixed' },
+              ]}
+            />
+          </div>
+        ) : null}
         <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
           <span className="min-w-0 flex-1 text-sm">
             <span className="font-medium">{s.theme.name}</span>
             {s.theme.author ? <span className="text-muted"> · {s.theme.author}</span> : null}
+            <span className="text-xs text-muted"> · {synced ? 'theme applies on every device' : 'theme syncs when connected'}</span>
             {s.resolved.variant !== s.requested ? <span className="text-muted"> · no {s.requested} variant, showing {s.resolved.variant}</span> : null}
           </span>
           <input

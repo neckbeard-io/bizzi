@@ -1,29 +1,17 @@
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { shallowEqual } from '@bizzi/client';
 import type { WorkspaceInfo } from '@bizzi/protocol';
+import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { useBizzi } from '../app/context.tsx';
-import { navigate, useIsWide } from '../app/hooks.ts';
+import { useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Checkbox, Empty, Spinner } from '../components/ui.tsx';
-import { pickerRequestFromHash } from '../lib/picker.ts';
 import { routeHref } from '../lib/router.ts';
 import { MachineTree } from './sidebar/MachineTree.tsx';
-import { WorkspacePicker } from './workspaces/WorkspacePicker.tsx';
-
-function subscribeHash(cb: () => void): () => void {
-  window.addEventListener('hashchange', cb);
-  return () => window.removeEventListener('hashchange', cb);
-}
-
-/** `#/workspaces?add=1[&machine=…][&path=…]` opens the picker (deep link for any "Add workspace" entry point). */
-function usePickerRequest(): { machineId?: string; path?: string } | null {
-  const hash = useSyncExternalStore(subscribeHash, () => window.location.hash, () => '');
-  return useMemo(() => pickerRequestFromHash(hash), [hash]);
-}
 
 export function WorkspacesView(): ReactNode {
   const machineId = useTargetMachineId();
@@ -41,12 +29,6 @@ export function WorkspacesView(): ReactNode {
     shallowEqual,
   );
   const otherCount = useBizzi((s) => Object.values(s.workspaces ?? {}).filter((w) => machineId && w.machineId !== machineId).length);
-  const [adding, setAdding] = useState(false);
-  const request = usePickerRequest();
-  const closePicker = (): void => {
-    setAdding(false);
-    if (request) navigate({ name: 'workspaces' }, { replace: true });
-  };
 
   return (
     <Page
@@ -55,7 +37,7 @@ export function WorkspacesView(): ReactNode {
           title="Workspaces"
           subtitle={machine ? `Directories on ${machine.name} where agents work` : 'Directories where agents work'}
           actions={
-            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => setAdding(true)}>
+            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => openAddWorkspace(machineId)}>
               Add workspace
             </Button>
           }
@@ -63,7 +45,6 @@ export function WorkspacesView(): ReactNode {
       }
     >
       <OfflineMachineBanner machineId={machineId} className="mb-3" />
-      {adding || request ? <WorkspacePicker machineId={request?.machineId ?? machineId} {...(request?.path ? { initialPath: request.path } : {})} onClose={closePicker} /> : null}
       {!wide ? (
         // Phone: the sidebar's machine → workspace structure, rows 1–2 only (spec §11.1).
         <MachineTree variant="phone" className="-mx-2" />
@@ -91,7 +72,8 @@ export function WorkspacesView(): ReactNode {
   );
 }
 
-function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): ReactNode {
+/** A workspace as a card: name, path, session counts. */
+export function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): ReactNode {
   const w = props.workspace;
   const counts = useBizzi((s) => {
     let total = 0;

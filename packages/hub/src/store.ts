@@ -5,7 +5,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import { ThemeTable } from '@bizzi/core';
+import { PrefsTable, ThemeTable } from '@bizzi/core';
 import type {
   AccountUsage,
   AgentCapabilities,
@@ -158,6 +158,8 @@ export class HubStore {
   readonly path: string;
   /** Custom themes (theming.md §5), shared by every device. */
   readonly themes: ThemeTable;
+  /** User-wide preferences (theme choice, density), shared by every device. */
+  readonly prefs: PrefsTable;
   readonly #db: DatabaseSync;
   readonly #insertEvent: StatementSync;
   readonly #replay: StatementSync;
@@ -173,6 +175,7 @@ export class HubStore {
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
     this.#db.exec(SCHEMA);
     this.themes = new ThemeTable(this.#db);
+    this.prefs = new PrefsTable(this.#db);
     this.#insertEvent = this.#db.prepare('INSERT OR IGNORE INTO events (ch, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)');
     this.#replay = this.#db.prepare('SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?');
     this.#maxSeq = this.#db.prepare('SELECT MAX(seq) AS seq FROM events WHERE ch = ?');

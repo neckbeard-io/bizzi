@@ -1,8 +1,9 @@
-// Custom themes (docs/theming.md §5). The hub stores them so every device sees them; a node stores its
-// own so the desktop app works offline. Both use this table over their own SQLite database.
+// Custom themes and user-wide preferences (docs/theming.md §5). The hub stores them so every device sees
+// them; a node stores its own so the desktop app works offline. Both use these tables over their own
+// SQLite database.
 
 import { DatabaseSync } from 'node:sqlite';
-import { BizziError, ulid, type ThemeFile } from '@bizzi/protocol';
+import { BizziError, ulid, type DensityPref, type ThemeFile, type UserPrefs } from '@bizzi/protocol';
 import type { NodeExtension } from './node.ts';
 import { asParams, optString, type Params } from './params.ts';
 
@@ -19,7 +20,43 @@ CREATE TABLE IF NOT EXISTS themes (
   data       TEXT NOT NULL,
   updated_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS user_prefs (
+  id         INTEGER PRIMARY KEY CHECK (id = 1),
+  data       TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
 `;
+
+const DENSITIES: readonly DensityPref[] = ['theme', 'compact', 'comfortable', 'spacious'];
+
+/**
+ * Validate a `prefs.set` patch. Known keys are type-checked (bad_request); unknown keys are dropped so a
+ * newer client can talk to an older server.
+ */
+export function parseUserPrefsPatch(params: unknown): Partial<UserPrefs> {
+  const p: Params = asParams(params);
+  const raw = p.prefs;
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) throw new BizziError('bad_request', 'prefs must be an object');
+  const r = raw as Record<string, unknown>;
+  const out: Partial<UserPrefs> = {};
+  if (r.themeId !== undefined) {
+    if (typeof r.themeId !== 'string' || !THEME_ID_RE.test(r.themeId)) throw new BizziError('bad_request', 'prefs.themeId must be a theme id');
+    out.themeId = r.themeId;
+  }
+  if (r.density !== undefined) {
+    if (!DENSITIES.includes(r.density as DensityPref)) throw new BizziError('bad_request', `prefs.density must be one of ${DENSITIES.join(', ')}`);
+    out.density = r.density as DensityPref;
+  }
+  return out;
+}
+
+/** Shallow merge: keys present in `patch` replace the stored value. */
+export function mergeUserPrefs(current: UserPrefs, patch: Partial<UserPrefs>): UserPrefs {
+  const next: UserPrefs = { ...current };
+  if (patch.themeId !== undefined) next.themeId = patch.themeId;
+  if (patch.density !== undefined) next.density = patch.density;
+  return next;
+}
 
 export interface ThemeSave {
   id?: string;
@@ -101,13 +138,53 @@ export class ThemeTable {
   }
 }
 
-/** The core's built-in `themes.*` handlers (local mode); a separate connection to `dbPath`. */
+/** The single row of user-wide preferences (`prefs.get` / `prefs.set`). */
+export class PrefsTable {
+  readonly #db: DatabaseSync;
+  readonly #now: () => Date;
+
+  constructor(db: DatabaseSync, now: () => Date = () => new Date()) {
+    this.#db = db;
+    this.#now = now;
+    db.exec(SCHEMA);
+  }
+
+  get(): UserPrefs {
+    const row = this.#db.prepare('SELECT data FROM user_prefs WHERE id = 1').get() as { data: string } | undefined;
+    if (!row) return {};
+    try {
+      // Re-validate what's stored so a hand-edited row can't hand clients a bad value.
+      return mergeUserPrefs({}, parseUserPrefsPatch({ prefs: JSON.parse(row.data) as unknown }));
+    } catch {
+      return {};
+    }
+  }
+
+  /** Merge a `prefs.set` params object; returns the stored result. Throws bad_request. */
+  set(params: unknown): UserPrefs {
+    const next = mergeUserPrefs(this.get(), parseUserPrefsPatch(params));
+    this.#db
+      .prepare(
+        `INSERT INTO user_prefs (id, data, updated_at) VALUES (1, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET data = excluded.data, updated_at = excluded.updated_at`,
+      )
+      .run(JSON.stringify(next), this.#now().toISOString());
+    return next;
+  }
+}
+
+/** The core's built-in `themes.*` and `prefs.*` handlers (local mode); a separate connection to `dbPath`. */
 export function themesExtension(dbPath: string): NodeExtension {
   let db: DatabaseSync | undefined;
   let table: ThemeTable | undefined;
+  let prefs: PrefsTable | undefined;
   const t = (): ThemeTable => {
     if (!table) throw new BizziError('machine_offline', 'node is shut down');
     return table;
+  };
+  const pt = (): PrefsTable => {
+    if (!prefs) throw new BizziError('machine_offline', 'node is shut down');
+    return prefs;
   };
   return {
     methods: {
@@ -117,14 +194,22 @@ export function themesExtension(dbPath: string): NodeExtension {
         t().delete(p);
         return {};
       },
+      'prefs.get': () => ({ prefs: pt().get() }),
+      'prefs.set': (p: unknown, ctx) => {
+        const next = pt().set(p);
+        ctx.emitGlobal({ type: 'prefs.updated', data: { prefs: next } });
+        return { prefs: next };
+      },
     },
     start: () => {
       db = new DatabaseSync(dbPath);
       db.exec('PRAGMA busy_timeout = 5000;');
       table = new ThemeTable(db);
+      prefs = new PrefsTable(db);
     },
     stop: () => {
       table = undefined;
+      prefs = undefined;
       if (db?.isOpen) db.close();
       db = undefined;
     },

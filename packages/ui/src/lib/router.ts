@@ -1,12 +1,15 @@
 // Hash routes, so the app works from file:// (Electron), Capacitor and any hub sub-path.
 
 export type SessionTab = 'chat' | 'plan' | 'files' | 'changes';
-export type SettingsSection = 'general' | 'knowledge' | 'devices';
+/** Global (app-level) settings; `general` is Appearance. Machine-scoped settings live on the machine page. */
+export type SettingsSection = 'general' | 'knowledge' | 'devices' | 'connection';
 
 export type Route =
+  /** Every machine: the machine → workspace tree (phone); on desktop the sidebar is the tree, so it redirects. */
   | { name: 'machines' }
-  /** A machine's page; without `machineId` the selected machine. */
+  /** A machine's page (agents, workspaces, machine settings); without `machineId` the selected machine. */
   | { name: 'machine'; machineId?: string }
+  /** Workspaces of the selected machine (phone); redirects to the machine page on desktop. */
   | { name: 'workspaces' }
   | { name: 'workspace'; workspaceId: string }
   | { name: 'session'; sessionId: string; tab: SessionTab }
@@ -19,7 +22,7 @@ export type Route =
   | { name: 'settings'; section: SettingsSection };
 
 const TABS: readonly SessionTab[] = ['chat', 'plan', 'files', 'changes'];
-const SECTIONS: readonly SettingsSection[] = ['general', 'knowledge', 'devices'];
+const SECTIONS: readonly SettingsSection[] = ['general', 'knowledge', 'devices', 'connection'];
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '').split('?')[0] ?? '';
@@ -28,7 +31,7 @@ export function parseHash(hash: string): Route {
     case 'machines':
       return { name: 'machines' };
     case 'machine':
-      return { name: 'machine' };
+      return parts[1] ? { name: 'machine', machineId: parts[1] } : { name: 'machine' };
     case 'm':
       return parts[1] ? { name: 'machine', machineId: parts[1] } : { name: 'machines' };
     case 'inbox':
@@ -36,7 +39,7 @@ export function parseHash(hash: string): Route {
     case 'knowledge':
       return { name: 'knowledge' };
     case 'settings': {
-      const section = SECTIONS.includes(parts[1] as SettingsSection) ? (parts[1] as SettingsSection) : 'general';
+      const section = SECTIONS.includes(parts[1] as SettingsSection) ? (parts[1] as SettingsSection) : 'general'; // incl. 'appearance'
       return { name: 'settings', section };
     }
     case 'login':
@@ -61,7 +64,7 @@ export function routeHref(r: Route): string {
     case 'machines':
       return '#/machines';
     case 'machine':
-      return r.machineId ? `#/m/${encodeURIComponent(r.machineId)}` : '#/machine';
+      return r.machineId ? `#/machine/${encodeURIComponent(r.machineId)}` : '#/machine';
     case 'inbox':
       return '#/inbox';
     case 'knowledge':
@@ -79,6 +82,16 @@ export function routeHref(r: Route): string {
     case 'session':
       return `#/s/${encodeURIComponent(r.sessionId)}${r.tab === 'chat' ? '' : `/${r.tab}`}`;
   }
+}
+
+/**
+ * Desktop: the sidebar is the machine → workspace tree, so the list pages (`#/machines`, `#/workspaces`)
+ * open the selected machine's page instead (or the first machine's). Returns null when no redirect applies.
+ */
+export function desktopRedirect(r: Route, wide: boolean, machineId: string | null): Route | null {
+  if (!wide || !machineId) return null;
+  if (r.name === 'machines' || r.name === 'workspaces') return { name: 'machine', machineId };
+  return null;
 }
 
 /** A pairing link the app was opened with (`…/#/pair?code=…` or `?pair=…`), e.g. from a hub's QR code. */

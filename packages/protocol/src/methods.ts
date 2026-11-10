@@ -27,6 +27,7 @@ import type {
   SessionMode,
   ThemeFile,
   UpdatePolicy,
+  UserPrefs,
   WidgetValue,
   WorkspaceInfo,
 } from './model.ts';
@@ -321,6 +322,9 @@ export interface Methods {
   'themes.list': { params: Empty; result: { themes: ThemeFile[] } };
   'theme.save': { params: { id?: string; name: string; data: unknown }; result: { theme: ThemeFile } };
   'theme.delete': { params: { id: string }; result: Empty };
+  /** User-wide preferences (theme choice, density); hub-local like themes.*. `prefs.set` merges and emits `prefs.updated`. */
+  'prefs.get': { params: Empty; result: { prefs: UserPrefs } };
+  'prefs.set': { params: { prefs: Partial<UserPrefs> }; result: { prefs: UserPrefs } };
 }
 
 export type MethodName = keyof Methods;

@@ -109,6 +109,8 @@ const UNIMPLEMENTED = [
   'themes.list',
   'theme.save',
   'theme.delete',
+  'prefs.get',
+  'prefs.set',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */

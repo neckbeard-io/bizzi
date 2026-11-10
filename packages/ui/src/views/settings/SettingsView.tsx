@@ -8,30 +8,35 @@ import { KnowledgeSettings } from '../knowledge/KnowledgeSettings.tsx';
 import { AppearanceSettings } from './AppearanceSettings.tsx';
 import { DevicesSettings } from './DevicesSettings.tsx';
 
+/**
+ * App-level settings only (the gear in the sidebar header): appearance, knowledge, devices (hub), connection.
+ * Machine-scoped settings (agents and their policies, API keys, widgets, agent-to-agent limits) are on each
+ * machine's page.
+ */
 export function SettingsView(props: { section: SettingsSection }): ReactNode {
   const hub = useBizzi((s) => s.role === 'hub');
   const items: { value: SettingsSection; label: string }[] = [
-    { value: 'general', label: 'General' },
+    { value: 'general', label: 'Appearance' },
     { value: 'knowledge', label: 'Knowledge' },
   ];
   if (hub) items.push({ value: 'devices', label: 'Devices' });
+  items.push({ value: 'connection', label: 'Connection' });
   const section = props.section === 'devices' && !hub ? 'general' : props.section;
   return (
-    <Page header={<PageHeader title="Settings" />}>
+    <Page header={<PageHeader title="Settings" subtitle="For the whole app; machine settings are on each machine's page" />}>
       <Tabs<SettingsSection> className="mb-4" value={section} onChange={(s) => navigate({ name: 'settings', section: s }, { replace: true })} items={items} />
-      {section === 'general' ? <GeneralSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : <DevicesSettings />}
+      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'devices' ? <DevicesSettings /> : <ConnectionSettings />}
     </Page>
   );
 }
 
-function GeneralSettings(): ReactNode {
+function ConnectionSettings(): ReactNode {
   const { target, disconnect } = useBizziContext();
   const conn = useBizzi((s) => s.connection);
   const role = useBizzi((s) => s.role);
   const machine = useBizzi((s) => s.machine);
   return (
     <>
-      <AppearanceSettings />
       <SectionTitle>Connection</SectionTitle>
       <Card className="grid gap-2 p-4 text-sm">
         <Row label="Connected to">{role === 'hub' ? `hub ${machine?.name ?? ''}` : `node ${machine?.name ?? ''}`}</Row>

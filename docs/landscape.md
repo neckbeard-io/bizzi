@@ -81,6 +81,8 @@ For self-hosters without a domain or Caddy: the hub listens on the tailnet (HTTP
 - Attention rollup, per-agent marks and `done` as an unseen-result flag: **designed, spec §11.1** (sidebar rows), with a hub-side `seen_through` cursor so devices agree (spec §4).
 - Per-agent notification sounds; suppress the toast for the session you're viewing (Herdr).
 - Agent-editable UI config with its own AGENTS.md (herdr-app): users customise layout by asking their agent.
+- Sidebar as the machine → workspace tree with clickable machine tiles and a resizable, auto-fitting width: **done, spec §11.1**.
+- Colour/tags per machine and workspace (a stripe or dot in the sidebar and headers): later, spec §13 M5. Not a per-machine theme: the theme is one user-wide setting (theming.md §5).
 
 ## Sources
 

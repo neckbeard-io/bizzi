@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createNode, type BizziNode, type NodeExtension } from '@bizzi/core';
 import { FakeAdapter } from '@bizzi/core/testing';
-import { GLOBAL_CHANNEL, type AccountUsage, type ChannelEvent, type ThemeFile, type WidgetValue } from '@bizzi/protocol';
+import { GLOBAL_CHANNEL, type AccountUsage, type ChannelEvent, type ThemeFile, type UserPrefs, type WidgetValue } from '@bizzi/protocol';
 import { connectToHub, NtfyPusher, pairWithHub, type BizziHub, type HubCredential } from '../src/index.ts';
 import { nullLogger } from '../src/util.ts';
 import { makeHub, pairDevice, setupCode, sleep, tempDir, TestClient, tokenFor, waitFor } from './helpers.ts';
@@ -142,6 +142,37 @@ test('themes live on the hub: CRUD, persisted, not relayed to nodes', async (t) 
   client = await TestClient.connect(hub.clientUrl, await tokenFor(hub, owner));
   const { themes } = await client.call<{ themes: ThemeFile[] }>('themes.list');
   assert.deepEqual(themes.map((x) => [x.id, x.name, x.data]), [[theme.id, 'Nord warmer', { base: 'nord', tones: 6 }]]);
+});
+
+test('prefs live on the hub: shared by devices, prefs.updated pushed, persisted', async (t) => {
+  const hubDir = tempDir();
+  let hub = await makeHub(hubDir.path);
+  const desktop = await pairDevice(hub, setupCode(hub), 'desktop');
+  let a = await TestClient.connect(hub.clientUrl, await tokenFor(hub, desktop));
+  const { code } = await a.call<{ code: string }>('pairing.create', { kind: 'device', name: 'phone' });
+  const phone = await pairDevice(hub, code, 'phone');
+  const b = await TestClient.connect(hub.clientUrl, await tokenFor(hub, phone));
+  t.after(async () => {
+    a.close();
+    b.close();
+    await hub.close();
+    hubDir.cleanup();
+  });
+  await b.call('subscribe', { ch: GLOBAL_CHANNEL });
+  assert.deepEqual((await a.call<{ prefs: UserPrefs }>('prefs.get')).prefs, {});
+  const { prefs } = await a.call<{ prefs: UserPrefs }>('prefs.set', { prefs: { themeId: 'harbour', density: 'compact' } });
+  assert.deepEqual(prefs, { themeId: 'harbour', density: 'compact' });
+  await waitFor(() => b.events.find((e) => e.type === 'prefs.updated'));
+  assert.deepEqual(b.events.find((e) => e.type === 'prefs.updated')?.data, { prefs: { themeId: 'harbour', density: 'compact' } });
+  assert.deepEqual((await b.call<{ prefs: UserPrefs }>('prefs.set', { prefs: { themeId: 'nord' } })).prefs, { themeId: 'nord', density: 'compact' });
+  assert.equal((await a.request('prefs.set', { prefs: { density: 7 } })).error?.code, 'bad_request');
+
+  a.close();
+  b.close();
+  await hub.close();
+  hub = await makeHub(hubDir.path);
+  a = await TestClient.connect(hub.clientUrl, await tokenFor(hub, desktop));
+  assert.deepEqual((await a.call<{ prefs: UserPrefs }>('prefs.get')).prefs, { themeId: 'nord', density: 'compact' });
 });
 
 test('NtfyPusher: plan windows at 80% and 95% and limited logins, once per window reset', async () => {
