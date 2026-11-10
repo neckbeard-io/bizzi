@@ -234,6 +234,7 @@ export class BizziStore {
   private readonly seenInflight = new Set<string>();
   private seenUnsupported = false;
   private readonly gitInflight = new Set<string>();
+  private readonly agentsReload = new Set<string>();
 
   /** Number of notifications sent (handy for perf tests). */
   notifications = 0;
@@ -530,7 +531,11 @@ export class BizziStore {
     const timelines = { ...this.state.timelines };
     let sessions: Record<string, SessionInfo> | null = null;
     for (const [sid, evs] of bySession) {
-      for (const ev of evs) if (ev.type === 'account.usage') this.upsertAccount(ev.data);
+      for (const ev of evs) {
+        if (ev.type === 'account.usage') this.upsertAccount(ev.data);
+        // A restart changes the machine's stale-session count (updates.md §6): refresh its agent list.
+        else if (ev.type === 'session.restarted' && ev.data.ok) this.scheduleAgentsReload(this.state.sessions[sid]?.machineId);
+      }
       const prev = timelines[sid] ?? emptyTimeline(sid);
       const next = reduceTimeline(prev, evs);
       timelines[sid] = next;
@@ -665,6 +670,15 @@ export class BizziStore {
       const mid = job.machineId ?? this.targetMachineId();
       if (mid && this.client.isOpen()) this.loadAgents(mid, true).catch((e) => this.logger.log('warn', 'reload agents failed', { error: String(e) }));
     }
+  }
+
+  private scheduleAgentsReload(machineId: string | undefined): void {
+    if (!machineId || this.agentsReload.has(machineId) || this.disposed) return;
+    this.agentsReload.add(machineId);
+    setTimeout(() => {
+      this.agentsReload.delete(machineId);
+      if (this.client.isOpen() && !this.disposed) this.loadAgents(machineId).catch((e) => this.logger.log('debug', 'agents reload failed', { error: String(e) }));
+    }, 250);
   }
 
   private scheduleKnowledgeReload(): void {

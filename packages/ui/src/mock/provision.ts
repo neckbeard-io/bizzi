@@ -1,10 +1,10 @@
 // Mock provisioning: agents.list per machine, agent.plan / install (with install.progress), login, secrets.
 import { BizziError, GLOBAL_CHANNEL } from '@bizzi/protocol';
-import type { AgentKind, AgentListing, InstallAction, InstallPlan, InstallStep, MachineInfo, SecretInfo } from '@bizzi/protocol';
-import { AGENTS, MACHINE, SERVER, SERVER_AGENTS } from './fixtures.ts';
+import type { AgentKind, AgentListing, InstallAction, InstallPlan, InstallStep, MachineInfo, RestartPolicy, SecretInfo, UpdatePolicy } from '@bizzi/protocol';
+import { AGENTS, MACHINE, MINI, MINI_AGENTS, SERVER, SERVER_AGENTS } from './fixtures.ts';
 import type { MockHost, MockModule } from './host.ts';
 
-const LATEST: Record<Exclude<AgentKind, 'shell'>, string> = { claude: '2.4.3', codex: '0.99.1', opencode: '1.3.4', agy: '0.9.2' };
+const LATEST: Record<Exclude<AgentKind, 'shell'>, string> = { claude: '2.4.3', codex: '0.99.1', opencode: '2.1.0', agy: '0.9.2' };
 
 const BIN_PATH: Record<Exclude<AgentKind, 'shell'>, (m: MachineInfo) => string> = {
   claude: (m) => (m.os === 'darwin' ? '/Users/dev/.local/bin/claude' : '/home/dev/.local/bin/claude'),
@@ -28,7 +28,7 @@ const step = (id: string, title: string, command?: string, requiresSudo?: boolea
 };
 
 /** Recipes per agent × action × OS (see docs/spec.md §7). */
-export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo, method?: string): InstallPlan {
+export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo, method?: string, current?: AgentListing): InstallPlan {
   if (agent === 'shell') throw new BizziError('unsupported', 'the shell is built in; nothing to install');
   const mac = m.os === 'darwin';
   const plan = (method: string, steps: InstallStep[], notes?: string[]): InstallPlan => (notes ? { target: agent, action, method, steps, notes } : { target: agent, action, method, steps });
@@ -72,6 +72,12 @@ export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo
     case 'opencode':
       if (action === 'install')
         return plan('script', [step('script', 'Run the install script', 'curl -fsSL https://opencode.ai/install | bash'), step('verify', 'Verify the binary', 'opencode --version')]);
+      if (action === 'update' && current?.version?.startsWith('1.'))
+        return plan(
+          'script',
+          [step('upgrade', 'Upgrade to OpenCode v2', 'opencode upgrade --major'), step('service', 'Restart the background service', 'opencode service restart'), step('verify', 'Verify the binary', 'opencode --version')],
+          ['v2 keeps your providers and sessions; v1-only plugins need updating.', 'Sessions running on v1 restart on v2 at their next safe point.'],
+        );
       if (action === 'update') return plan('script', [step('upgrade', 'Upgrade in place', 'opencode upgrade'), step('verify', 'Verify the binary', 'opencode --version')]);
       return plan('script', [step('remove', 'Remove the install directory', 'rm -rf ~/.opencode')]);
     case 'agy':
@@ -102,6 +108,25 @@ export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo
   }
 }
 
+/** spec §7 "Install method and migration": switch an adopted install to the recipe's preferred method. */
+export function mockMigratePlan(agent: AgentKind, m: MachineInfo, current: AgentListing | undefined): InstallPlan {
+  if (agent !== 'claude') throw new BizziError('unsupported', `${agent} has no preferred method to migrate to`);
+  const from = current?.method ?? 'brew';
+  const remove = from === 'npm' ? 'npm rm -g @anthropic-ai/claude-code' : 'brew uninstall --cask claude-code';
+  return {
+    target: agent,
+    action: 'install',
+    method: 'installer',
+    steps: [
+      step('native', 'Install with the native installer', 'curl -fsSL https://claude.ai/install.sh | bash'),
+      step('pathorder', 'Put ~/.local/bin first on PATH for login and non-interactive shells', `bizzi env path add ~/.local/bin --first --service ${m.os === 'darwin' ? 'launchd' : 'systemd'}`),
+      step('reprobe', 'Re-probe the binary and the login', 'claude --version && claude auth status'),
+      step('cleanup', `Remove the ${from} install once no session uses it`, remove),
+    ],
+    notes: ['Your login lives in ~/.claude and the keychain, not next to the binary, so it carries over.', 'The native install updates itself.'],
+  };
+}
+
 /** Fake output per step, so the progress log reads like a real run. */
 const STEP_MESSAGES: Record<string, string> = {
   download: 'Downloading claude 2.4.3 for this platform (38 MB)…',
@@ -116,6 +141,11 @@ const STEP_MESSAGES: Record<string, string> = {
   script: 'Installing to ~/.local/bin…',
   upgrade: 'Fetching the latest release…',
   deps: 'Reading package lists…',
+  native: 'Installing claude 2.4.3 to ~/.local/bin…',
+  pathorder: 'PATH order checked for zsh, launchd',
+  reprobe: 'claude 2.4.3 · signed in as dev@example.com (Max)',
+  cleanup: '==> Uninstalling Cask claude-code',
+  service: 'Restarted opencode.service',
 };
 
 interface LoginRun {
@@ -136,6 +166,7 @@ export class MockProvision implements MockModule {
     this.host = host;
     this.agents.set(MACHINE.id, AGENTS.map((a) => ({ ...a })));
     this.agents.set(SERVER.id, SERVER_AGENTS.map((a) => ({ ...a })));
+    this.agents.set(MINI.id, MINI_AGENTS.map((a) => ({ ...a })));
     this.secrets.set(MACHINE.id, [{ agent: 'claude', name: 'ANTHROPIC_API_KEY', setAt: new Date(Date.now() - 3 * 86400_000).toISOString() }]);
     if (host.demo.has('install')) {
       setTimeout(() => {
@@ -159,7 +190,29 @@ export class MockProvision implements MockModule {
       }
       case 'agent.plan': {
         await this.host.sleep(250);
-        return { plan: mockPlan(this.agentParam(params), this.actionParam(params), m, typeof params.method === 'string' ? params.method : undefined) };
+        const agent = this.agentParam(params);
+        return { plan: mockPlan(agent, this.actionParam(params), m, typeof params.method === 'string' ? params.method : undefined, this.listing(m.id, agent)) };
+      }
+      case 'agent.migrate': {
+        const agent = this.agentParam(params);
+        const listing = this.listing(m.id, agent);
+        if (!listing?.installed) throw new BizziError('conflict', `${agent} is not installed`);
+        if (!listing.remedies?.some((r) => r.kind === 'migrate')) throw new BizziError('conflict', `${agent} already uses the preferred install method`);
+        await this.host.sleep(250);
+        const plan = mockMigratePlan(agent, m, listing);
+        const jobId = `job_${(++this.jobCounter).toString(36)}${Date.now().toString(36).slice(-4)}`;
+        if (params.dryRun !== true) setTimeout(() => void this.runJob(jobId, m, agent, 'migrate', plan, 1000), 0);
+        return { jobId, plan };
+      }
+      case 'agent.policy.set': {
+        const agent = this.agentParam(params);
+        if (!this.listing(m.id, agent)) throw new BizziError('not_found', `${agent} is unknown on ${m.name}`);
+        const update = params.update as UpdatePolicy | undefined;
+        const restart = params.restart as RestartPolicy | undefined;
+        if (update !== undefined && !['auto', 'notify', 'pinned'].includes(update)) throw new BizziError('bad_request', `unknown update policy: ${String(update)}`);
+        if (restart !== undefined && !['when-idle', 'ask', 'manual'].includes(restart)) throw new BizziError('bad_request', `unknown restart policy: ${String(restart)}`);
+        this.patchListing(m.id, agent, (l) => ({ ...l, ...(update ? { updatePolicy: update } : {}), ...(restart ? { restartPolicy: restart } : {}) }));
+        return { agent: { ...this.listing(m.id, agent) } };
       }
       case 'agent.install': {
         const agent = this.agentParam(params);
@@ -167,7 +220,7 @@ export class MockProvision implements MockModule {
         const listing = this.listing(m.id, agent);
         if (action === 'install' && listing?.installed) throw new BizziError('conflict', `${agent} is already installed`);
         if (action !== 'install' && !listing?.installed) throw new BizziError('conflict', `${agent} is not installed`);
-        const plan = mockPlan(agent, action, m, typeof params.method === 'string' ? params.method : undefined);
+        const plan = mockPlan(agent, action, m, typeof params.method === 'string' ? params.method : undefined, listing);
         const jobId = `job_${(++this.jobCounter).toString(36)}${Date.now().toString(36).slice(-4)}`;
         if (params.dryRun !== true) setTimeout(() => void this.runJob(jobId, m, agent, action, plan, 1000), 0);
         return { jobId, plan };
@@ -238,7 +291,17 @@ export class MockProvision implements MockModule {
     this.host.emit(GLOBAL_CHANNEL, { type: 'install.progress', data: { agent, jobId, ...data } });
   }
 
-  private async runJob(jobId: string, m: MachineInfo, agent: AgentKind, action: InstallAction, plan: InstallPlan, stepMs: number, minSteps = 0): Promise<void> {
+  /** Sessions of `agent` on a machine whose process runs another version than `version` (updates.md §2). */
+  staleCount(machineId: string, agent: AgentKind, version: string | undefined): number {
+    return this.host.sessions().filter((x) => x.machineId === machineId && x.agent === agent && x.status !== 'ended' && x.agentVersion !== undefined && x.agentVersion !== version).length;
+  }
+
+  /** Re-derive `staleSessions` for an agent (after an update or a session restart). */
+  refreshStale(machineId: string, agent: AgentKind): void {
+    this.patchListing(machineId, agent, (l) => ({ ...l, staleSessions: this.staleCount(machineId, agent, l.version) }));
+  }
+
+  private async runJob(jobId: string, m: MachineInfo, agent: AgentKind, action: InstallAction | 'migrate', plan: InstallPlan, stepMs: number, minSteps = 0): Promise<void> {
     // The demo job pads the plan with a resolve step so it runs long enough to be seen mid-way.
     const steps = [...plan.steps];
     while (steps.length < minSteps) steps.unshift(step(`resolve${steps.length}`, steps.length % 2 ? 'Check prerequisites' : 'Resolve the latest version'));
@@ -257,6 +320,14 @@ export class MockProvision implements MockModule {
     const a = agent as Exclude<AgentKind, 'shell'>;
     if (action === 'uninstall') {
       this.patchListing(m.id, agent, (l) => ({ agent: l.agent, installed: false, auth: 'missing', latestVersion: LATEST[a] }));
+    } else if (action === 'migrate') {
+      this.patchListing(m.id, agent, (l) => {
+        const next: AgentListing = { ...l, method: plan.method, path: BIN_PATH[a](m), realPath: BIN_PATH[a](m), version: LATEST[a], latestVersion: LATEST[a], updateAvailable: false, onPath: true };
+        next.remedies = (l.remedies ?? []).filter((r) => r.kind !== 'migrate');
+        delete next.notes;
+        return next;
+      });
+      this.refreshStale(m.id, agent);
     } else {
       this.patchListing(m.id, agent, (l) => {
         const next: AgentListing = { ...l, installed: true, version: LATEST[a], latestVersion: LATEST[a], updateAvailable: false, path: l.path ?? BIN_PATH[a](m), onPath: true };
@@ -265,10 +336,16 @@ export class MockProvision implements MockModule {
           next.notes = ['installed by bizzi; log in to use it'];
           next.method = plan.method;
         }
+        if (l.support === 'unsupported') {
+          next.support = 'ok';
+          delete next.supportReason;
+          next.remedies = (l.remedies ?? []).filter((r) => r.kind !== 'upgrade');
+        }
         return next;
       });
+      this.refreshStale(m.id, agent);
     }
-    this.progress(jobId, agent, { stage: 'Done', message: `${agent} ${action === 'uninstall' ? 'removed' : LATEST[a]}`, step: total, total, done: true, ok: true });
+    this.progress(jobId, agent, { stage: 'Done', message: `${agent} ${action === 'uninstall' ? 'removed' : action === 'migrate' ? `${LATEST[a]} via ${plan.method}` : LATEST[a]}`, step: total, total, done: true, ok: true });
   }
 
   /** A login flow as a terminal session that prints a URL + code and waits for the code to be pasted. */

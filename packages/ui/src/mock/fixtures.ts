@@ -1,5 +1,5 @@
 import { NO_CAPABILITIES } from '@bizzi/protocol';
-import type { AgentCapabilities, AgentListing, MachineInfo, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+import type { AccountUsage, AgentCapabilities, AgentListing, ContextUsage, MachineInfo, SessionInfo, WidgetValue, WorkspaceInfo } from '@bizzi/protocol';
 
 export const MACHINE: MachineInfo = {
   id: 'm_laptop',
@@ -30,7 +30,22 @@ export const SERVER: MachineInfo = {
   bizziVersion: '0.0.1',
 };
 
-export const OTHER_MACHINES: MachineInfo[] = [SERVER];
+/** mac-mini: an always-on second Mac (online), where Codex runs a version newer than bizzi tested. */
+export const MINI: MachineInfo = {
+  id: 'm_mini',
+  name: 'mac-mini',
+  hostname: 'mac-mini.local',
+  os: 'darwin',
+  arch: 'arm64',
+  headful: true,
+  alwaysOn: true,
+  tags: ['xcode'],
+  online: true,
+  roles: ['node'],
+  bizziVersion: '0.0.1-mock',
+};
+
+export const OTHER_MACHINES: MachineInfo[] = [SERVER, MINI];
 
 /** The hub's own host (hello.machine in hub mode); not a node. */
 export const HUB_MACHINE: MachineInfo = {
@@ -116,9 +131,58 @@ const OPENCODE_CAPS: AgentCapabilities = {
 const TERMINAL_CAPS: AgentCapabilities = { ...NO_CAPABILITIES, modes: ['terminal'], interrupt: true, terminal: true };
 
 export const AGENTS: AgentListing[] = [
-  { agent: 'claude', installed: true, path: '/opt/homebrew/bin/claude', version: '2.4.1', latestVersion: '2.4.3', auth: 'ok', account: 'dev@example.com (Max)', capabilities: CLAUDE_CAPS },
-  { agent: 'codex', installed: true, path: '/opt/homebrew/bin/codex', version: '0.98.0', auth: 'expired', notes: ['login expired 3 days ago'], capabilities: CODEX_CAPS },
-  { agent: 'opencode', installed: true, path: '/usr/local/bin/opencode', version: '1.3.2', auth: 'ok', capabilities: OPENCODE_CAPS },
+  {
+    agent: 'claude',
+    installed: true,
+    path: '/opt/homebrew/bin/claude',
+    realPath: '/opt/homebrew/Caskroom/claude-code/2.4.1/claude',
+    method: 'brew',
+    preferredMethod: 'installer',
+    version: '2.4.1',
+    latestVersion: '2.4.3',
+    auth: 'ok',
+    account: 'dev@example.com (Max)',
+    billing: 'plan',
+    support: 'ok',
+    remedies: [{ kind: 'migrate', title: 'Switch to the native installer', method: 'installer' }],
+    notes: ['Installed with Homebrew: it does not update itself.'],
+    updatePolicy: 'notify',
+    restartPolicy: 'when-idle',
+    staleSessions: 1,
+    capabilities: CLAUDE_CAPS,
+  },
+  {
+    agent: 'codex',
+    installed: true,
+    path: '/opt/homebrew/bin/codex',
+    method: 'brew',
+    preferredMethod: 'brew',
+    version: '0.98.0',
+    auth: 'expired',
+    billing: 'plan',
+    support: 'ok',
+    notes: ['login expired 3 days ago'],
+    updatePolicy: 'auto',
+    restartPolicy: 'when-idle',
+    capabilities: CODEX_CAPS,
+  },
+  {
+    agent: 'opencode',
+    installed: true,
+    path: '/usr/local/bin/opencode',
+    method: 'script',
+    preferredMethod: 'script',
+    version: '1.3.2',
+    latestVersion: '2.1.0',
+    auth: 'ok',
+    billing: 'budgetless',
+    support: 'unsupported',
+    supportReason: 'OpenCode v1 is not supported; bizzi drives v2 only.',
+    remedies: [{ kind: 'upgrade', title: 'Upgrade to v2', method: 'script', command: 'opencode upgrade --major' }],
+    updatePolicy: 'notify',
+    restartPolicy: 'ask',
+    capabilities: OPENCODE_CAPS,
+  },
   { agent: 'agy', installed: false, auth: 'missing', notes: ['not installed'] },
   { agent: 'shell', installed: true, path: '/bin/zsh', version: '5.9', auth: 'ok', capabilities: TERMINAL_CAPS },
 ];
@@ -131,6 +195,32 @@ export const SERVER_AGENTS: AgentListing[] = [
   { agent: 'agy', installed: false, auth: 'missing', notes: ['headless: needs a Gemini API key'] },
   { agent: 'shell', installed: true, path: '/bin/bash', version: '5.2', auth: 'ok', capabilities: TERMINAL_CAPS },
 ];
+
+/** mac-mini's agents: Claude via the native installer, Codex newer than the tested range. */
+export const MINI_AGENTS: AgentListing[] = [
+  { agent: 'claude', installed: true, path: '/Users/dev/.local/bin/claude', method: 'installer', preferredMethod: 'installer', version: '2.4.3', latestVersion: '2.4.3', auth: 'ok', account: 'dev@example.com (Max)', billing: 'plan', support: 'ok', updatePolicy: 'auto', restartPolicy: 'when-idle', capabilities: CLAUDE_CAPS },
+  {
+    agent: 'codex',
+    installed: true,
+    path: '/opt/homebrew/bin/codex',
+    method: 'brew',
+    preferredMethod: 'brew',
+    version: '0.101.0',
+    auth: 'ok',
+    account: 'dev@example.com (ChatGPT Pro)',
+    billing: 'plan',
+    support: 'untested',
+    supportReason: 'Newer than the range bizzi was tested with (up to 0.99).',
+    updatePolicy: 'auto',
+    restartPolicy: 'when-idle',
+    capabilities: CODEX_CAPS,
+  },
+  { agent: 'opencode', installed: false, auth: 'missing' },
+  { agent: 'agy', installed: false, auth: 'missing' },
+  { agent: 'shell', installed: true, path: '/bin/zsh', version: '5.9', auth: 'ok', capabilities: TERMINAL_CAPS },
+];
+
+export const AGENTS_BY_MACHINE: Record<string, AgentListing[]> = { m_laptop: AGENTS, m_server: SERVER_AGENTS, m_mini: MINI_AGENTS };
 
 export const CAPS_BY_AGENT: Record<string, AgentCapabilities> = {
   claude: CLAUDE_CAPS,
@@ -147,7 +237,35 @@ export const WORKSPACES: WorkspaceInfo[] = [
   { id: 'w_acme', machineId: MACHINE.id, name: 'acme-shop', path: '/Users/dev/src/acme-shop', kind: 'git', projectId: 'p_acme', createdAt: iso(-60 * 24 * 7) },
   { id: 'w_notes', machineId: MACHINE.id, name: 'research-notes', path: '/Users/dev/research/notes', kind: 'dir', createdAt: iso(-60 * 24 * 2) },
   { id: 'w_infra', machineId: SERVER.id, name: 'infra', path: '/srv/infra', kind: 'git', createdAt: iso(-60 * 24 * 30) },
+  {
+    id: 'w_acme_oauth',
+    machineId: MACHINE.id,
+    name: 'acme-shop · feat/oauth',
+    path: '/Users/dev/src/acme-shop.worktrees/feat-oauth',
+    kind: 'worktree',
+    parentWorkspaceId: 'w_acme',
+    branch: 'feat/oauth',
+    projectId: 'p_acme',
+    createdAt: iso(-40),
+  },
+  { id: 'w_ext', machineId: MINI.id, name: 'extensions', path: '/Users/dev/src/extensions', kind: 'git', createdAt: iso(-60 * 24 * 12) },
 ];
+
+/** git.status per workspace (spec §11.1 row 1 branch/dirty and row 3 ahead/behind). */
+export const GIT_STATUS: Record<string, { branch: string; ahead: number; behind: number; files: { path: string; status: string }[] }> = {
+  w_acme: {
+    branch: 'fix/flaky-checkout',
+    ahead: 1,
+    behind: 0,
+    files: [
+      { path: 'src/checkout/checkout.spec.ts', status: ' M' },
+      { path: 'notes.txt', status: '??' },
+    ],
+  },
+  w_acme_oauth: { branch: 'feat/oauth', ahead: 3, behind: 1, files: [{ path: 'src/auth/oauth.ts', status: 'A ' }] },
+  w_infra: { branch: 'main', ahead: 0, behind: 0, files: [] },
+  w_ext: { branch: 'main', ahead: 0, behind: 2, files: [] },
+};
 
 export const SESSIONS: SessionInfo[] = [
   {
@@ -161,6 +279,8 @@ export const SESSIONS: SessionInfo[] = [
     model: 'opus',
     permissionMode: 'default',
     effort: 'high',
+    agentVersion: '2.4.0',
+    billing: 'plan',
     createdAt: iso(-30),
     updatedAt: iso(-2),
     lastSeq: 0,
@@ -176,6 +296,8 @@ export const SESSIONS: SessionInfo[] = [
     model: 'gpt-5.5-codex',
     permissionMode: 'on-request',
     effort: 'medium',
+    agentVersion: '0.98.0',
+    billing: 'plan',
     createdAt: iso(-90),
     updatedAt: iso(-5),
     lastSeq: 0,
@@ -202,6 +324,8 @@ export const SESSIONS: SessionInfo[] = [
     title: 'Plan the auth migration',
     model: 'sonnet',
     permissionMode: 'plan',
+    agentVersion: '2.4.1',
+    billing: 'plan',
     createdAt: iso(-12),
     updatedAt: iso(-3),
     lastSeq: 0,
@@ -227,11 +351,188 @@ export const SESSIONS: SessionInfo[] = [
     mode: 'structured',
     status: 'idle',
     title: 'Summarize papers on CRDTs',
+    billing: 'budgetless',
     createdAt: iso(-60 * 26),
     updatedAt: iso(-60 * 25),
     lastSeq: 0,
   },
+  // Agent-to-agent (spec §12.1): a Claude parent with two helpers, one in a worktree.
+  {
+    id: 's_lead',
+    machineId: MACHINE.id,
+    workspaceId: 'w_acme',
+    agent: 'claude',
+    mode: 'structured',
+    status: 'running',
+    title: 'Implement OAuth login',
+    model: 'opus',
+    permissionMode: 'acceptEdits',
+    agentVersion: '2.4.1',
+    billing: 'plan',
+    budget: { usd: 5 },
+    depth: 0,
+    createdAt: iso(-40),
+    updatedAt: iso(-1),
+    lastSeq: 0,
+  },
+  {
+    id: 's_helper_review',
+    machineId: MACHINE.id,
+    workspaceId: 'w_acme_oauth',
+    agent: 'codex',
+    mode: 'structured',
+    status: 'waiting_input',
+    title: 'Review the OAuth change',
+    model: 'gpt-5.5-codex',
+    agentVersion: '0.98.0',
+    billing: 'metered',
+    budget: { usd: 2 },
+    spawnedBy: 's_lead',
+    scope: 'child',
+    depth: 1,
+    createdAt: iso(-30),
+    updatedAt: iso(-4),
+    lastSeq: 0,
+  },
+  {
+    id: 's_helper_explore',
+    machineId: MACHINE.id,
+    workspaceId: 'w_acme',
+    agent: 'opencode',
+    mode: 'structured',
+    status: 'idle',
+    title: 'Map the session middleware',
+    model: 'qwen3.8-27b (h200)',
+    billing: 'budgetless',
+    spawnedBy: 's_lead',
+    scope: 'child',
+    depth: 1,
+    createdAt: iso(-29),
+    updatedAt: iso(-20),
+    lastSeq: 0,
+  },
+  {
+    id: 's_ext',
+    machineId: MINI.id,
+    workspaceId: 'w_ext',
+    agent: 'codex',
+    mode: 'structured',
+    status: 'idle',
+    title: 'Clean up the theme stylesheet',
+    model: 'gpt-5.5-codex',
+    agentVersion: '0.101.0',
+    billing: 'plan',
+    createdAt: iso(-60 * 3),
+    updatedAt: iso(-60 * 2),
+    lastSeq: 0,
+  },
 ];
+
+/** Sessions whose last turn finished after you last looked (done, not yet seen). */
+export const UNSEEN_SESSIONS = new Set(['s_ext']);
+
+// ---------------------------------------------------------------- context, usage, widgets (docs/usage.md)
+
+/** Claude-style breakdown: "71% · compacts at 80%", with bizzi's own overhead as a row. */
+export const DEMO_CONTEXT: ContextUsage = {
+  used: 142_000,
+  window: 200_000,
+  usable: 160_000,
+  compactAt: 160_000,
+  categories: [
+    { id: 'system', label: 'System prompt', tokens: 3_100, kind: 'used' },
+    { id: 'tools', label: 'System tools', tokens: 14_200, kind: 'used' },
+    { id: 'mcp', label: 'MCP tools (6 servers)', tokens: 26_300, kind: 'used' },
+    { id: 'bizzi', label: 'bizzi overhead', tokens: 4_300, kind: 'used' },
+    { id: 'memory', label: 'Memory files', tokens: 2_400, kind: 'used' },
+    { id: 'messages', label: 'Messages', tokens: 91_700, kind: 'used' },
+    { id: 'buffer', label: 'Autocompact buffer', tokens: 40_000, kind: 'buffer' },
+    { id: 'free', label: 'Free space', tokens: 18_000, kind: 'free' },
+  ],
+};
+
+export const LEAD_CONTEXT: ContextUsage = {
+  used: 48_000,
+  window: 200_000,
+  usable: 160_000,
+  compactAt: 160_000,
+  categories: [
+    { id: 'system', label: 'System prompt', tokens: 3_100, kind: 'used' },
+    { id: 'tools', label: 'System tools', tokens: 14_200, kind: 'used' },
+    { id: 'bizzi', label: 'bizzi overhead', tokens: 6_900, kind: 'used' },
+    { id: 'messages', label: 'Messages', tokens: 23_800, kind: 'used' },
+    { id: 'buffer', label: 'Autocompact buffer', tokens: 40_000, kind: 'buffer' },
+    { id: 'free', label: 'Free space', tokens: 112_000, kind: 'free' },
+  ],
+};
+
+const ago = (min: number): string => new Date(Date.now() - min * 60_000).toISOString();
+const ahead = (min: number): string => new Date(Date.now() + min * 60_000).toISOString();
+
+/** Per-login usage (usage.md §3): Claude Max at 62% of its 5-hour window, Codex Pro at 85%, a metered API key. */
+export function mockAccounts(): AccountUsage[] {
+  return [
+    {
+      agent: 'claude',
+      accountId: 'dev@example.com',
+      label: 'claude · max · dev@…',
+      billing: 'plan',
+      machines: [MACHINE.id, SERVER.id, MINI.id],
+      windows: [
+        { id: 'five_hour', label: '5-hour', usedPercent: 62, resetsAt: ahead(80), windowMins: 300 },
+        { id: 'seven_day', label: '7-day', usedPercent: 31, resetsAt: ahead(60 * 24 * 3 + 200), windowMins: 10080 },
+        { id: 'seven_day_opus', label: '7-day Opus', usedPercent: 44, resetsAt: ahead(60 * 24 * 3 + 200) },
+      ],
+      status: 'ok',
+      observedAt: ago(40),
+    },
+    {
+      agent: 'codex',
+      accountId: 'dev@example.com',
+      label: 'codex · pro · dev@…',
+      billing: 'plan',
+      machines: [MACHINE.id, MINI.id],
+      windows: [
+        { id: 'primary', label: '5-hour', usedPercent: 85, resetsAt: ahead(125), windowMins: 300 },
+        { id: 'secondary', label: 'weekly', usedPercent: 40, resetsAt: ahead(60 * 24 * 5), windowMins: 10080 },
+      ],
+      status: 'warning',
+      observedAt: ago(3),
+    },
+    {
+      agent: 'opencode',
+      accountId: 'sk-ant-…a41f',
+      label: 'opencode · api key · …a41f',
+      billing: 'metered',
+      machines: [MACHINE.id],
+      spend: { usd: 12.4, period: 'November' },
+      status: 'ok',
+      observedAt: ago(26),
+    },
+  ];
+}
+
+/** Node-run widgets (usage.md §4): a LiteLLM spend meter, the H200 gateway load, CI, and a failing one. */
+export function mockWidgets(): WidgetValue[] {
+  return [
+    {
+      id: 'litellm-billed',
+      machineId: MACHINE.id,
+      label: 'billed',
+      kind: 'meter',
+      placement: ['bar'],
+      value: 554.2,
+      max: 2474,
+      format: 'usd',
+      tooltip: 'LiteLLM key claude-via-litellm: spend against max_budget',
+      resetsAt: ahead(60 * 24 * 12),
+      observedAt: ago(1),
+    },
+    { id: 'h200', machineId: MINI.id, label: 'h200', kind: 'meter', placement: ['bar', 'machine'], value: 3, max: 8, format: 'number', tooltip: 'In-flight requests on the local H200 gateway (vLLM)', observedAt: ago(0) },
+    { id: 'ci', machineId: MACHINE.id, label: 'CI', kind: 'status', placement: ['workspace', 'session-header'], text: 'passing', tone: 'ok', tooltip: 'GitHub checks for the current branch', link: 'https://github.com/acme/shop/actions', observedAt: ago(2) },
+    { id: 'disk', machineId: MACHINE.id, label: 'disk', kind: 'text', placement: ['machine'], text: '81% used', tone: 'warn', error: 'command timed out after 10s', observedAt: ago(42) },
+  ];
+}
 
 // ---------------------------------------------------------------- virtual files
 
