@@ -1,6 +1,7 @@
 export * from './backoff.ts';
 export * from './base64.ts';
 export * from './client.ts';
+export * from './fanout.ts';
 export * from './hub.ts';
 export * from './identity.ts';
 export * from './native.ts';
