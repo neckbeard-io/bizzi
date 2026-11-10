@@ -8,6 +8,9 @@
 //   /fail <message>     the turn ends with stopReason 'error'
 //   /crash              the session fails (session.status failed)
 //   /exit               the session ends (session.status ended)
+//   /mcp <server> <tool> [json args]
+//                       call a tool on an injected HTTP MCP server (e.g. bizzi-agents), like a real agent
+//                       would; the tool.completed output is the JSON CallToolResult
 //   anything else       echoed back as "echo: <text>"
 //
 // Also: steering is acknowledged with an assistant message "steered: <text>"; starting with
@@ -27,6 +30,7 @@ import {
   type ApprovalRequest,
   type EmitFn,
   type InputBlock,
+  type McpServerSpec,
   type QuestionAnswers,
   type QuestionItem,
   type SessionEventBody,
@@ -55,7 +59,9 @@ export type FakeStep =
   | { type: 'fail'; error: string }
   | { type: 'status'; status: SessionStatus; reason?: string; prompt?: 'approval' | 'input' | 'login' }
   /** Ask a question and wait for question.respond; the answer (or "declined") is echoed as text. */
-  | { type: 'question'; text: string; options?: string[]; questions?: QuestionItem[] };
+  | { type: 'question'; text: string; options?: string[]; questions?: QuestionItem[] }
+  /** Call `tool` on the injected HTTP MCP server `server` (StartSessionOptions.mcpServers). */
+  | { type: 'mcp'; server: string; tool: string; args?: Record<string, unknown> };
 
 export interface FakeTurnContext {
   turnId: string;
@@ -353,6 +359,9 @@ export class FakeSession implements AdapterSession {
           case 'question':
             await this.#question(step, signal);
             break;
+          case 'mcp':
+            await this.#mcp(step, signal);
+            break;
           case 'status':
             this.#emit({
               type: 'session.status',
@@ -443,6 +452,21 @@ export class FakeSession implements AdapterSession {
     this.#emit({ type: 'message.completed', data: { messageId: newId('msg'), role: 'assistant', text } });
   }
 
+  async #mcp(step: Extract<FakeStep, { type: 'mcp' }>, signal: AbortSignal): Promise<void> {
+    const toolId = newId('tc');
+    const input = { server: step.server, tool: step.tool, arguments: step.args ?? {} };
+    const name = `mcp__${step.server}__${step.tool}`;
+    this.#emit({ type: 'tool.started', data: { toolId, kind: 'mcp', name, title: `${step.server}.${step.tool}`, input } });
+    try {
+      const result = await callMcpTool(this.opts.mcpServers?.[step.server], step.tool, step.args ?? {}, signal);
+      const failed = (result as { isError?: unknown } | undefined)?.isError === true;
+      this.#emit({ type: 'tool.completed', data: { toolId, status: failed ? 'error' : 'ok', output: JSON.stringify(result) } });
+    } catch (err) {
+      if (signal.aborted) throw err;
+      this.#emit({ type: 'tool.completed', data: { toolId, status: 'error', error: (err as Error).message } });
+    }
+  }
+
   #remember(chunk: Buffer): void {
     const next = Buffer.concat([this.#scrollback, chunk]);
     this.#scrollback = next.length > FAKE_SCROLLBACK_BYTES ? next.subarray(next.length - FAKE_SCROLLBACK_BYTES) : next;
@@ -473,6 +497,17 @@ export const defaultScript: FakeScript = (input) => {
       return [{ type: 'status', status: 'failed', reason: arg || 'scripted crash' }];
     case '/exit':
       return [{ type: 'status', status: 'ended', reason: arg || 'scripted exit' }];
+    case '/mcp': {
+      const [server = '', tool = '', ...json] = rest;
+      const raw = json.join(' ').trim();
+      let args: Record<string, unknown> = {};
+      try {
+        if (raw) args = JSON.parse(raw) as Record<string, unknown>;
+      } catch {
+        return [{ type: 'fail', error: `/mcp: invalid JSON arguments: ${raw}` }];
+      }
+      return [{ type: 'mcp', server, tool, args }, { type: 'text', text: 'done' }];
+    }
     default:
       return [{ type: 'text', text: `echo: ${text}` }];
   }
@@ -487,6 +522,31 @@ export function textOf(input: InputBlock[]): string {
     .filter((b): b is Extract<InputBlock, { type: 'text' }> => b.type === 'text')
     .map((b) => b.text)
     .join('\n');
+}
+
+/** One MCP `tools/call` over Streamable HTTP (stateless servers; JSON or SSE response). */
+async function callMcpTool(spec: McpServerSpec | undefined, tool: string, args: Record<string, unknown>, signal: AbortSignal): Promise<unknown> {
+  if (!spec) throw new Error('no such MCP server injected into this session');
+  if (spec.type !== 'http') throw new Error('the fake agent only calls http MCP servers');
+  const res = await fetch(spec.url, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', accept: 'application/json, text/event-stream', ...spec.headers },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: tool, arguments: args } }),
+    signal,
+  });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`MCP HTTP ${res.status}: ${body.slice(0, 200)}`);
+  // SSE: the JSON-RPC response is the last `data:` line.
+  const json = (res.headers.get('content-type') ?? '').includes('text/event-stream')
+    ? body
+        .split('\n')
+        .filter((l) => l.startsWith('data:'))
+        .map((l) => l.slice(5).trim())
+        .at(-1)
+    : body;
+  const msg = JSON.parse(json ?? '') as { result?: unknown; error?: { message?: string } };
+  if (msg.error) throw new Error(`MCP error: ${msg.error.message ?? 'unknown'}`);
+  return msg.result;
 }
 
 function chunkText(text: string, n: number): string[] {
