@@ -3,6 +3,7 @@ import type { ReactNode, SVGProps } from 'react';
 // Small stroke icons (24×24, currentColor), hand-drawn to avoid an icon dependency.
 const PATHS = {
   machine: 'M4 5h16v10H4zM8 19h8M12 15v4',
+  home: 'M4 11l8-7 8 7M6 9.5V20h4v-6h4v6h4V9.5',
   folder: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
   chat: 'M4 5h16v11H9l-5 4z',
   inbox: 'M4 13l2-8h12l2 8v6H4zM4 13h5l1 2h4l1-2h5',

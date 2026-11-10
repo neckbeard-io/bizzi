@@ -371,15 +371,7 @@ export function WorkspacePicker(props: { machineId: string | null; initialPath?:
                 disabled={!online || !listing?.parent}
                 onClick={() => listing?.parent && setPath(listing.parent)}
               />
-              <button
-                type="button"
-                title="Home"
-                disabled={!online || !home}
-                onClick={() => home && setPath(home)}
-                className="inline-flex h-11 min-w-11 items-center justify-center rounded-md px-1 font-mono text-sm text-muted hover:bg-panel-2 hover:text-fg disabled:opacity-40 sm:h-7 sm:min-w-7"
-              >
-                ~
-              </button>
+              <IconButton icon="home" label="Home" className="h-11 w-11 sm:h-7 sm:w-7" disabled={!online || !home} onClick={() => home && setPath(home)} />
               <nav aria-label="Path" className="flex min-w-0 flex-1 items-center overflow-x-auto font-mono text-xs whitespace-nowrap">
                 {crumbs.map((c, i) => (
                   <span key={c.path} className="flex items-center">
