@@ -137,7 +137,7 @@ A widget is **data, not UI**: it produces a small value that bizzi renders nativ
   "source": {
     "type": "http",
     "url": "${env:ANTHROPIC_BASE_URL}/key/info",
-    "headers": { "Authorization": "Bearer ${secret:litellm-key}" },
+    "headers": { "Authorization": "Bearer ${secret:LITELLM_KEY}" },
     "value": "$.info.spend", "max": "$.info.max_budget",
     "resetsAt": "$.info.budget_reset_at",
     "format": "usd"
@@ -162,7 +162,7 @@ Values are cached on the node and relayed through the hub like events; a stale v
 
 ### 4.2 Rules
 
-- Widgets run on a node, with that machine's environment and bizzi's secret store (`${secret:…}`, `@bizzi/services`). Secrets never leave the node; only the rendered value does.
+- Widgets run on a node, with that machine's environment and bizzi's secret store (`@bizzi/services`). `${secret:NAME}` is a secret stored with `agent.setSecret`, so `NAME` is an environment-variable name (`LITELLM_KEY`, not `litellm-key`); it resolves to the first agent that has one by that name, or use `${secret:claude:NAME}` for a specific agent's. Secrets are allowed in http `url`/`headers` and command `env`, never in command arguments. Secrets never leave the node; only the rendered value does.
 - **Trust:** a `command` widget is code on your machine, the same trust as opening a terminal there (`term.open`). Creating one remotely (from the phone) goes through the same confirmation as provisioning, and the node logs it. `http` widgets can't execute anything.
 - **Billing hook:** a widget with `billing.account` becomes the usage source for that login (§3) and can back a budget cap (spec §12.2). For example, Claude Code through LiteLLM gets its real cap from the key's `max_budget`.
 - **Files are agent-editable.** Widget files are plain JSON with a schema, and the directory has an `AGENTS.md`, so "add a widget for my H200 queue depth" is a request to your agent (an idea from herdr-app, [landscape.md](landscape.md)).
