@@ -4,7 +4,7 @@ import { selectMachineOnline } from '@bizzi/client';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useIsWide } from '../../app/hooks.ts';
 import { Button, ErrorText, cx } from '../../components/ui.tsx';
-import { contextUse, formatCost, formatTokens, isBusy } from '../../lib/format.ts';
+import { formatCost, formatTokens, isBusy } from '../../lib/format.ts';
 
 export function Composer(props: { sessionId: string }): ReactNode {
   const { sessionId } = props;
@@ -95,9 +95,9 @@ export function Composer(props: { sessionId: string }): ReactNode {
   );
 }
 
+/** Tokens and cost of the session. Context lives in the header's context bar (usage.md §1.3), never estimated here. */
 function UsageFooter(props: { sessionId: string }): ReactNode {
   const usage = useBizzi((s) => s.timelines[props.sessionId]?.usage ?? null);
-  const ctx = contextUse(usage);
   if (!usage) return <div className="h-5" />;
   return (
     <div className="flex h-5 items-center gap-3 px-1 pt-1 text-[11px] text-muted">
@@ -106,14 +106,6 @@ function UsageFooter(props: { sessionId: string }): ReactNode {
       </span>
       {usage.cacheReadTokens ? <span className="hidden sm:inline">{formatTokens(usage.cacheReadTokens)} cached</span> : null}
       {usage.costUsd !== undefined ? <span>{formatCost(usage.costUsd)}</span> : null}
-      {ctx !== null ? (
-        <span className="ml-auto flex items-center gap-1.5" title="context window used">
-          <span className="relative h-1 w-14 overflow-hidden rounded bg-panel-2">
-            <span className={cx('absolute inset-y-0 left-0', ctx > 0.85 ? 'bg-err' : ctx > 0.6 ? 'bg-warn' : 'bg-accent')} style={{ width: `${Math.round(ctx * 100)}%` }} />
-          </span>
-          {Math.round(ctx * 100)}% context
-        </span>
-      ) : null}
     </div>
   );
 }

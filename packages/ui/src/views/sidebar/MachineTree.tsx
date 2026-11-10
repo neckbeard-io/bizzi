@@ -154,9 +154,9 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
         {...(phone ? longPress : {})}
       >
         <WorkspaceIcon workspace={w} />
-        <span className="min-w-0 truncate">{w.kind === 'worktree' && w.branch ? w.branch : w.name}</span>
+        <span className="min-w-[4.5rem] truncate">{w.kind === 'worktree' && w.branch ? w.branch : w.name}</span>
         {branch && w.kind !== 'worktree' ? (
-          <span className="min-w-0 shrink truncate font-mono text-[11px] text-muted">
+          <span className="min-w-0 shrink-[4] truncate font-mono text-[11px] text-muted">
             {branch}
             {git?.dirty ? '*' : ''}
           </span>

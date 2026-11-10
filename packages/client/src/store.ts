@@ -147,7 +147,7 @@ export interface BizziStoreOptions {
   logger?: Logger;
   /** Load machines/agents/workspaces/sessions after every handshake (default true). */
   autoLoad?: boolean;
-  /** Subscribe to sessions that wait for an approval or input, so the inbox has details (default true). */
+  /** Subscribe to sessions that wait for an approval or input (inbox details) or finished unseen (sidebar row 2); default true. */
   watchAttention?: boolean;
   /** Preferred machine to select once machines are known (e.g. the last one used). */
   initialMachineId?: string | null;
@@ -373,7 +373,9 @@ export class BizziStore {
   }
 
   private maybeWatch(s: SessionInfo): void {
-    if (this.watchAttention && ATTENTION.has(s.status) && !this.opened.has(s.id)) {
+    // Waiting sessions (inbox details) and finished-but-unseen ones (the sidebar shows their final message).
+    const unseen = s.status === 'idle' && s.seenThrough !== undefined && s.lastSeq > s.seenThrough;
+    if (this.watchAttention && (ATTENTION.has(s.status) || unseen) && !this.opened.has(s.id)) {
       this.openSession(s.id).catch((e) => this.logger.log('warn', 'watch session failed', { sessionId: s.id, error: String(e) }));
     }
   }

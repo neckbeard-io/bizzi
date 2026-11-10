@@ -9,7 +9,7 @@ import { useIsHub, useMachine, useMachineOnline, useTargetMachineId } from '../a
 import { Icon } from '../components/icons.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
-import { Badge, Button, Card, CopyButton, Empty, ErrorText, Select, Spinner, cx } from '../components/ui.tsx';
+import { Badge, Button, Card, CopyButton, Empty, ErrorText, Spinner, cx } from '../components/ui.tsx';
 import { WidgetRow } from '../components/Widget.tsx';
 import { machinePresence } from '../lib/format.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
@@ -331,29 +331,30 @@ function PolicySelects(props: { machineId: string; agent: AgentListing; disabled
   const store = useStore();
   const set = useAction((p: { update?: UpdatePolicy; restart?: RestartPolicy }) => store.setAgentPolicy({ machineId, agent: a.agent, ...p }));
   if (!a.updatePolicy && !a.restartPolicy) return null;
-  const sel = 'h-7 w-auto py-0 text-xs';
+  // A plain compact select: the shared Select is a full-height form control.
+  const sel = 'h-7 rounded-md border border-border bg-panel px-1.5 text-xs text-fg focus:border-accent focus:outline-none disabled:opacity-50';
   return (
     <div className="mt-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
         <label className="flex items-center gap-1.5">
           Updates
-          <Select className={sel} value={a.updatePolicy ?? 'auto'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ update: e.target.value as UpdatePolicy })}>
+          <select className={sel} value={a.updatePolicy ?? 'auto'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ update: e.target.value as UpdatePolicy })}>
             {(Object.keys(UPDATE_POLICY_LABEL) as UpdatePolicy[]).map((p) => (
               <option key={p} value={p}>
                 {UPDATE_POLICY_LABEL[p]}
               </option>
             ))}
-          </Select>
+          </select>
         </label>
         <label className="flex items-center gap-1.5">
           Restarts
-          <Select className={sel} value={a.restartPolicy ?? 'when-idle'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ restart: e.target.value as RestartPolicy })}>
+          <select className={sel} value={a.restartPolicy ?? 'when-idle'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ restart: e.target.value as RestartPolicy })}>
             {(Object.keys(RESTART_POLICY_LABEL) as RestartPolicy[]).map((p) => (
               <option key={p} value={p}>
                 {RESTART_POLICY_LABEL[p]}
               </option>
             ))}
-          </Select>
+          </select>
         </label>
         {set.busy ? <Spinner size={12} /> : null}
       </div>
