@@ -7,7 +7,10 @@ import type {
   QuestionItem,
   InputBlock,
   MachineInfo,
+  AccountUsage,
+  ContextUsage,
   SessionInfo,
+  WidgetValue,
   SessionStatus,
   Usage,
   WorkspaceInfo,
@@ -44,7 +47,12 @@ export interface SessionEventMap {
     status: SessionStatus;
     reason?: string;
     /** What the session is waiting on, when known (terminal heuristics, login flows). */
-    prompt?: 'approval' | 'input' | 'login';
+    prompt?: 'approval' | 'input' | 'login' | 'question' | 'budget';
+    /**
+     * What produced this status, for the "explain" view (landscape.md §4.3), e.g.
+     * 'osc7501', 'detector:claude-permission', 'adapter'.
+     */
+    source?: string;
   };
   /** Adapter-reported metadata changes (agent session id assigned, model switched, …). */
   'session.info': {
@@ -101,6 +109,14 @@ export interface SessionEventMap {
   'question.asked': { questionId: string; text: string; options?: string[]; questions?: QuestionItem[] };
   'question.resolved': { questionId: string; answers?: QuestionAnswers; cancelled?: boolean };
   'usage.updated': Usage;
+  /** Current context-window occupancy (usage.md §1.2). Agents without data never emit it. */
+  'context.updated': ContextUsage;
+  'context.compacted': { before?: number; after?: number };
+  /** Per-login usage observed during this session (rate-limit events etc.); the core republishes it globally. */
+  'account.usage': AccountUsage;
+  /** The agent process is being replaced at a safe point (updates.md §5). The bizzi session carries on. */
+  'session.restarting': { fromVersion?: string; toVersion?: string; reason?: string };
+  'session.restarted': { fromVersion?: string; toVersion?: string; ok: boolean; error?: string };
   'subagent.started': { subagentId: string; name?: string; description?: string; parentToolId?: string };
   'subagent.completed': { subagentId: string; status: 'ok' | 'error' | 'cancelled' };
   /** Terminal-mode output. */
@@ -135,6 +151,10 @@ export interface GlobalEventMap {
     ok?: boolean;
   };
   'knowledge.changed': { ids: string[] };
+  /** Latest snapshot for one login (usage.md §3). */
+  'account.usage': { usage: AccountUsage };
+  'widget.updated': { widget: WidgetValue };
+  'widget.removed': { machineId: string; widgetId: string };
   /** Hub only. */
   'device.updated': { device: DeviceInfo };
 }

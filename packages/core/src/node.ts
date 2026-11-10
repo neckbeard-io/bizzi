@@ -88,6 +88,21 @@ const UNIMPLEMENTED = [
   'pairing.create',
   'devices.list',
   'device.revoke',
+  // Protocol 1.2 additions; implemented by later phases or by extensions.
+  'worktree.create',
+  'worktree.remove',
+  'session.markSeen',
+  'session.restart',
+  'agent.migrate',
+  'agent.policy.set',
+  'usage.list',
+  'widgets.list',
+  'widget.refresh',
+  'orchestration.settings.get',
+  'orchestration.settings.set',
+  'themes.list',
+  'theme.save',
+  'theme.delete',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */

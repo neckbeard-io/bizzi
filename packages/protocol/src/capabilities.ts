@@ -29,6 +29,10 @@ export interface AgentCapabilities {
   terminal: boolean;
   /** The agent can ask the user structured questions (`question.asked` / `question.respond`). */
   questions?: boolean;
+  /** The adapter emits `context.updated` (usage.md §1). */
+  context?: boolean;
+  /** The adapter emits `account.usage` snapshots (usage.md §3). */
+  accountUsage?: boolean;
 }
 
 export const NO_CAPABILITIES: AgentCapabilities = {

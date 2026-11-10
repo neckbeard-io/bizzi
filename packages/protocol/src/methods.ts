@@ -1,5 +1,6 @@
 import type { AgentCapabilities } from './capabilities.ts';
 import type {
+  AccountUsage,
   AgentKind,
   AgentProbe,
   ApprovalDecision,
@@ -16,10 +17,16 @@ import type {
   LoginMode,
   MachineInfo,
   MachineRole,
+  OrchestrationSettings,
   QuestionAnswers,
+  RestartPolicy,
   SecretInfo,
+  SessionBudget,
   SessionInfo,
   SessionMode,
+  ThemeFile,
+  UpdatePolicy,
+  WidgetValue,
   WorkspaceInfo,
 } from './model.ts';
 
@@ -73,7 +80,22 @@ export interface Methods {
   /** Removes the workspace from bizzi's registry only; files are untouched. */
   'workspace.remove': { params: { workspaceId: string }; result: Empty };
 
-  'sessions.list': { params: MachineTarget & { workspaceId?: string }; result: { sessions: SessionInfo[] } };
+  /**
+   * `git worktree add` + a new workspace (kind 'worktree') grouped under the repo workspace.
+   * Creates `branch` from `base` (default HEAD) unless it already exists.
+   */
+  'worktree.create': {
+    params: { workspaceId: string; branch: string; base?: string; path?: string; name?: string };
+    result: { workspace: WorkspaceInfo };
+  };
+  /** Removes the worktree and its workspace. Never deletes the branch; refuses on uncommitted changes unless `force`. */
+  'worktree.remove': { params: { workspaceId: string; force?: boolean }; result: Empty };
+
+  /** `spawnedBy`: only that parent's helpers. */
+  'sessions.list': {
+    params: MachineTarget & { workspaceId?: string; spawnedBy?: string };
+    result: { sessions: SessionInfo[] };
+  };
   'session.get': { params: { sessionId: string }; result: { session: SessionInfo; capabilities: AgentCapabilities } };
   'session.create': {
     params: {
@@ -91,6 +113,7 @@ export interface Methods {
       rows?: number;
       /** Terminal mode only: run this command (argv) instead of the agent's TUI. */
       command?: string[];
+      budget?: SessionBudget;
     };
     result: { session: SessionInfo };
   };
@@ -101,6 +124,10 @@ export interface Methods {
   'session.send': { params: { sessionId: string; input: InputBlock[] }; result: { turnId: string } };
   'session.steer': { params: { sessionId: string; input: InputBlock[] }; result: Empty };
   'session.interrupt': { params: { sessionId: string }; result: Empty };
+  /** Record that the user has seen the session through `seq` (spec §4 `seen_through`). Never moves backwards. */
+  'session.markSeen': { params: { sessionId: string; seq: number }; result: { seenThrough: number } };
+  /** Restart the agent process on the installed version at the next safe point and resume (updates.md §5). */
+  'session.restart': { params: { sessionId: string }; result: Empty };
   'session.stop': { params: { sessionId: string }; result: Empty };
   'session.set': {
     params: { sessionId: string; model?: string; permissionMode?: string; effort?: string };
@@ -150,6 +177,35 @@ export interface Methods {
   'agent.setSecret': { params: MachineTarget & { agent: AgentKind; name: string; value: string }; result: Empty };
   'agent.deleteSecret': { params: MachineTarget & { agent: AgentKind; name: string }; result: Empty };
   'agent.secrets': { params: MachineTarget & { agent?: AgentKind }; result: { secrets: SecretInfo[] } };
+  /**
+   * Switch an adopted install to the recipe's preferred method (spec §7): install with the preferred
+   * method, check PATH order, re-probe login, remove the old install once no session uses it.
+   */
+  'agent.migrate': {
+    params: MachineTarget & { agent: AgentKind; toMethod?: string; dryRun?: boolean };
+    result: { jobId: string; plan: InstallPlan };
+  };
+  'agent.policy.set': {
+    params: MachineTarget & { agent: AgentKind; update?: UpdatePolicy; restart?: RestartPolicy };
+    result: { agent: AgentListing };
+  };
+
+  // ---- usage and widgets (docs/usage.md)
+  /** Per-login usage; on a hub, merged across machines per account. */
+  'usage.list': { params: Empty; result: { accounts: AccountUsage[] } };
+  /** On a hub without machineId: every online machine's widgets. */
+  'widgets.list': { params: MachineTarget; result: { widgets: WidgetValue[] } };
+  'widget.refresh': { params: MachineTarget & { widgetId: string }; result: { widget: WidgetValue } };
+
+  // ---- orchestration (spec §12)
+  'orchestration.settings.get': {
+    params: MachineTarget & { workspaceId?: string };
+    result: { settings: OrchestrationSettings };
+  };
+  'orchestration.settings.set': {
+    params: MachineTarget & { workspaceId?: string; settings: Partial<OrchestrationSettings> };
+    result: { settings: OrchestrationSettings };
+  };
 
   // ---- knowledge (docs/knowledge.md)
   'knowledge.list': {
@@ -205,6 +261,10 @@ export interface Methods {
   };
   'devices.list': { params: Empty; result: { devices: DeviceInfo[] } };
   'device.revoke': { params: { deviceId: string }; result: Empty };
+  /** Custom themes (theming.md §5). Hub-stored so every device sees them; a node stores them locally. */
+  'themes.list': { params: Empty; result: { themes: ThemeFile[] } };
+  'theme.save': { params: { id?: string; name: string; data: unknown }; result: { theme: ThemeFile } };
+  'theme.delete': { params: { id: string }; result: Empty };
 }
 
 export type MethodName = keyof Methods;

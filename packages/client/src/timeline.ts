@@ -557,6 +557,13 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (tl.prompt === 'login') tl.prompt = null;
       return;
     }
+    case 'context.updated':
+    case 'context.compacted':
+    case 'account.usage':
+    case 'session.restarting':
+    case 'session.restarted':
+      // Protocol 1.2: rendered by later phases.
+      return;
     default: {
       const unknown: never = ev;
       void unknown;

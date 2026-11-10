@@ -51,9 +51,44 @@ export interface AgentProbe {
   updateAvailable?: boolean;
   /** Whether the binary is on the PATH of non-interactive shells (launchd/systemd/containers). */
   onPath?: boolean;
+  /** Whether bizzi supports this installed version (spec §7 "Supported versions"). Absent = not checked. */
+  support?: AgentSupport;
+  /** Why `support` isn't 'ok', e.g. "OpenCode v1 is not supported; bizzi drives v2 only". */
+  supportReason?: string;
+  /** Confirmable fixes for `support` or for a non-preferred install method. Never run automatically. */
+  remedies?: AgentRemedy[];
+  /** The recipe's preferred method on this OS (first in its method order). */
+  preferredMethod?: string;
+  /** Real path of the executable after resolving symlinks and wrapper shims. */
+  realPath?: string;
+  updatePolicy?: UpdatePolicy;
+  restartPolicy?: RestartPolicy;
+  /** Billing class of the logged-in account (spec §12.3), when known. */
+  billing?: BillingClass;
+  /** Sessions on this machine whose agent process runs an older version than the installed one. */
+  staleSessions?: number;
 }
 
-export type WorkspaceKind = 'git' | 'dir';
+export type AgentSupport = 'ok' | 'untested' | 'unsupported';
+
+export interface AgentRemedy {
+  /** upgrade: move to a supported version · migrate: switch to the preferred install method · restart-service: restart a stale shared server. */
+  kind: 'upgrade' | 'migrate' | 'restart-service';
+  title: string;
+  /** Target method for 'migrate' / 'upgrade'. */
+  method?: string;
+  /** Shell command shown to the user, when there's a single one. */
+  command?: string;
+}
+
+/** spec §7 / updates.md §6. */
+export type UpdatePolicy = 'auto' | 'notify' | 'pinned';
+export type RestartPolicy = 'when-idle' | 'ask' | 'manual';
+
+/** spec §12.3: metered = pay per token · plan = subscription windows · budgetless = inference you own. */
+export type BillingClass = 'metered' | 'plan' | 'budgetless';
+
+export type WorkspaceKind = 'git' | 'dir' | 'worktree';
 
 export interface WorkspaceInfo {
   id: string;
@@ -63,6 +98,10 @@ export interface WorkspaceInfo {
   path: string;
   kind: WorkspaceKind;
   projectId?: string;
+  /** kind 'worktree': the repo workspace it was created from (UI groups it under that one). */
+  parentWorkspaceId?: string;
+  /** kind 'worktree': the branch checked out in it. */
+  branch?: string;
   createdAt: string;
 }
 
@@ -80,10 +119,53 @@ export interface SessionInfo {
   permissionMode?: string;
   effort?: string;
   forkedFrom?: string;
+  /** Agent-to-agent (spec §12.1): the parent session that started this helper. Same machine for now. */
+  spawnedBy?: string;
+  /** Helpers only. child: stops with its parent · detached: outlives it. */
+  scope?: 'child' | 'detached';
+  /** 0 for sessions you start; parent depth + 1 for helpers (spec §12.2 depth limit). */
+  depth?: number;
+  /** Version of the agent process currently running this session (updates.md §2). */
+  agentVersion?: string;
+  /** Billing class of what the session runs on (spec §12.3). */
+  billing?: BillingClass;
+  /** Optional cap for this session and its helpers (usage.md §2). */
+  budget?: SessionBudget;
+  /** Highest seq viewed on any device (spec §4); "done, not yet seen" = idle with lastSeq > seenThrough. */
+  seenThrough?: number;
   createdAt: string;
   updatedAt: string;
   lastSeq: number;
 }
+
+/** Only `metered` spend counts toward `usd`; budgetless providers count tokens only (usage.md §2). */
+export interface SessionBudget {
+  usd?: number;
+  tokens?: number;
+  turns?: number;
+}
+
+/** Guardrails for agent-to-agent helpers (spec §12.2). Per machine, optionally overridden per workspace. */
+export interface OrchestrationSettings {
+  /** parent → helper → helper's helper = 2. */
+  maxDepth: number;
+  maxHelpersPerParent: number;
+  maxHelpersPerMachine: number;
+  /** What `session_start` does beyond the concurrency limits. */
+  onLimit: 'queue' | 'fail';
+  /** Let a parent answer its helpers' approvals (default: they go to you). */
+  parentAnswersApprovals: boolean;
+  /** Optional metered-spend cap for a whole session tree. */
+  treeBudgetUsd?: number;
+}
+
+export const DEFAULT_ORCHESTRATION_SETTINGS: OrchestrationSettings = {
+  maxDepth: 2,
+  maxHelpersPerParent: 4,
+  maxHelpersPerMachine: 8,
+  onLimit: 'fail',
+  parentAnswersApprovals: false,
+};
 
 export type InputBlock =
   | { type: 'text'; text: string }
@@ -124,6 +206,79 @@ export interface Usage {
   cacheWriteTokens?: number;
   costUsd?: number;
   contextWindow?: number;
+}
+
+/** usage.md §1.2. `used` is the agent's own occupancy figure, never a sum of turns. */
+export interface ContextUsage {
+  used: number;
+  window: number;
+  /** Window minus the agent's compaction buffer, when known. Warnings key off this. */
+  usable?: number;
+  /** Token count at which the agent compacts, when known. */
+  compactAt?: number;
+  /** Only where the agent reports a breakdown (Claude); bizzi adds a 'bizzi' row for what it injects. */
+  categories?: ContextCategory[];
+}
+
+export interface ContextCategory {
+  id: string;
+  label: string;
+  tokens: number;
+  kind: 'used' | 'free' | 'buffer' | 'deferred';
+}
+
+/** Per-login usage snapshot (usage.md §3.3). Merged per (agent, accountId) across machines; newest wins. */
+export interface AccountUsage {
+  agent: AgentKind;
+  /** Stable account identity: email / account id, or an API-key fingerprint. */
+  accountId: string;
+  /** e.g. "claude · max · mc@…" */
+  label: string;
+  billing: BillingClass;
+  machines: string[];
+  windows?: UsageWindow[];
+  spend?: { usd: number; capUsd?: number; period?: string; resetsAt?: string };
+  status: 'ok' | 'warning' | 'limited' | 'unknown';
+  /** ISO; the UI shows the age. */
+  observedAt: string;
+}
+
+export interface UsageWindow {
+  /** e.g. five_hour, seven_day, primary, secondary */
+  id: string;
+  label: string;
+  usedPercent: number;
+  resetsAt?: string;
+  windowMins?: number;
+}
+
+/** A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code. */
+export interface WidgetValue {
+  id: string;
+  machineId: string;
+  label: string;
+  kind: 'meter' | 'text' | 'status';
+  placement: ('bar' | 'machine' | 'workspace' | 'session-header')[];
+  text?: string;
+  value?: number;
+  max?: number;
+  format?: 'usd' | 'percent' | 'number' | 'tokens';
+  tone?: 'neutral' | 'ok' | 'warn' | 'error';
+  tooltip?: string;
+  link?: string;
+  resetsAt?: string;
+  /** Set when the last run failed; the previous value (if any) is kept. */
+  error?: string;
+  /** ISO time of the last successful run; the UI shows staleness. */
+  observedAt?: string;
+}
+
+/** A custom theme stored on the hub (theming.md §5); `data` is the theme JSON (shape owned by @bizzi/ui). */
+export interface ThemeFile {
+  id: string;
+  name: string;
+  data: unknown;
+  updatedAt: string;
 }
 
 export interface QuestionItem {
