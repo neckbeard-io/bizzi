@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { shallowEqual } from '@bizzi/client';
 import type { WorkspaceInfo } from '@bizzi/protocol';
+import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction, useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
@@ -28,7 +29,6 @@ export function WorkspacesView(): ReactNode {
     shallowEqual,
   );
   const otherCount = useBizzi((s) => Object.values(s.workspaces ?? {}).filter((w) => machineId && w.machineId !== machineId).length);
-  const [adding, setAdding] = useState(false);
 
   return (
     <Page
@@ -37,7 +37,7 @@ export function WorkspacesView(): ReactNode {
           title="Workspaces"
           subtitle={machine ? `Directories on ${machine.name} where agents work` : 'Directories where agents work'}
           actions={
-            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => setAdding((a) => !a)}>
+            <Button variant="primary" icon="plus" size="sm" disabled={!online} onClick={() => openAddWorkspace(machineId)}>
               Add workspace
             </Button>
           }
@@ -45,7 +45,6 @@ export function WorkspacesView(): ReactNode {
       }
     >
       <OfflineMachineBanner machineId={machineId} className="mb-3" />
-      {adding && online ? <AddWorkspaceForm machineId={machineId} onDone={() => setAdding(false)} /> : null}
       {!wide ? (
         // Phone: the sidebar's machine → workspace structure, rows 1–2 only (spec §11.1).
         <MachineTree variant="phone" className="-mx-2" />
@@ -73,7 +72,8 @@ export function WorkspacesView(): ReactNode {
   );
 }
 
-function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): ReactNode {
+/** A workspace as a card: name, path, session counts. */
+export function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): ReactNode {
   const w = props.workspace;
   const counts = useBizzi((s) => {
     let total = 0;
@@ -108,7 +108,8 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean }): Re
   );
 }
 
-function AddWorkspaceForm(props: { machineId: string | null; onDone: () => void }): ReactNode {
+/** The add-workspace form; shown in the add-workspace dialog (AddWorkspaceDialog.tsx). */
+export function AddWorkspaceForm(props: { machineId: string | null; onDone: () => void }): ReactNode {
   const store = useStore();
   const [path, setPath] = useState('');
   const [name, setName] = useState('');

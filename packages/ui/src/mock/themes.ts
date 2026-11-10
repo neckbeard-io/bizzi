@@ -1,12 +1,14 @@
-// Mock custom-theme storage (`themes.list` / `theme.save` / `theme.delete`, docs/theming.md §5).
-// `?mock=1&demo=nothemes` answers `unsupported`, like a pre-1.2 server, so the UI falls back to
-// localStorage.
-import { BizziError } from '@bizzi/protocol';
-import type { ThemeFile } from '@bizzi/protocol';
+// Mock custom-theme storage (`themes.list` / `theme.save` / `theme.delete`) and user-wide prefs
+// (`prefs.get` / `prefs.set` → `prefs.updated`), docs/theming.md §5. `?mock=1&demo=nothemes` answers
+// `unsupported`, like a pre-1.2 server, so the UI falls back to localStorage.
+import { BizziError, GLOBAL_CHANNEL } from '@bizzi/protocol';
+import type { DensityPref, ThemeFile, UserPrefs } from '@bizzi/protocol';
+import { mergePrefs } from '../lib/prefs.ts';
 import { fiveToneTheme } from '../lib/theme/fiveTone.ts';
 import type { MockHost, MockModule } from './host.ts';
 
-const METHODS = new Set(['themes.list', 'theme.save', 'theme.delete']);
+const METHODS = new Set(['themes.list', 'theme.save', 'theme.delete', 'prefs.get', 'prefs.set']);
+const DENSITIES: readonly DensityPref[] = ['theme', 'compact', 'comfortable', 'spacious'];
 
 const SEED: ThemeFile[] = [
   {
@@ -26,6 +28,8 @@ const SEED: ThemeFile[] = [
 export class MockThemes implements MockModule {
   private readonly host: MockHost;
   private readonly files = new Map<string, ThemeFile>(SEED.map((f) => [f.id, structuredClone(f)]));
+  /** Starts empty, like a fresh hub: the first device to connect seeds it with its own choice. */
+  private prefs: UserPrefs = {};
 
   constructor(host: MockHost) {
     this.host = host;
@@ -47,6 +51,25 @@ export class MockThemes implements MockModule {
         const file: ThemeFile = { id, name, data: params.data, updatedAt: new Date().toISOString() };
         this.files.set(id, file);
         return { theme: file };
+      }
+      case 'prefs.get':
+        return { prefs: { ...this.prefs } };
+      case 'prefs.set': {
+        const raw = params.prefs;
+        if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new BizziError('bad_request', 'prefs must be an object');
+        const r = raw as Record<string, unknown>;
+        const patch: Partial<UserPrefs> = {};
+        if (r.themeId !== undefined) {
+          if (typeof r.themeId !== 'string' || !r.themeId) throw new BizziError('bad_request', 'prefs.themeId must be a theme id');
+          patch.themeId = r.themeId;
+        }
+        if (r.density !== undefined) {
+          if (!DENSITIES.includes(r.density as DensityPref)) throw new BizziError('bad_request', 'prefs.density is not a density');
+          patch.density = r.density as DensityPref;
+        }
+        this.prefs = mergePrefs(this.prefs, patch);
+        this.host.emit(GLOBAL_CHANNEL, { type: 'prefs.updated', data: { prefs: { ...this.prefs } } });
+        return { prefs: { ...this.prefs } };
       }
       case 'theme.delete': {
         const id = String(params.id ?? '');

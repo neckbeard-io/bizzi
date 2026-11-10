@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
-import { selectAgentJob, selectAgents } from '@bizzi/client';
+import { selectAgentJob, selectAgents, shallowEqual } from '@bizzi/client';
 import type { JobAction } from '@bizzi/client';
 import type { AgentCapabilities, AgentKind, AgentListing, AgentRemedy, MachineInfo, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
+import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
 import { useIsHub, useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
@@ -13,14 +14,17 @@ import { Badge, Button, Card, CopyButton, Empty, ErrorText, Spinner, cx } from '
 import { WidgetRow } from '../components/Widget.tsx';
 import { machinePresence } from '../lib/format.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
-import { routeHref } from '../lib/router.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, RESTART_POLICY_LABEL, UPDATE_POLICY_LABEL, pendingUpdatesLabel } from '../lib/states.ts';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 import { JobProgress } from './provision/JobProgress.tsx';
 import { PlanModal } from './provision/PlanModal.tsx';
 import { SecretsPanel } from './provision/SecretsPanel.tsx';
+import { WorkspaceRow } from './WorkspacesView.tsx';
 
-/** One machine: what it is, which agents it has (install / update / log in), and its API keys. */
+/**
+ * One machine (opened from its sidebar tile): what it is, its workspaces, which agents it has (install /
+ * update / log in, update and restart policies), its API keys and widgets, and its machine-scoped settings.
+ */
 export function MachineView(props: { machineId?: string }): ReactNode {
   const store = useStore();
   const hub = useIsHub();
@@ -60,9 +64,14 @@ export function MachineView(props: { machineId?: string }): ReactNode {
           subtitle={machine ? `${machine.hostname} · bizzi ${machine.bizziVersion}${serverVersion && !hub ? ` · server ${serverVersion}` : ''}` : undefined}
           back={() => navigate({ name: 'machines' })}
           actions={
-            <Button size="sm" variant="ghost" icon="refresh" busy={refresh.busy} disabled={!online} onClick={() => void refresh.run()}>
-              Re-probe
-            </Button>
+            <>
+              <Button size="sm" variant="ghost" icon="refresh" busy={refresh.busy} disabled={!online} onClick={() => void refresh.run()}>
+                Re-probe
+              </Button>
+              <Button size="sm" variant="primary" icon="plus" disabled={!online} onClick={() => openAddWorkspace(machineId)}>
+                Add workspace
+              </Button>
+            </>
           }
         />
       }
@@ -71,6 +80,8 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       {agents ? <UnsupportedBanner agents={agents} machineName={name} /> : null}
       {machine ? <MachineCard machine={machine} /> : null}
       <WidgetRow placement="machine" machineId={machineId} className="mt-3 rounded-lg border border-border bg-panel px-4 py-2" />
+
+      <MachineWorkspaces machineId={machineId} online={online} />
 
       <SectionTitle>Agents</SectionTitle>
       <ErrorText error={refresh.error ?? (online ? loadError : null)} className="mb-2" />
@@ -96,20 +107,60 @@ export function MachineView(props: { machineId?: string }): ReactNode {
 
       <SecretsPanel machineId={machineId} online={online} preset={secretFor} onPresetUsed={clearSecretFor} />
 
-      <SectionTitle>Agent-to-agent</SectionTitle>
+      <SectionTitle>Machine settings · agent-to-agent</SectionTitle>
       <OrchestrationPanel machineId={machineId} online={online} />
+      <p className="mt-2 text-xs text-muted">Update and restart policies are on each agent's card above. App-wide settings (appearance, knowledge, devices) are under Settings.</p>
 
-      {!hub ? (
-        <p className="mt-6 text-xs text-muted">
-          Connected directly to this node. Other machines are reached through a hub; see{' '}
-          <a className="text-accent underline-offset-2 hover:underline" href={routeHref({ name: 'machines' })}>
-            Machines
-          </a>
-          .
-        </p>
-      ) : null}
+      {!hub ? <p className="mt-6 text-xs text-muted">Connected directly to this node. Other machines are reached through a hub.</p> : null}
       {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} {...(plan.method ? { method: plan.method } : {})} onClose={() => setPlan(null)} /> : null}
     </Page>
+  );
+}
+
+/** This machine's workspaces (the sidebar shows the same tree; here with paths and session counts). */
+function MachineWorkspaces(props: { machineId: string; online: boolean }): ReactNode {
+  const loaded = useBizzi((s) => s.workspaces !== null);
+  const workspaces = useBizzi(
+    (s) =>
+      Object.values(s.workspaces ?? {})
+        .filter((w) => w.machineId === props.machineId)
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    shallowEqual,
+  );
+  return (
+    <>
+      <SectionTitle
+        actions={
+          workspaces.length > 0 ? (
+            <Button size="sm" variant="ghost" icon="plus" disabled={!props.online} onClick={() => openAddWorkspace(props.machineId)}>
+              Add
+            </Button>
+          ) : null
+        }
+      >
+        Workspaces
+      </SectionTitle>
+      {!loaded ? (
+        <div className="flex justify-center py-6 text-muted">
+          <Spinner />
+        </div>
+      ) : workspaces.length === 0 ? (
+        <Empty icon="folder" title="No workspaces yet">
+          <div className="grid justify-items-center gap-3">
+            <span>Add a git repository or a plain directory to start a session in it.</span>
+            <Button size="sm" variant="primary" icon="plus" disabled={!props.online} onClick={() => openAddWorkspace(props.machineId)}>
+              Add workspace
+            </Button>
+          </div>
+        </Empty>
+      ) : (
+        <div className="grid gap-2">
+          {workspaces.map((w) => (
+            <WorkspaceRow key={w.id} workspace={w} foreign={false} />
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 

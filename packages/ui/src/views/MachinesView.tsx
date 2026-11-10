@@ -9,9 +9,14 @@ import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Empty, Spinner, cx } from '../components/ui.tsx';
 import { machinePresence } from '../lib/format.ts';
+import { MachineTree } from './sidebar/MachineTree.tsx';
 import { UsageChip } from './usage/Usage.tsx';
 
-/** Every machine reachable through this connection: online state, what it is good for, ADE status. */
+/**
+ * Every machine reachable through this connection. Phone: the machine → workspace tree (tap a machine tile
+ * for its page). Desktop redirects to the machine page (the sidebar is the tree); the cards remain for a
+ * connection with no machine to open yet.
+ */
 export function MachinesView(): ReactNode {
   const machines = useBizzi(selectMachineList, shallowEqual);
   const loaded = useBizzi((s) => Object.keys(s.machines).length > 0 || s.machine !== null);
@@ -44,6 +49,8 @@ export function MachinesView(): ReactNode {
         <Empty icon="machine" title="No machines yet">
           Pair a machine from Settings → Devices.
         </Empty>
+      ) : !wide ? (
+        <MachineTree variant="phone" className="-mx-2" />
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {machines.map((m) => (

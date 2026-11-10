@@ -1,9 +1,10 @@
-// Theme state for this device (theming.md §2, §5): which theme, which mode, which density. The choice is
-// per device (localStorage); custom themes come from the hub. A module-level store so every
-// component (sidebar toggle, settings, terminals) sees the same theme, applied once per change.
+// Theme state (theming.md §2, §5): which theme, which mode, which density. The theme and density are one
+// user-wide choice stored on the server (`prefs.*`; localStorage caches it for first paint and offline);
+// the mode (system / light / dark) is per device. Custom themes come from the server too. A module-level
+// store so every component (sidebar toggle, settings, terminals) sees the same theme, applied once per change.
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { BizziStore } from '@bizzi/client';
-import type { ThemeFile } from '@bizzi/protocol';
+import type { ThemeFile, UserPrefs } from '@bizzi/protocol';
 import { applyTheme, paintEntry, PAINT_CACHE_KEY } from '../lib/theme/apply.ts';
 import type { PaintCache } from '../lib/theme/apply.ts';
 import { BUILTIN_CATALOGUE, DEFAULT_THEME_ID, DEVICE_THEME_ID, bizziDefault, builtinTheme, deviceTheme, normalizeAccent } from '../lib/theme/builtins/index.ts';
@@ -11,7 +12,8 @@ import { isUnsupported, readThemeFiles, toThemeFile, upsertFile } from '../lib/t
 import type { CustomTheme } from '../lib/theme/custom.ts';
 import { effectiveDensity, resolveTheme } from '../lib/theme/resolve.ts';
 import type { Density, ModePref, ResolvedTheme, Theme, ThemeMode } from '../lib/theme/types.ts';
-import { loadJson, loadString, saveJson, saveString } from '../lib/storage.ts';
+import { mergePrefs, reconcilePrefs } from '../lib/prefs.ts';
+import { loadJson, loadString, remove, saveJson, saveString } from '../lib/storage.ts';
 
 const MODE_KEY = 'bizzi.theme'; // existing key (system|light|dark), also read by theme-init.js
 const ID_KEY = 'bizzi.theme.id';
@@ -20,6 +22,8 @@ const DENSITY_KEY = 'bizzi.theme.density';
 const SELECTED_KEY = 'bizzi.theme.selected';
 /** Custom themes when the server has no `themes.*` methods. */
 const LOCAL_KEY = 'bizzi.themes.local';
+/** Theme/density changes made here that haven't reached a server yet (offline); pushed on connect. */
+const PENDING_KEY = 'bizzi.prefs.pending';
 
 export type DensityPref = Density | 'theme';
 export type CustomSource = 'hub' | 'local';
@@ -54,6 +58,11 @@ function initialAccent(): string | null {
 /** `?theme=<id>&mode=light|dark` override the stored choice for this load (demos, screenshots); not saved. */
 const urlParams = typeof location !== 'undefined' ? new URLSearchParams(location.search) : null;
 const urlOverride = !!(urlParams?.get('theme') || urlParams?.get('mode'));
+const urlTheme = !!urlParams?.get('theme');
+
+function isDensityPref(d: unknown): d is DensityPref {
+  return d === 'theme' || d === 'compact' || d === 'comfortable' || d === 'spacious';
+}
 
 let state: ThemeState = {
   mode: ((): ModePref => {
@@ -63,7 +72,7 @@ let state: ThemeState = {
   themeId: urlParams?.get('theme') ?? loadString(ID_KEY) ?? DEFAULT_THEME_ID,
   density: ((): DensityPref => {
     const d = loadString(DENSITY_KEY);
-    return d === 'compact' || d === 'comfortable' || d === 'spacious' ? d : 'theme';
+    return isDensityPref(d) ? d : 'theme';
   })(),
   preview: null,
   custom: readThemeFiles(loadJson<ThemeFile[]>(LOCAL_KEY) ?? []),
@@ -139,21 +148,106 @@ export const themeStore = {
     saveString(MODE_KEY, mode);
     set({ mode });
   },
+  /** Choose a theme for every device (synced through the server). */
   setTheme(themeId: string): void {
-    saveString(ID_KEY, themeId);
-    const custom = state.custom.find((c) => c.file.id === themeId);
-    if (custom?.ok) saveJson(SELECTED_KEY, custom.file);
-    set({ themeId, preview: null });
+    applyLocal({ themeId });
+    set({ preview: null });
+    void pushPrefs({ themeId });
   },
   setDensity(density: DensityPref): void {
-    saveString(DENSITY_KEY, density);
-    set({ density });
+    applyLocal({ density });
+    void pushPrefs({ density });
   },
   /** Show a theme without choosing it (null ends the preview). */
   preview(theme: Theme | null): void {
     set({ preview: theme });
   },
 };
+
+// ---------------------------------------------------------------- user-wide prefs (server, cached here)
+
+/** The connected store whose server has `prefs.*`; null offline or on an older server. */
+let prefsStore: BizziStore | null = null;
+
+/** What this device last chose or saw (the cache). */
+function cachedPrefs(): UserPrefs {
+  const p: UserPrefs = {};
+  const id = loadString(ID_KEY);
+  if (id) p.themeId = id;
+  const d = loadString(DENSITY_KEY);
+  if (isDensityPref(d)) p.density = d;
+  return p;
+}
+
+/** Show and cache prefs (from this device or the server). A `?theme=` override keeps its theme. */
+function applyLocal(p: UserPrefs): void {
+  const patch: Partial<ThemeState> = {};
+  if (p.themeId && !urlTheme) {
+    saveString(ID_KEY, p.themeId);
+    const custom = state.custom.find((c) => c.file.id === p.themeId);
+    if (custom?.ok) saveJson(SELECTED_KEY, custom.file);
+    if (p.themeId !== state.themeId) patch.themeId = p.themeId;
+  }
+  if (p.density && isDensityPref(p.density)) {
+    saveString(DENSITY_KEY, p.density);
+    if (p.density !== state.density) patch.density = p.density;
+  }
+  if (Object.keys(patch).length > 0) set(patch);
+}
+
+async function pushPrefs(patch: Partial<UserPrefs>): Promise<void> {
+  const pending = mergePrefs(loadJson<UserPrefs>(PENDING_KEY) ?? {}, patch);
+  saveJson(PENDING_KEY, pending);
+  const store = prefsStore;
+  if (!store) return;
+  try {
+    await store.client.request('prefs.set', { prefs: pending });
+    // Clear unless something newer was queued meanwhile.
+    if (JSON.stringify(loadJson(PENDING_KEY)) === JSON.stringify(pending)) remove(PENDING_KEY);
+  } catch (e) {
+    if (isUnsupported(e)) {
+      prefsStore = null;
+      remove(PENDING_KEY);
+    }
+    // Otherwise (offline) it stays pending and goes up on the next connect.
+  }
+}
+
+/** On connect: the server's choice wins, pending local changes go up, a server without prefs is seeded. */
+export async function syncPrefs(store: BizziStore): Promise<void> {
+  try {
+    const { prefs } = await store.client.request('prefs.get', {});
+    const r = reconcilePrefs(cachedPrefs(), prefs, loadJson<UserPrefs>(PENDING_KEY) ?? {});
+    prefsStore = store;
+    applyLocal(r.apply);
+    if (r.push) await store.client.request('prefs.set', { prefs: r.push });
+    remove(PENDING_KEY);
+  } catch (e) {
+    if (isUnsupported(e)) {
+      // An older server: the choice stays on this device.
+      prefsStore = null;
+      remove(PENDING_KEY);
+    }
+  }
+}
+
+/**
+ * While connected: load the custom themes and the user-wide prefs, and follow `prefs.updated` from other
+ * devices. Mounted once by the shell.
+ */
+export function useServerThemes(store: BizziStore, connected: boolean): void {
+  useEffect(() => {
+    if (!connected) return;
+    const off = store.client.onEvent((ev) => {
+      if (ev.type === 'prefs.updated') applyLocal(ev.data.prefs);
+    });
+    void loadCustomThemes(store).then(() => syncPrefs(store));
+    return () => {
+      off();
+      if (prefsStore === store) prefsStore = null;
+    };
+  }, [store, connected]);
+}
 
 // ---------------------------------------------------------------- custom themes (hub, else local)
 
@@ -233,13 +327,6 @@ export function useThemeState(): ThemeSnapshot {
 
 export function useResolvedTheme(): ResolvedTheme {
   return useThemeState().resolved;
-}
-
-/** Load custom themes once the store is connected (and again after reconnects). */
-export function useCustomThemes(store: BizziStore, connected: boolean): void {
-  useEffect(() => {
-    if (connected) void loadCustomThemes(store);
-  }, [store, connected]);
 }
 
 /** Mode only (system / light / dark), the original `useTheme` shape: [pref, set, isDark]. */

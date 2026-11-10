@@ -16,9 +16,11 @@ import {
 } from '@bizzi/client';
 import type { SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
 import type { MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
+import { openAddWorkspace } from '../../app/addWorkspace.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
+import { PresenceDot } from '../../components/MachineSwitcher.tsx';
 import { AgentMark, MarkCount, MarkDot } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
 import { formatRelative } from '../../lib/format.ts';
@@ -33,9 +35,11 @@ const COLLAPSED_KEY = 'bizzi.sidebar.collapsed';
 /**
  * Machines first, workspaces under each (spec §11.1). A quiet workspace is one line; a row grows only when
  * something needs you (row 2) or the repo isn't in sync (row 3, desktop only). Machine sections collapse and
- * remember their state.
+ * remember their state. Each machine header is a tile that opens the machine's page.
+ *
+ * Auto width (Shell): elements marked `data-fit-ignore` (rows 2 and 3, notes) don't widen the sidebar.
  */
-export function MachineTree(props: { variant: Variant; activeWorkspaceId?: string | null; className?: string }): ReactNode {
+export function MachineTree(props: { variant: Variant; activeWorkspaceId?: string | null; activeMachineId?: string | null; className?: string }): ReactNode {
   const machines = useBizzi(selectMachineList, shallowEqual);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadJson<Record<string, boolean>>(COLLAPSED_KEY) ?? {});
   const toggle = useCallback((id: string) => {
@@ -49,13 +53,21 @@ export function MachineTree(props: { variant: Variant; activeWorkspaceId?: strin
   return (
     <div className={cx('flex flex-col gap-1', props.className)}>
       {machines.map((m) => (
-        <MachineSection key={m.id} machine={m} variant={props.variant} collapsed={collapsed[m.id] ?? false} onToggle={toggle} activeWorkspaceId={props.activeWorkspaceId ?? null} />
+        <MachineSection
+          key={m.id}
+          machine={m}
+          variant={props.variant}
+          collapsed={collapsed[m.id] ?? false}
+          onToggle={toggle}
+          activeWorkspaceId={props.activeWorkspaceId ?? null}
+          active={props.activeMachineId === m.id}
+        />
       ))}
     </div>
   );
 }
 
-function MachineSection(props: { machine: MachineInfo; variant: Variant; collapsed: boolean; onToggle: (id: string) => void; activeWorkspaceId: string | null }): ReactNode {
+function MachineSection(props: { machine: MachineInfo; variant: Variant; collapsed: boolean; onToggle: (id: string) => void; activeWorkspaceId: string | null; active: boolean }): ReactNode {
   const { machine: m, variant, collapsed } = props;
   const store = useStore();
   const summary = useBizzi((s) => selectMachineSummary(s, m.id), machineSummaryEqual);
@@ -65,11 +77,17 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
   const unsupported = summary.unsupported.map((a) => AGENT_LABEL[a]).join(', ');
   return (
     <section className={cx(!summary.online && 'opacity-60')}>
-      <div className={cx('flex items-center gap-1 rounded-md pr-2', phone ? 'min-h-11' : 'h-7')}>
+      <div
+        className={cx(
+          'group relative flex items-center rounded-md pr-1.5',
+          phone ? 'min-h-11' : 'h-8',
+          props.active ? (phone ? 'bg-panel-2' : 'bg-sidebar-accent text-sidebar-accent-foreground') : phone ? 'active:bg-panel-2' : 'hover:bg-sidebar-accent/70',
+        )}
+      >
         <button
           type="button"
           onClick={() => props.onToggle(m.id)}
-          className={cx('flex shrink-0 items-center justify-center text-muted hover:text-fg', phone ? 'h-11 w-9' : 'h-7 w-6')}
+          className={cx('flex shrink-0 items-center justify-center rounded-md text-muted hover:text-fg', phone ? 'h-11 w-9' : 'h-8 w-6')}
           aria-expanded={!collapsed}
           aria-label={collapsed ? `Expand ${m.name}` : `Collapse ${m.name}`}
         >
@@ -78,26 +96,60 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
         <a
           href={routeHref({ name: 'machine', machineId: m.id })}
           onClick={() => store.selectMachine(m.id)}
-          className={cx('min-w-0 flex-1 truncate font-semibold hover:underline', phone ? 'text-sm' : 'text-xs')}
-          title={`${m.hostname}${summary.online ? '' : ' · offline'}`}
+          className={cx('flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-md', phone ? 'text-sm' : 'text-xs')}
+          title={`Open ${m.name} (${m.hostname}${summary.online ? '' : ', offline'})`}
+          aria-current={props.active ? 'page' : undefined}
         >
-          {m.name}
-          {summary.online ? null : <span className="font-normal text-muted"> (offline)</span>}
+          <PresenceDot online={summary.online} className="h-1.5 w-1.5" />
+          <span className="min-w-0 truncate font-semibold">{m.name}</span>
+          {summary.online ? null : <span className="shrink-0 font-normal text-muted">(offline)</span>}
+          <span className="min-w-1 flex-1" />
+          {summary.unsupported.length > 0 ? (
+            <span className="shrink-0 text-warn" title={`Not supported here: ${unsupported}. Open the machine for remedies.`}>
+              <Icon name="alert" size={13} />
+            </span>
+          ) : null}
+          {totals ? <span className={cx('shrink-0 text-[11px] tabular-nums', summary.waiting > 0 ? 'text-warn' : 'text-muted')}>{totals}</span> : null}
         </a>
-        {summary.unsupported.length > 0 ? (
-          <span className="text-warn" title={`Not supported here: ${unsupported}. Open the machine for remedies.`}>
-            <Icon name="alert" size={13} />
+        {phone ? null : (
+          // Hover actions overlay the totals, so they never change the row's width.
+          <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-sidebar-accent pl-1 group-focus-within:flex group-hover:flex">
+            <button
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40"
+              title={`Add a workspace on ${m.name}`}
+              aria-label={`Add a workspace on ${m.name}`}
+              disabled={!summary.online}
+              onClick={() => {
+                store.selectMachine(m.id);
+                openAddWorkspace(m.id);
+              }}
+            >
+              <Icon name="plus" size={14} />
+            </button>
+            <a
+              href={routeHref({ name: 'machine', machineId: m.id })}
+              onClick={() => store.selectMachine(m.id)}
+              className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg"
+              title={`${m.name}: agents and machine settings`}
+              aria-label={`${m.name} settings`}
+            >
+              <Icon name="settings" size={14} />
+            </a>
           </span>
-        ) : null}
-        {totals ? <span className={cx('shrink-0 text-[11px] tabular-nums', summary.waiting > 0 ? 'text-warn' : 'text-muted')}>{totals}</span> : null}
+        )}
       </div>
-      {!collapsed && summary.staleSessions > 0 && !phone ? <div className="truncate pl-7 text-[11px] text-muted">{pendingUpdatesLabel(summary.staleSessions)}</div> : null}
+      {!collapsed && summary.staleSessions > 0 && !phone ? (
+        <div data-fit-ignore className="truncate pl-7 text-[11px] text-muted">
+          {pendingUpdatesLabel(summary.staleSessions)}
+        </div>
+      ) : null}
       {!collapsed ? (
         <div className="flex flex-col">
           {rows.map((r) => (
             <WorkspaceRow key={r.workspace.id} workspace={r.workspace} depth={r.depth} variant={variant} online={summary.online} active={props.activeWorkspaceId === r.workspace.id} />
           ))}
-          {rows.length === 0 ? <div className="py-1 pl-7 text-[11px] text-muted">No workspaces</div> : null}
+          {rows.length === 0 ? <div data-fit-ignore className="py-1 pl-7 text-[11px] text-muted">No workspaces</div> : null}
         </div>
       ) : null}
     </section>
@@ -168,6 +220,7 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
       </a>
       {row.urgent ? (
         <a
+          data-fit-ignore
           href={routeHref({ name: 'session', sessionId: row.urgent.sessionId, tab: 'chat' })}
           className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-8 text-xs text-muted hover:text-fg', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11' : 'h-6')}
           title={`${AGENT_LABEL[row.urgent.agent]}: ${row.urgent.text}`}
@@ -180,7 +233,7 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
           </span>
         </a>
       ) : null}
-      {!phone && ab ? <div className="h-5 truncate pl-8 font-mono text-[11px] leading-5 text-muted">{ab}</div> : null}
+      {!phone && ab ? <div data-fit-ignore className="h-5 truncate pl-8 font-mono text-[11px] leading-5 text-muted">{ab}</div> : null}
       {hover ? <BreakdownPopover workspaceId={w.id} rect={hover} /> : null}
       {sheet ? (
         <Modal title={w.name} onClose={() => setSheet(false)}>
