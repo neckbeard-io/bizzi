@@ -40,6 +40,9 @@ latest:
     verified: true
     notes: [The per-platform manifest the installer reads.]
 
+# No `support` block: agy runs in terminal mode only and no agy version has been tested with bizzi,
+# so probes don't report `support` for it.
+
 methods:
   - id: script
     kind: script
@@ -49,6 +52,7 @@ methods:
     pinnable: false
     selfUpdates: true
     pathHints: [/.local/bin/agy]
+    watch: ["~/.local/bin/agy"]
     verified: true
     sources:
       - https://antigravity.google/docs/getting-started?tab=cli
@@ -84,10 +88,10 @@ methods:
         env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
     update:
       - description: Upgrade the antigravity-cli cask
-        argv: [brew, upgrade, --cask, antigravity-cli]
+        argv: [brew, upgrade, --cask, "{{brewCask|antigravity-cli}}"]
     uninstall:
       - description: Uninstall the antigravity-cli cask
-        argv: [brew, uninstall, --cask, antigravity-cli]
+        argv: [brew, uninstall, --cask, "{{brewCask|antigravity-cli}}"]
 
 login:
   interactive:

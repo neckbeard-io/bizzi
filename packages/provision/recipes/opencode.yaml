@@ -43,6 +43,22 @@ latest:
     package: "@opencode/cli"
     verified: true
 
+# OpenCode 1 shares the `opencode` command but not the v2 server API (tech-choices D12).
+support:
+  versions: ">=2.0.0"
+  tested: ">=2.0.0 <2.1.0"
+  unsupported:
+    reason: OpenCode v1 is not supported; bizzi drives the v2 server API only (terminal mode still works)
+    remedies:
+      - kind: upgrade
+        title: Upgrade to v2
+        command: opencode upgrade --major
+      - kind: upgrade
+        title: Upgrade to v2 with the v2 installer
+        method: script
+        command: curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
+  notes: [The structured adapter was tested with 2.0.25.]
+
 methods:
   - id: script
     kind: script
@@ -51,6 +67,7 @@ methods:
     targetDir: "~/.opencode/bin"
     pinnable: true
     pathHints: [/.opencode/bin/]
+    watch: ["~/.opencode/bin/opencode"]
     verified: true
     sources:
       - https://opencode.ai/v2/docs
@@ -77,25 +94,27 @@ methods:
 
   - id: brew
     kind: brew
-    label: Homebrew (anomalyco/tap/opencode-v2)
+    label: Homebrew (opencode formula, or anomalyco/tap/opencode-v2)
     platforms: [darwin]
     requires: [{ command: brew }]
     targetDir: "{{brewBin}}"
     pinnable: false
     pathHints: [/Cellar/opencode]
     verified: true
-    sources: [https://opencode.ai/v2/docs]
-    notes: [homebrew-core's `opencode` formula also ships v2 (2.x as of 2026-11).]
+    sources: [https://opencode.ai/v2/docs, https://formulae.brew.sh/formula/opencode]
+    notes:
+      - homebrew-core's `opencode` formula also ships v2 (2.x as of 2026-11), and most Homebrew installs come from it.
+      - Adopted installs update and uninstall the formula the binary came from, read from its Cellar path and INSTALL_RECEIPT.json (`opencode` for core, `anomalyco/tap/opencode-v2` for the tap). Fresh installs use the tap.
     install:
       - description: Install OpenCode 2 from the anomalyco tap
         argv: [brew, install, anomalyco/tap/opencode-v2]
         env: { HOMEBREW_NO_AUTO_UPDATE: "1" }
     update:
-      - description: Upgrade OpenCode via Homebrew
-        argv: [opencode, upgrade, --method, brew]
+      - description: Upgrade the OpenCode Homebrew formula
+        argv: [brew, upgrade, "{{brewFormula|anomalyco/tap/opencode-v2}}"]
     uninstall:
-      - description: Uninstall the Homebrew formula
-        argv: [brew, uninstall, anomalyco/tap/opencode-v2]
+      - description: Uninstall the OpenCode Homebrew formula
+        argv: [brew, uninstall, "{{brewFormula|anomalyco/tap/opencode-v2}}"]
 
   - id: npm
     kind: npm
@@ -116,7 +135,7 @@ methods:
     uninstall:
       - description: Uninstall @opencode/cli
         argv: [npm, uninstall, -g, "@opencode/cli"]
-        env: { NPM_CONFIG_PREFIX: "~/.local" }
+        env: { NPM_CONFIG_PREFIX: "{{npmPrefix|~/.local}}" }
 
 login:
   interactive:

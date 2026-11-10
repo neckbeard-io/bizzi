@@ -2,6 +2,7 @@
 // key of T, so the TS types in types.ts and the runtime schema can't drift apart silently.
 
 import { ENGINE_VARS, templateVars } from './template.ts';
+import { parseRange } from './versions.ts';
 import type {
   AuthCommand,
   AuthRule,
@@ -14,8 +15,10 @@ import type {
   MethodSpec,
   PlatformSpec,
   Recipe,
+  RemedySpec,
   Requirement,
   StepSpec,
+  SupportSpec,
   VersionDetect,
 } from './types.ts';
 
@@ -184,6 +187,7 @@ const methodSchema = obj<MethodSpec>({
   pinnable: bool,
   selfUpdates: opt(bool),
   pathHints: opt(arr(str())),
+  watch: opt(arr(str())),
   verified: bool,
   sources: opt(arr(urlStr())),
   notes,
@@ -306,6 +310,45 @@ const authSchema = obj<AuthSpec>({
   notes,
 });
 
+function rangeStr(): Schema<string> {
+  return (v, p, i) => {
+    const s = str()(v, p, i);
+    if (s === BAD) return BAD;
+    try {
+      parseRange(s);
+    } catch (e) {
+      return fail(i, p, (e as Error).message);
+    }
+    return s;
+  };
+}
+
+const remedySchema = obj<RemedySpec>({
+  kind: lit('upgrade', 'migrate', 'restart-service'),
+  title: str(),
+  method: opt(str({ pattern: /^[a-z0-9-]+$/ })),
+  command: opt(str()),
+});
+
+const supportSchema = obj<SupportSpec>({
+  versions: rangeStr(),
+  tested: opt(rangeStr()),
+  unsupported: opt(
+    obj<NonNullable<SupportSpec['unsupported']>>({
+      reason: str(),
+      remedies: opt(arr(remedySchema)),
+    }),
+  ),
+  migrate: opt(
+    obj<NonNullable<SupportSpec['migrate']>>({
+      from: arr(str({ pattern: /^[a-z0-9-]+$/ }), { min: 1 }),
+      title: str(),
+      reason: opt(str()),
+    }),
+  ),
+  notes,
+});
+
 const platformSpecSchema = obj<PlatformSpec>({
   vars: opt(record(str(), /^[a-zA-Z][a-zA-Z0-9]*$/)),
   notes,
@@ -325,6 +368,7 @@ export const recipeSchema: Schema<Recipe> = obj<Recipe>({
   detect: detectSchema,
   latest: arr(latestSchema, { min: 1 }),
   methods: arr(methodSchema, { min: 1 }),
+  support: opt(supportSchema),
   login: opt(loginSchema),
   auth: opt(authSchema),
 });
@@ -368,6 +412,7 @@ function semanticChecks(r: Recipe, issues: string[]): void {
     const strings: [string, string][] = [
       [`${mp}.targetDir`, m.targetDir],
       ...(m.binDir ? ([[`${mp}.binDir`, m.binDir]] as [string, string][]) : []),
+      ...(m.watch ?? []).map((w, wi): [string, string] => [`${mp}.watch[${wi}]`, w]),
     ];
     for (const phase of ['install', 'update', 'uninstall'] as const) {
       (m[phase] ?? []).forEach((s, si) => {
@@ -400,6 +445,16 @@ function semanticChecks(r: Recipe, issues: string[]): void {
       }
     }
   });
+
+  if (r.support) {
+    if (r.kind !== 'agent') issues.push('support: only agent recipes declare supported versions');
+    for (const id of r.support.migrate?.from ?? []) {
+      if (!ids.has(id)) issues.push(`support.migrate.from: unknown method "${id}"`);
+    }
+    r.support.unsupported?.remedies?.forEach((rem, i) => {
+      if (rem.method && !ids.has(rem.method)) issues.push(`support.unsupported.remedies[${i}].method: unknown method "${rem.method}"`);
+    });
+  }
 
   const cmd = r.auth?.command;
   if (cmd?.format === 'json' && !cmd.loggedInField && !cmd.nonEmptyMeansOk && !cmd.okExitCodes) {

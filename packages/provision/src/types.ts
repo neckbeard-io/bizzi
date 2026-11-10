@@ -2,7 +2,7 @@
 // `recipeSchema` (schema.ts) at load time. Strings may contain `{{var}}` / `{{var|default}}`
 // templates (see template.ts for the variable list) and a leading `~/` for the home dir.
 
-import type { AgentKind, GlobalEventMap } from '@bizzi/protocol';
+import type { AgentKind, AgentRemedy, GlobalEventMap } from '@bizzi/protocol';
 
 export type OsName = 'darwin' | 'linux';
 export type ArchName = 'arm64' | 'x64';
@@ -59,6 +59,12 @@ export interface MethodSpec {
   selfUpdates?: boolean;
   /** Substrings of the binary's real path that indicate this method was used. */
   pathHints?: string[];
+  /**
+   * Paths that change when this install is updated (updates.md §2), watched by the node. A directory
+   * is watched for entries; a file or symlink through its parent directory. Missing paths are fine.
+   * Homebrew and npm installs add their package directories automatically.
+   */
+  watch?: string[];
   verified: boolean;
   sources?: string[];
   notes?: string[];
@@ -195,6 +201,22 @@ export interface PlatformSpec {
   notes?: string[];
 }
 
+/** A confirmable fix shown with a probe (protocol `AgentRemedy`). */
+export type RemedySpec = AgentRemedy;
+
+/** Which installed versions bizzi supports (spec §7 "Supported versions"). */
+export interface SupportSpec {
+  /** Version range bizzi can drive at all, e.g. `>=2.0.0`. Outside it the install is `unsupported`. */
+  versions: string;
+  /** The adapter's tested range. Inside `versions` but outside this, the install is `untested`. */
+  tested?: string;
+  /** What to tell the user about an unsupported version, and how to fix it. */
+  unsupported?: { reason: string; remedies?: RemedySpec[] };
+  /** Methods that update worse than the preferred one; installs using them get a 'migrate' remedy. */
+  migrate?: { from: string[]; title: string; reason?: string };
+  notes?: string[];
+}
+
 export interface Recipe {
   schema: 1;
   name: string;
@@ -212,6 +234,8 @@ export interface Recipe {
   detect: DetectSpec;
   latest: LatestSource[];
   methods: MethodSpec[];
+  /** Agents only: supported and tested versions. Absent = not checked. */
+  support?: SupportSpec;
   login?: LoginSpec;
   auth?: AuthSpec;
 }
