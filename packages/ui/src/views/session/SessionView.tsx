@@ -1,17 +1,21 @@
 import { Suspense, lazy, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { selectSessionPrompt } from '@bizzi/client';
+import type { SessionStatus } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
 import { useMachine, useMachineOnline } from '../../app/machine.ts';
 import { Icon } from '../../components/icons.tsx';
 import { PageHeader } from '../../components/layout.tsx';
 import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
-import { machinePresence } from '../../lib/format.ts';
+import { STATUS_LABEL, machinePresence } from '../../lib/format.ts';
+import { statusSourceLabel } from '../../lib/states.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
+import { HelperTree } from './HelperTree.tsx';
 import { PlanPanel } from './PlanPanel.tsx';
 import { SessionControls } from './SessionControls.tsx';
+import { SessionHeaderBar } from './SessionHeaderBar.tsx';
 import { Timeline } from './Timeline.tsx';
 
 // Heavy, rarely-first panels load on demand.
@@ -34,6 +38,9 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const sessionsLoaded = useBizzi((s) => s.sessionsLoaded);
   const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status ?? null);
   const prompt = useBizzi((s) => selectSessionPrompt(s, sessionId));
+  const statusSource = useBizzi((s) => s.timelines[sessionId]?.statusSource);
+  const statusReason = useBizzi((s) => s.timelines[sessionId]?.statusReason);
+  const lastSeq = useBizzi((s) => s.timelines[sessionId]?.lastSeq ?? 0);
   const canFork = useBizzi((s) => s.capabilities[sessionId]?.fork ?? false);
   const isLogin = useBizzi((s) => s.timelines[sessionId]?.login != null);
   const machine = useMachine(session?.machineId);
@@ -60,6 +67,22 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
     setOpenError(null);
     store.openSession(sessionId).catch((e: unknown) => setOpenError(e));
   }, [store, sessionId]);
+
+  // Viewing a session marks it seen through what has arrived (spec §4 seen_through), so "done, not yet
+  // seen" clears here and on every other device. Only while the page is visible; never backwards.
+  useEffect(() => {
+    if (lastSeq === 0) return;
+    const mark = (): void => {
+      if (document.visibilityState === 'visible') store.markSeen(sessionId, lastSeq);
+    };
+    // Debounced: a streaming turn advances lastSeq every frame; "done" only matters once it settles.
+    const t = setTimeout(mark, 500);
+    document.addEventListener('visibilitychange', mark);
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('visibilitychange', mark);
+    };
+  }, [store, sessionId, lastSeq]);
 
   if (!session) {
     return (
@@ -130,7 +153,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
         back={() => navigate({ name: 'workspace', workspaceId: session.workspaceId })}
         actions={
           <>
-            <StatusBadge status={status} prompt={prompt} />
+            <StatusBadge status={status} prompt={prompt} title={statusTitle(status, statusReason, statusSource)} />
             {!terminal ? <IconButton icon="settings" label="Session settings" onClick={() => setShowControls((v) => !v)} className={cx(showControls && 'bg-panel-2 text-fg')} /> : null}
             {canFork ? <IconButton icon="fork" label="Fork: new session continuing this conversation" disabled={!online || fork.busy} onClick={() => void fork.run()} /> : null}
             <IconButton
@@ -158,6 +181,8 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
           </>
         }
       />
+      <SessionHeaderBar session={session} />
+      <HelperTree sessionId={sessionId} />
       {showControls && !terminal ? (
         <div className="shrink-0 border-b border-border bg-panel px-3 py-2 md:px-5">
           <SessionControls sessionId={sessionId} />
@@ -199,6 +224,13 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
       )}
     </div>
   );
+}
+
+/** Status tooltip: the status, its reason and what produced it ("via OSC 7501", "detector: claude-permission"). */
+function statusTitle(status: SessionStatus | null, reason: string | undefined, source: string | undefined): string | undefined {
+  if (!status) return undefined;
+  const src = statusSourceLabel(source);
+  return [STATUS_LABEL[status], reason, src].filter(Boolean).join(' · ');
 }
 
 function Count(props: { n: number }): ReactNode {

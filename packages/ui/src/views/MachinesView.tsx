@@ -2,19 +2,21 @@ import type { ReactNode } from 'react';
 import { selectMachineList, shallowEqual } from '@bizzi/client';
 import type { MachineInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
-import { navigate } from '../app/hooks.ts';
+import { navigate, useIsWide } from '../app/hooks.ts';
 import { useTargetMachineId } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Empty, Spinner, cx } from '../components/ui.tsx';
 import { machinePresence } from '../lib/format.ts';
+import { UsageChip } from './usage/Usage.tsx';
 
 /** Every machine reachable through this connection: online state, what it is good for, ADE status. */
 export function MachinesView(): ReactNode {
   const machines = useBizzi(selectMachineList, shallowEqual);
   const loaded = useBizzi((s) => Object.keys(s.machines).length > 0 || s.machine !== null);
   const hub = useBizzi((s) => s.role === 'hub');
+  const wide = useIsWide();
   return (
     <Page
       header={
@@ -22,11 +24,14 @@ export function MachinesView(): ReactNode {
           title="Machines"
           subtitle={hub ? 'Machines connected to this hub' : 'This node and the machines it knows about'}
           actions={
-            hub ? (
-              <Button size="sm" icon="plus" onClick={() => navigate({ name: 'settings', section: 'devices' })}>
-                Add machine
-              </Button>
-            ) : null
+            <>
+              {wide ? null : <UsageChip />}
+              {hub ? (
+                <Button size="sm" icon="plus" onClick={() => navigate({ name: 'settings', section: 'devices' })}>
+                  Add machine
+                </Button>
+              ) : null}
+            </>
           }
         />
       }

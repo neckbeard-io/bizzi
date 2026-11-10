@@ -100,19 +100,27 @@ export function SafetyBadge(props: { kind?: 'warn' | 'danger'; children: ReactNo
   );
 }
 
-export function StatusBadge(props: { status: SessionStatus | null | undefined; prompt?: SessionPrompt | null }): ReactNode {
+/** `title` explains where the status came from (e.g. "via OSC 7501"). */
+export function StatusBadge(props: { status: SessionStatus | null | undefined; prompt?: SessionPrompt | null; title?: string }): ReactNode {
   if (!props.status) return null;
   if (props.prompt === 'login' && (props.status === 'waiting_input' || props.status === 'running' || props.status === 'starting')) {
     return (
-      <Badge tone="warn">
+      <Badge tone="warn" {...(props.title ? { title: props.title } : {})}>
         <Icon name="key" size={11} />
         login
       </Badge>
     );
   }
+  if (props.prompt === 'budget' && props.status === 'waiting_input') {
+    return (
+      <Badge tone="warn" {...(props.title ? { title: props.title } : {})}>
+        budget reached
+      </Badge>
+    );
+  }
   const tone = STATUS_TONE[props.status];
   return (
-    <Badge tone={tone}>
+    <Badge tone={tone} {...(props.title ? { title: props.title } : {})}>
       {props.status === 'running' || props.status === 'starting' ? <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-current" /> : null}
       {STATUS_LABEL[props.status]}
     </Badge>

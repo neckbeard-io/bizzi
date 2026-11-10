@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { selectAgentJob, selectAgents } from '@bizzi/client';
-import type { AgentCapabilities, AgentKind, AgentListing, InstallAction, MachineInfo } from '@bizzi/protocol';
+import type { JobAction } from '@bizzi/client';
+import type { AgentCapabilities, AgentKind, AgentListing, AgentRemedy, MachineInfo, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
 import { useIsHub, useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
-import { Badge, Button, Card, Empty, ErrorText, Spinner, cx } from '../components/ui.tsx';
+import { Badge, Button, Card, CopyButton, Empty, ErrorText, Spinner, cx } from '../components/ui.tsx';
+import { WidgetRow } from '../components/Widget.tsx';
 import { machinePresence } from '../lib/format.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
 import { routeHref } from '../lib/router.ts';
+import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, RESTART_POLICY_LABEL, UPDATE_POLICY_LABEL, pendingUpdatesLabel } from '../lib/states.ts';
+import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 import { JobProgress } from './provision/JobProgress.tsx';
 import { PlanModal } from './provision/PlanModal.tsx';
 import { SecretsPanel } from './provision/SecretsPanel.tsx';
@@ -28,7 +32,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
   const loadError = useBizzi((s) => (machineId ? (s.machineErrors[machineId] ?? null) : null));
   const serverVersion = useBizzi((s) => s.connection.serverVersion);
   const refresh = useAction(() => store.loadAgents(machineId, true));
-  const [plan, setPlan] = useState<{ agent: AgentKind; action: InstallAction } | null>(null);
+  const [plan, setPlan] = useState<{ agent: AgentKind; action: JobAction; method?: string } | null>(null);
   const [secretFor, setSecretFor] = useState<AgentKind | null>(null);
   const clearSecretFor = useCallback(() => setSecretFor(null), []);
 
@@ -64,7 +68,9 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       }
     >
       {!online && machine ? <OfflineBanner machine={machine} /> : null}
+      {agents ? <UnsupportedBanner agents={agents} machineName={name} /> : null}
       {machine ? <MachineCard machine={machine} /> : null}
+      <WidgetRow placement="machine" machineId={machineId} className="mt-3 rounded-lg border border-border bg-panel px-4 py-2" />
 
       <SectionTitle>Agents</SectionTitle>
       <ErrorText error={refresh.error ?? (online ? loadError : null)} className="mb-2" />
@@ -83,12 +89,15 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {agents.map((a) => (
-            <AgentCard key={a.agent} machineId={machineId} online={online} agent={a} onPlan={(action) => setPlan({ agent: a.agent, action })} onSecret={() => setSecretFor(a.agent)} />
+            <AgentCard key={a.agent} machineId={machineId} online={online} agent={a} onPlan={(action, method) => setPlan(method ? { agent: a.agent, action, method } : { agent: a.agent, action })} onSecret={() => setSecretFor(a.agent)} />
           ))}
         </div>
       )}
 
       <SecretsPanel machineId={machineId} online={online} preset={secretFor} onPresetUsed={clearSecretFor} />
+
+      <SectionTitle>Agent-to-agent</SectionTitle>
+      <OrchestrationPanel machineId={machineId} online={online} />
 
       {!hub ? (
         <p className="mt-6 text-xs text-muted">
@@ -99,7 +108,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
           .
         </p>
       ) : null}
-      {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} onClose={() => setPlan(null)} /> : null}
+      {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} {...(plan.method ? { method: plan.method } : {})} onClose={() => setPlan(null)} /> : null}
     </Page>
   );
 }
@@ -113,6 +122,25 @@ function OfflineBanner(props: { machine: MachineInfo }): ReactNode {
           {props.machine.name} is offline{props.machine.lastSeenAt ? ` · ${machinePresence(props.machine)}` : ''}
         </div>
         <div className="text-xs opacity-90">Showing cached data. Installs, logins and API keys are disabled until it reconnects.</div>
+      </div>
+    </div>
+  );
+}
+
+/** spec §7: an unsupported install raises a banner on the machine (remedies are on the agent's card). */
+function UnsupportedBanner(props: { agents: readonly AgentListing[]; machineName: string }): ReactNode {
+  const bad = props.agents.filter((a) => a.installed && a.support === 'unsupported');
+  if (bad.length === 0) return null;
+  return (
+    <div className="mb-3 flex items-start gap-2.5 rounded-lg border border-err/40 bg-err/5 px-3 py-2.5 text-sm text-err" role="alert">
+      <Icon name="alert" size={18} className="mt-0.5 shrink-0" />
+      <div className="min-w-0 flex-1">
+        {bad.map((a) => (
+          <div key={a.agent} className="font-medium">
+            {AGENT_LABEL[a.agent]} {a.version ?? ''} on {props.machineName} is not supported{a.supportReason ? `: ${a.supportReason}` : '.'}
+          </div>
+        ))}
+        <div className="text-xs opacity-90">Structured sessions won't start on it; terminal mode still works. The fix is on its card below and runs only when you confirm.</div>
       </div>
     </div>
   );
@@ -157,7 +185,7 @@ function MachineCard(props: { machine: MachineInfo }): ReactNode {
 const AUTH_TONE = { ok: 'ok', missing: 'warn', expired: 'err', unknown: 'neutral' } as const;
 const AUTH_LABEL = { ok: 'signed in', missing: 'not signed in', expired: 'login expired', unknown: 'auth unknown' } as const;
 
-function AgentCard(props: { machineId: string; online: boolean; agent: AgentListing; onPlan: (action: InstallAction) => void; onSecret: () => void }): ReactNode {
+function AgentCard(props: { machineId: string; online: boolean; agent: AgentListing; onPlan: (action: JobAction, method?: string) => void; onSecret: () => void }): ReactNode {
   const { agent: a, machineId, online } = props;
   const store = useStore();
   const job = useBizzi((s) => selectAgentJob(s, machineId, a.agent));
@@ -174,12 +202,14 @@ function AgentCard(props: { machineId: string; online: boolean; agent: AgentList
       <div className="flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="font-medium capitalize">{a.agent}</div>
-          <div className="truncate text-xs text-muted" title={a.path}>
-            {a.installed ? `${a.version ?? 'unknown version'}${a.path ? ` · ${a.path}` : ''}` : 'not installed'}
+          <div className="truncate text-xs text-muted" title={a.realPath && a.realPath !== a.path ? `${a.path} → ${a.realPath}` : a.path}>
+            {a.installed ? `${a.version ?? 'unknown version'}${a.method ? ` · ${a.method}` : ''}${a.path ? ` · ${a.path}` : ''}` : 'not installed'}
           </div>
         </div>
+        {a.installed && a.billing ? <Badge title={BILLING_HINT[a.billing]}>{BILLING_LABEL[a.billing]}</Badge> : null}
         {a.installed ? <Badge tone={AUTH_TONE[a.auth]}>{AUTH_LABEL[a.auth]}</Badge> : <Badge>missing</Badge>}
       </div>
+      {a.installed ? <SupportNotice agent={a} disabled={disabled} onRemedy={(r) => props.onPlan(r.kind === 'migrate' ? 'migrate' : 'update', r.method)} /> : null}
       {a.account ? (
         <div className="mt-2 flex items-center gap-1.5 truncate text-xs text-muted">
           <Icon name="user" size={12} />
@@ -192,6 +222,12 @@ function AgentCard(props: { machineId: string; online: boolean; agent: AgentList
         </div>
       ) : null}
       {a.installed && a.onPath === false ? <div className="mt-2 text-xs text-warn">Not on the PATH of background services; agents may not find it.</div> : null}
+      {a.installed && a.staleSessions ? (
+        <div className="mt-2 text-xs text-muted" title="These sessions still run the previous version; restart them from the session header, or let the restart policy do it.">
+          {pendingUpdatesLabel(a.staleSessions)}
+        </div>
+      ) : null}
+      {a.installed && a.agent !== 'shell' ? <PolicySelects machineId={machineId} agent={a} disabled={!online} /> : null}
       {a.notes?.length ? (
         <ul className="mt-2 list-disc pl-4 text-xs text-muted">
           {a.notes.map((n) => (
@@ -233,6 +269,97 @@ function AgentCard(props: { machineId: string; online: boolean; agent: AgentList
         </div>
       ) : null}
     </Card>
+  );
+}
+
+/**
+ * spec §7 supported versions and install method: `unsupported` is an alert with confirm-first remedies,
+ * `untested` a quiet note, a non-preferred method an offer to switch.
+ */
+function SupportNotice(props: { agent: AgentListing; disabled: boolean; onRemedy: (r: AgentRemedy) => void }): ReactNode {
+  const a = props.agent;
+  const remedies = a.remedies ?? [];
+  const actionable = remedies.filter((r) => r.kind !== 'restart-service');
+  const service = remedies.find((r) => r.kind === 'restart-service');
+  if (a.support === 'unsupported') {
+    return (
+      <div className="mt-2 rounded-md border border-err/40 bg-err/5 px-2.5 py-2 text-xs text-err" role="alert">
+        <div className="font-medium">Not supported{a.supportReason ? `: ${a.supportReason}` : ''}</div>
+        <Remedies remedies={actionable} disabled={props.disabled} onRemedy={props.onRemedy} />
+      </div>
+    );
+  }
+  return (
+    <>
+      {a.support === 'untested' ? <div className="mt-2 text-xs text-muted">Untested version{a.supportReason ? `: ${a.supportReason}` : ''}</div> : null}
+      {actionable.length > 0 ? (
+        <div className="mt-2 rounded-md border border-border bg-panel-2/50 px-2.5 py-2 text-xs text-muted">
+          {a.method && a.preferredMethod && a.method !== a.preferredMethod ? (
+            <div>
+              Installed with {a.method}; bizzi prefers {a.preferredMethod} here.
+            </div>
+          ) : null}
+          <Remedies remedies={actionable} disabled={props.disabled} onRemedy={props.onRemedy} />
+        </div>
+      ) : null}
+      {service ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-warn">
+          <span>{service.title}</span>
+          {service.command ? <CopyButton text={service.command} label={service.command} /> : null}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function Remedies(props: { remedies: AgentRemedy[]; disabled: boolean; onRemedy: (r: AgentRemedy) => void }): ReactNode {
+  if (props.remedies.length === 0) return null;
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      {props.remedies.map((r) => (
+        <Button key={`${r.kind}:${r.method ?? ''}`} size="sm" variant="secondary" icon={r.kind === 'migrate' ? 'refresh' : 'upload'} disabled={props.disabled} onClick={() => props.onRemedy(r)} title={r.command ? `Runs: ${r.command}` : undefined}>
+          {r.title}
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/** Update / restart policy per agent and machine (updates.md §6). */
+function PolicySelects(props: { machineId: string; agent: AgentListing; disabled: boolean }): ReactNode {
+  const { agent: a, machineId } = props;
+  const store = useStore();
+  const set = useAction((p: { update?: UpdatePolicy; restart?: RestartPolicy }) => store.setAgentPolicy({ machineId, agent: a.agent, ...p }));
+  if (!a.updatePolicy && !a.restartPolicy) return null;
+  // A plain compact select: the shared Select is a full-height form control.
+  const sel = 'h-7 rounded-md border border-border bg-panel px-1.5 text-xs text-fg focus:border-accent focus:outline-none disabled:opacity-50';
+  return (
+    <div className="mt-2">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted">
+        <label className="flex items-center gap-1.5">
+          Updates
+          <select className={sel} value={a.updatePolicy ?? 'auto'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ update: e.target.value as UpdatePolicy })}>
+            {(Object.keys(UPDATE_POLICY_LABEL) as UpdatePolicy[]).map((p) => (
+              <option key={p} value={p}>
+                {UPDATE_POLICY_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex items-center gap-1.5">
+          Restarts
+          <select className={sel} value={a.restartPolicy ?? 'when-idle'} disabled={props.disabled || set.busy} onChange={(e) => void set.run({ restart: e.target.value as RestartPolicy })}>
+            {(Object.keys(RESTART_POLICY_LABEL) as RestartPolicy[]).map((p) => (
+              <option key={p} value={p}>
+                {RESTART_POLICY_LABEL[p]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {set.busy ? <Spinner size={12} /> : null}
+      </div>
+      <ErrorText error={set.error} className="mt-1 text-xs" />
+    </div>
   );
 }
 

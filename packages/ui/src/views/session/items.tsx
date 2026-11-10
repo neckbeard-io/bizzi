@@ -5,9 +5,11 @@ import type {
   ErrorItem,
   FileChangeItem,
   MessageItem,
+  CompactItem,
   QuestionItem,
   RawItem,
   ReasoningItem,
+  RestartItem,
   StatusItem,
   SteerItem,
   SubagentItem,
@@ -25,7 +27,7 @@ import { Icon } from '../../components/icons.tsx';
 import type { IconName } from '../../components/icons.tsx';
 import { Badge, Button, Disclosure, ErrorText, Input, Spinner, Textarea, cx } from '../../components/ui.tsx';
 import { diffStats, parseUnifiedDiff } from '../../lib/diff.ts';
-import { formatDuration, prettyJson, tail, usageSummary } from '../../lib/format.ts';
+import { formatDuration, formatTokens, prettyJson, tail, usageSummary } from '../../lib/format.ts';
 import { EMPTY_DRAFT, answerText, buildAnswers, isOptional, isQuickPick, missingAnswers, setText, toggleOption } from '../../lib/questions.ts';
 import type { QuestionDraft } from '../../lib/questions.ts';
 import { Markdown } from './Markdown.tsx';
@@ -66,7 +68,42 @@ function ItemView(props: { sessionId: string; item: TimelineItem }): ReactNode {
       return <SubagentRow item={item} />;
     case 'raw':
       return <RawRow item={item} />;
+    case 'restart':
+      return <RestartRow item={item} />;
+    case 'compact':
+      return <CompactRow item={item} />;
   }
+}
+
+/** Divider: "restarted on 2.1.322" (updates.md §5); the bizzi session and its seq carry on. */
+function RestartRow(props: { item: RestartItem }): ReactNode {
+  const r = props.item;
+  const text =
+    r.state === 'restarting'
+      ? `restarting${r.toVersion ? ` on ${r.toVersion}` : ''}…`
+      : r.state === 'ok'
+        ? `restarted on ${r.toVersion ?? 'the installed version'}`
+        : `restart failed${r.error ? `: ${r.error}` : ''}`;
+  return (
+    <div className={cx('flex items-center gap-3 text-xs', r.state === 'failed' ? 'text-err' : 'text-muted')} role="separator">
+      <span className="h-px flex-1 bg-border" />
+      {r.state === 'restarting' ? <Spinner size={11} /> : <Icon name="refresh" size={12} />}
+      <span title={r.fromVersion ? `from ${r.fromVersion}${r.reason ? ` · ${r.reason}` : ''}` : r.reason}>{text}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
+}
+
+function CompactRow(props: { item: CompactItem }): ReactNode {
+  const c = props.item;
+  const sizes = c.before !== undefined && c.after !== undefined ? ` · ${formatTokens(c.before)} → ${formatTokens(c.after)}` : '';
+  return (
+    <div className="flex items-center gap-3 text-xs text-muted" role="separator">
+      <span className="h-px flex-1 bg-border" />
+      <span>context compacted{sizes}</span>
+      <span className="h-px flex-1 bg-border" />
+    </div>
+  );
 }
 
 function UserBubble(props: { children: ReactNode }): ReactNode {

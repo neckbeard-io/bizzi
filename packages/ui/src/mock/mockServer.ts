@@ -28,20 +28,23 @@ import type {
 import { base64ToBytes, base64UrlToBytes, bytesToBase64, stringToBase64, verifySignature } from '@bizzi/client';
 import type { FetchLike, SocketFactory, WebSocketLike } from '@bizzi/client';
 import {
-  AGENTS,
   ASSISTANT_REPLY,
   CAPS_BY_AGENT,
   CHECKOUT_DIFF,
+  DEMO_CONTEXT,
   FILES,
+  GIT_STATUS,
   HUB_MACHINE,
   HUB_ORIGIN,
+  LEAD_CONTEXT,
   MACHINE,
+  MINI,
   MOCK_SETUP_CODE,
   NOTES_DIFF,
   REVIEW_REPLY,
   SERVER,
-  SERVER_AGENTS,
   SESSIONS,
+  UNSEEN_SESSIONS,
   WORKSPACES,
   iso,
 } from './fixtures.ts';
@@ -49,6 +52,7 @@ import type { MockHost, MockModule } from './host.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
 import { MockThemes } from './themes.ts';
+import { MockUsage } from './usage.ts';
 
 export interface MockOptions {
   /** Multiplier for every delay (0 = instant, for tests). */
@@ -89,6 +93,10 @@ export class MockCore implements MockHost {
   private readonly termHandlers = new Map<string, (data: string) => void>();
   private readonly pendingStatic = new Map<string, string>();
   private readonly modules: MockModule[];
+  private readonly provision: MockProvision;
+  private readonly usageModule: MockUsage;
+  /** git.status per workspace (mutable: worktrees add entries). */
+  private readonly git = new Map<string, { branch: string; ahead: number; behind: number; files: { path: string; status: string }[] }>();
   private autoplayed = false;
   // hub: devices, pairing codes, tokens
   readonly devices = new Map<string, DeviceInfo & { publicKey?: Ed25519PublicJwk }>();
@@ -103,11 +111,22 @@ export class MockCore implements MockHost {
     this.demo = new Set(opts.demo ?? []);
     this.machineMap.set(MACHINE.id, { ...MACHINE });
     this.machineMap.set(SERVER.id, { ...SERVER, lastSeenAt: new Date(Date.now() - 2 * 3600_000 - 14 * 60_000).toISOString() });
+    this.machineMap.set(MINI.id, { ...MINI });
     for (const w of WORKSPACES) this.workspaceMap.set(w.id, { ...w });
-    for (const s of SESSIONS) this.sessionMap.set(s.id, { ...s });
+    for (const s of SESSIONS) this.sessionMap.set(s.id, { ...s, ...(s.budget ? { budget: { ...s.budget } } : {}) });
+    for (const [wid, g] of Object.entries(GIT_STATUS)) this.git.set(wid, { ...g, files: [...g.files] });
     this.seedDevices();
     this.seedHistory();
-    this.modules = [new MockProvision(this), new MockKnowledge(this), new MockThemes(this)];
+    // Everything seeded has been seen, except the sessions that finished while you were away.
+    for (const x of this.sessionMap.values()) x.seenThrough = UNSEEN_SESSIONS.has(x.id) ? Math.max(0, x.lastSeq - 1) : x.lastSeq;
+    this.provision = new MockProvision(this);
+    this.usageModule = new MockUsage(this, { live: this.autoplay && this.speed > 0 });
+    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule];
+  }
+
+  /** Stop background timers (tests). */
+  dispose(): void {
+    this.usageModule.dispose();
   }
 
   // ---------------------------------------------------------------- MockHost
@@ -152,6 +171,7 @@ export class MockCore implements MockHost {
       createdAt: now,
       updatedAt: now,
       lastSeq: 0,
+      seenThrough: 0,
     };
     this.sessionMap.set(s.id, s);
     this.emit(GLOBAL_CHANNEL, { type: 'session.created', data: { session: { ...s } } });
@@ -257,6 +277,7 @@ export class MockCore implements MockHost {
     this.emitS(s, { type: 'message.completed', data: { messageId: 'msg_seed1', role: 'assistant', text: 'Reproduced on run 3: the assertion sees `pending`. The spec sleeps 50 ms instead of waiting for the payment mock to settle. Next I will look at how the mock resolves.' } }, at());
     this.emitS(s, { type: 'plan.updated', data: { items: [{ text: 'Reproduce the flake locally', status: 'completed' }, { text: 'Find the race', status: 'in_progress' }, { text: 'Fix and verify 100×', status: 'pending' }] } }, at());
     this.emitS(s, { type: 'usage.updated', data: { inputTokens: 18_420, outputTokens: 1_210, cacheReadTokens: 12_000, costUsd: 0.14, contextWindow: 200_000 } }, at());
+    this.emitS(s, { type: 'context.updated', data: DEMO_CONTEXT }, at());
     this.emitS(s, { type: 'turn.completed', data: { turnId: 't_seed1', stopReason: 'end_turn', usage: { inputTokens: 18_420, outputTokens: 1_210, costUsd: 0.14 } } }, at());
 
     // s_review: waiting on an approval.
@@ -269,7 +290,9 @@ export class MockCore implements MockHost {
     this.emitS(r, { type: 'file.changed', data: { path: 'src/payments/client.ts', change: 'modified', diff: '@@ -1,5 +1,9 @@\n+import { withRetry } from "./retry";\n+\n export const payments = {\n   async charge(amount: number, card: string) {\n-    return fetch("/api/charge", { method: "POST", body: JSON.stringify({ amount, card }) });\n+    return withRetry(() =>\n+      fetch("/api/charge", { method: "POST", body: JSON.stringify({ amount, card }) }),\n+    );\n   },\n };\n' } }, at());
     this.emitS(r, { type: 'message.completed', data: { messageId: 'msg_rev1', role: 'assistant', text: REVIEW_REPLY } }, at());
     this.emitS(r, { type: 'tool.started', data: { toolId: 'tc_rev2', kind: 'shell', name: 'commandExecution', title: 'docker compose up -d payments-sandbox', input: { command: ['docker', 'compose', 'up', '-d', 'payments-sandbox'], cwd: '/Users/dev/src/acme-shop' } } }, at());
+    this.emitS(r, { type: 'context.updated', data: { used: 61_000, window: 272_000, usable: 245_000 } }, at());
     this.emitS(r, { type: 'approval.requested', data: { approvalId: 'ap_rev1', toolId: 'tc_rev2', kind: 'shell', title: 'Run: docker compose up -d payments-sandbox', description: 'Starts the local payment sandbox container needed by the integration suite.', input: { command: ['docker', 'compose', 'up', '-d', 'payments-sandbox'] }, editable: false, options: ['allow', 'allow_always', 'deny'] } }, at());
+    this.emitS(r, { type: 'session.status', data: { status: 'waiting_approval', prompt: 'approval', source: 'adapter' } }, at());
     this.pendingStatic.set('ap_rev1', 's_review');
 
     // s_plan: Claude asks structured questions (AskUserQuestion).
@@ -312,7 +335,7 @@ export class MockCore implements MockHost {
       },
       at(),
     );
-    this.emitS(q, { type: 'session.status', data: { status: 'waiting_input', prompt: 'input' } }, at());
+    this.emitS(q, { type: 'session.status', data: { status: 'waiting_input', prompt: 'input', source: 'adapter' } }, at());
     this.pendingStatic.set(PLAN_QUESTION_ID, q);
 
     // s_notes: a finished research turn, then a turn whose approval was cancelled by an interrupt.
@@ -341,7 +364,52 @@ export class MockCore implements MockHost {
     this.emitS(f, { type: 'message.completed', data: { messageId: 'msg_f1', role: 'assistant', text: 'Backed up all databases, bumped the image to `postgres:17` and ran `pg_upgrade`. The app boots and the health check is green.' } }, at());
     this.emitS(f, { type: 'turn.completed', data: { turnId: 't_f1', stopReason: 'end_turn', usage: { inputTokens: 33_000, outputTokens: 2_100, costUsd: 0.31 } } }, at());
 
+    // s_lead: a Claude parent that started two helpers through bizzi's agent-to-agent tools (spec §12.1).
+    const L = 's_lead';
+    m = -40;
+    this.emitS(L, { type: 'session.info', data: { model: 'opus', permissionMode: 'acceptEdits' } }, at());
+    this.emitS(L, { type: 'turn.started', data: { turnId: 't_lead1', input: [{ type: 'text', text: 'Implement OAuth login with PKCE in a worktree. Have Codex review it and use the local model to map the session middleware first.' }] } }, at());
+    this.emitS(L, { type: 'message.completed', data: { messageId: 'msg_lead1', role: 'assistant', text: 'I will map the middleware with a budgetless helper first, then implement on `feat/oauth` and ask Codex for a review.' } }, at());
+    this.emitS(L, { type: 'tool.started', data: { toolId: 'tc_lead1', kind: 'other', name: 'bizzi.session_start', title: 'opencode · Map the session middleware', input: { agent: 'opencode', prompt: 'Map the session middleware', scope: 'child' } } }, at());
+    this.emitS(L, { type: 'tool.completed', data: { toolId: 'tc_lead1', status: 'ok', output: 'sessionId: s_helper_explore' } }, at());
+    this.emitS(L, { type: 'tool.started', data: { toolId: 'tc_lead2', kind: 'other', name: 'bizzi.session_start', title: 'codex · Review the OAuth change', input: { agent: 'codex', worktree: 'feat/oauth', scope: 'child', budget: { usd: 2 } } } }, at());
+    this.emitS(L, { type: 'tool.completed', data: { toolId: 'tc_lead2', status: 'ok', output: 'sessionId: s_helper_review' } }, at());
+    this.emitS(L, { type: 'tool.started', data: { toolId: 'tc_lead3', kind: 'other', name: 'bizzi.session_wait', title: 'wait for s_helper_review (done)' } }, at());
+    this.emitS(L, { type: 'usage.updated', data: { inputTokens: 41_000, outputTokens: 3_900, costUsd: 0.62, contextWindow: 200_000 } }, at());
+    this.emitS(L, { type: 'context.updated', data: LEAD_CONTEXT }, at());
+
+    const E = 's_helper_explore';
+    m = -29;
+    this.emitS(E, { type: 'session.info', data: { model: 'qwen3.8-27b (h200)' } }, at());
+    this.emitS(E, { type: 'turn.started', data: { turnId: 't_ex1', input: [{ type: 'text', text: 'Map the session middleware: where sessions are created, read and destroyed.' }] } }, at());
+    this.emitS(E, { type: 'message.completed', data: { messageId: 'msg_ex1', role: 'assistant', text: 'Sessions are created in `src/auth/session.ts` (login), read by `requireSession()` in 14 routes and destroyed on logout and password change.' } }, at());
+    this.emitS(E, { type: 'turn.completed', data: { turnId: 't_ex1', stopReason: 'end_turn', usage: { inputTokens: 88_000, outputTokens: 2_400 } } }, at());
+    this.emitS(E, { type: 'usage.updated', data: { inputTokens: 88_000, outputTokens: 2_400, contextWindow: 131_072 } }, at());
+    this.emitS(E, { type: 'context.updated', data: { used: 90_400, window: 131_072 } }, at());
+
+    const V = 's_helper_review';
+    m = -30;
+    this.emitS(V, { type: 'session.info', data: { model: 'gpt-5.5-codex' } }, at());
+    this.emitS(V, { type: 'turn.started', data: { turnId: 't_rv1', input: [{ type: 'text', text: 'Review the OAuth change on feat/oauth. Report findings with file and line.' }] } }, at());
+    this.emitS(V, { type: 'tool.started', data: { toolId: 'tc_rv1', kind: 'read', name: 'read', title: 'src/auth/oauth.ts' } }, at());
+    this.emitS(V, { type: 'tool.completed', data: { toolId: 'tc_rv1', status: 'ok' } }, at());
+    this.emitS(V, { type: 'message.completed', data: { messageId: 'msg_rv1', role: 'assistant', text: 'Two findings so far: the PKCE verifier is logged at debug level, and the state parameter is not checked on callback.' } }, at());
+    this.emitS(V, { type: 'usage.updated', data: { inputTokens: 152_000, outputTokens: 6_100, costUsd: 2.0, contextWindow: 272_000 } }, at());
+    this.emitS(V, { type: 'context.updated', data: { used: 158_000, window: 272_000, usable: 245_000 } }, at());
+    this.emitS(V, { type: 'turn.completed', data: { turnId: 't_rv1', stopReason: 'end_turn' } }, at());
+    this.emitS(V, { type: 'session.status', data: { status: 'waiting_input', prompt: 'budget', reason: '$2.00 budget reached', source: 'bizzi:budget' } }, at());
+
+    // s_ext (mac-mini): finished while you were away.
+    const X = 's_ext';
+    m = -60 * 3;
+    this.emitS(X, { type: 'turn.started', data: { turnId: 't_x1', input: [{ type: 'text', text: 'Remove the unused selectors from the theme stylesheet.' }] } }, at());
+    this.emitS(X, { type: 'tool.started', data: { toolId: 'tc_x1', kind: 'edit', name: 'apply_patch', title: 'src/theme.css' } }, at());
+    this.emitS(X, { type: 'tool.completed', data: { toolId: 'tc_x1', status: 'ok' } }, at());
+    this.emitS(X, { type: 'message.completed', data: { messageId: 'msg_x1', role: 'assistant', text: 'Removed five unused selectors from `src/theme.css`; the visual snapshots are unchanged.' } }, at());
+    this.emitS(X, { type: 'turn.completed', data: { turnId: 't_x1', stopReason: 'end_turn', usage: { inputTokens: 21_000, outputTokens: 900 } } }, at());
+
     // s_term: a shell with some output.
+    this.emitS('s_term', { type: 'session.status', data: { status: 'running', source: 'osc7501' } }, iso(-15));
     this.emitS('s_term', { type: 'term.output', data: { dataBase64: stringToBase64('\x1b[1;32mdev@mbp\x1b[0m:\x1b[1;34m~/src/acme-shop\x1b[0m$ git log --oneline -3\r\n\x1b[33mfd3be0d\x1b[0m Add checkout retries\r\n\x1b[33m9a01c2e\x1b[0m Bump vitest\r\n\x1b[33m2be44f1\x1b[0m Initial commit\r\n') } }, iso(-14));
     this.termPrompt('s_term');
   }
@@ -408,12 +476,68 @@ export class MockCore implements MockHost {
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: wid } });
         return {};
       }
+      case 'worktree.create': {
+        const from = this.workspaceOnline(p.workspaceId);
+        const root = from.kind === 'worktree' && from.parentWorkspaceId ? (this.workspaceMap.get(from.parentWorkspaceId) ?? from) : from;
+        if (root.kind === 'dir') throw new BizziError('bad_request', `${root.name} is not a git repository`);
+        const branch = String(p.branch ?? '').trim();
+        if (!/^[\w][\w./-]*$/.test(branch) || branch.includes('..')) throw new BizziError('bad_request', 'branch must be a valid git branch name');
+        if ([...this.workspaceMap.values()].some((w) => w.kind === 'worktree' && w.parentWorkspaceId === root.id && w.branch === branch)) {
+          throw new BizziError('conflict', `${branch} is already checked out in a worktree`);
+        }
+        await this.sleep(400);
+        const slug = branch.replace(/[^\w.-]+/g, '-');
+        const w: WorkspaceInfo = {
+          id: id('w'),
+          machineId: root.machineId,
+          name: (typeof p.name === 'string' && p.name.trim()) || `${root.name} · ${branch}`,
+          path: (typeof p.path === 'string' && p.path.trim()) || `${root.path}.worktrees/${slug}`,
+          kind: 'worktree',
+          parentWorkspaceId: root.id,
+          branch,
+          createdAt: new Date().toISOString(),
+        };
+        if (root.projectId) w.projectId = root.projectId;
+        this.workspaceMap.set(w.id, w);
+        this.git.set(w.id, { branch, ahead: 0, behind: 0, files: [] });
+        this.emit(GLOBAL_CHANNEL, { type: 'workspace.created', data: { workspace: { ...w } } });
+        return { workspace: { ...w } };
+      }
+      case 'worktree.remove': {
+        const w = this.workspaceOnline(p.workspaceId);
+        if (w.kind !== 'worktree') throw new BizziError('bad_request', `${w.name} is not a worktree`);
+        const live = this.sessions().filter((x) => x.workspaceId === w.id && x.status !== 'ended' && x.status !== 'failed');
+        if (live.length > 0) throw new BizziError('conflict', `worktree is used by ${live.length} live session(s); stop them first`, { sessions: live.map((x) => x.id) });
+        const paths = this.git.get(w.id)?.files.map((f) => f.path) ?? [];
+        if (paths.length > 0 && p.force !== true) throw new BizziError('conflict', `worktree has uncommitted changes (${paths.join(', ')}); commit them or pass force`, { paths });
+        this.workspaceMap.delete(w.id);
+        this.git.delete(w.id);
+        this.emit(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: w.id } });
+        return {};
+      }
       case 'sessions.list': {
         const m = this.targetMachine(p.machineId);
-        const all = this.sessions()
+        let all = this.sessions()
           .filter((s) => s.machineId === m.id)
           .map((s) => ({ ...s }));
+        if (typeof p.spawnedBy === 'string') all = all.filter((s) => s.spawnedBy === p.spawnedBy);
         return { sessions: p.workspaceId ? all.filter((s) => s.workspaceId === p.workspaceId) : all };
+      }
+      case 'session.markSeen': {
+        const s = this.session(p.sessionId);
+        const seq = typeof p.seq === 'number' ? Math.min(p.seq, s.lastSeq) : s.lastSeq;
+        if (seq > (s.seenThrough ?? 0)) {
+          s.seenThrough = seq;
+          this.emit(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...s } } });
+        }
+        return { seenThrough: s.seenThrough ?? 0 };
+      }
+      case 'session.restart': {
+        const s = this.liveSession(p.sessionId);
+        const installed = this.provision.agents.get(s.machineId)?.find((a) => a.agent === s.agent)?.version;
+        if (!installed || s.agentVersion === installed) throw new BizziError('conflict', 'the session already runs the installed version');
+        void this.restartSession(s, installed);
+        return {};
       }
       case 'session.get': {
         const s = this.session(p.sessionId);
@@ -424,12 +548,18 @@ export class MockCore implements MockHost {
         if (!ws) throw new BizziError('not_found', 'no such workspace');
         this.requireOnline(ws.machineId);
         const agent = String(p.agent) as SessionInfo['agent'];
-        const listing = (ws.machineId === SERVER.id ? SERVER_AGENTS : AGENTS).find((a) => a.agent === agent);
+        const listing = this.provision.agents.get(ws.machineId)?.find((a) => a.agent === agent);
         if (!listing?.installed) throw new BizziError('agent_unavailable', `${agent} is not installed`);
         const mode = (p.mode as SessionInfo['mode'] | undefined) ?? 'structured';
+        if (mode === 'structured' && listing.support === 'unsupported') {
+          throw new BizziError('agent_unavailable', `${listing.supportReason ?? `${agent} ${listing.version ?? ''} is not supported.`} Start it in terminal mode instead.`);
+        }
         const title = typeof p.title === 'string' && p.title ? p.title : mode === 'terminal' ? `${agent} terminal` : 'New session';
         const now = new Date().toISOString();
-        const s: SessionInfo = { id: id('s'), machineId: ws.machineId, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', title, createdAt: now, updatedAt: now, lastSeq: 0 };
+        const s: SessionInfo = { id: id('s'), machineId: ws.machineId, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', title, createdAt: now, updatedAt: now, lastSeq: 0, seenThrough: 0, depth: 0 };
+        if (listing.version) s.agentVersion = listing.version;
+        if (listing.billing) s.billing = listing.billing;
+        if (p.budget && typeof p.budget === 'object') s.budget = { ...(p.budget as SessionInfo['budget']) };
         if (typeof p.model === 'string' && p.model) s.model = p.model;
         if (typeof p.permissionMode === 'string' && p.permissionMode) s.permissionMode = p.permissionMode;
         if (typeof p.effort === 'string' && p.effort) s.effort = p.effort;
@@ -446,8 +576,10 @@ export class MockCore implements MockHost {
         if (!CAPS_BY_AGENT[src.agent]?.fork) throw new BizziError('unsupported', `${src.agent} cannot fork sessions`);
         const now = new Date().toISOString();
         const title = typeof p.title === 'string' && p.title ? p.title : `${src.title ?? 'Session'} (fork)`;
-        const s: SessionInfo = { ...src, id: id('s'), status: 'idle', title, forkedFrom: src.id, createdAt: now, updatedAt: now, lastSeq: 0 };
+        const s: SessionInfo = { ...src, id: id('s'), status: 'idle', title, forkedFrom: src.id, createdAt: now, updatedAt: now, lastSeq: 0, seenThrough: 0 };
         delete s.agentSessionRef;
+        delete s.spawnedBy;
+        delete s.scope;
         this.sessionMap.set(s.id, s);
         // The fork continues the conversation: copy the finished part of the source's history.
         for (const ev of this.log(sessionChannel(src.id))) {
@@ -573,17 +705,9 @@ export class MockCore implements MockHost {
       }
       case 'git.status': {
         const ws = this.workspaceOnline(p.workspaceId);
-        if (ws.kind !== 'git') return { isRepo: false, files: [] };
-        return {
-          isRepo: true,
-          branch: 'fix/flaky-checkout',
-          ahead: 1,
-          behind: 0,
-          files: [
-            { path: 'src/checkout/checkout.spec.ts', status: ' M' },
-            { path: 'notes.txt', status: '??' },
-          ],
-        };
+        if (ws.kind === 'dir') return { isRepo: false, files: [] };
+        const g = this.git.get(ws.id) ?? { branch: ws.branch ?? 'main', ahead: 0, behind: 0, files: [] };
+        return { isRepo: true, branch: g.branch, ahead: g.ahead, behind: g.behind, files: g.files.map((f) => ({ ...f })) };
       }
       case 'git.diff': {
         this.workspaceOnline(p.workspaceId);
@@ -617,6 +741,22 @@ export class MockCore implements MockHost {
       default:
         throw new BizziError('unsupported', `mock does not implement ${method}`);
     }
+  }
+
+  /** session.restart: replace the agent process at a safe point and resume (updates.md §5). */
+  private async restartSession(s: SessionInfo, toVersion: string): Promise<void> {
+    const fromVersion = s.agentVersion;
+    while (this.runs.has(s.id)) await this.sleep(200);
+    const prev = s.status === 'starting' ? 'idle' : s.status;
+    this.emitS(s.id, { type: 'session.restarting', data: { ...(fromVersion ? { fromVersion } : {}), toVersion, reason: 'restart requested' } });
+    this.emitS(s.id, { type: 'session.status', data: { status: 'starting', reason: `restarting on ${toVersion}`, source: 'bizzi:restart' } });
+    this.setStatus(s.id, 'starting');
+    await this.sleep(900);
+    s.agentVersion = toVersion;
+    this.emitS(s.id, { type: 'session.restarted', data: { ...(fromVersion ? { fromVersion } : {}), toVersion, ok: true } });
+    this.emitS(s.id, { type: 'session.status', data: { status: prev, source: 'adapter' } });
+    this.setStatus(s.id, prev);
+    this.provision.refreshStale(s.machineId, s.agent);
   }
 
   private requireHub(): void {
@@ -820,6 +960,7 @@ export class MockCore implements MockHost {
       this.emitS(S, { type: 'tool.completed', data: { toolId: edit, status: 'ok', output: 'The file src/checkout/checkout.spec.ts has been updated.' } });
       this.emitS(S, { type: 'file.changed', data: { path: 'src/checkout/checkout.spec.ts', change: 'modified', diff: CHECKOUT_DIFF } });
       this.usage(S, { inputTokens: 24_900, outputTokens: 1_880, cacheReadTokens: 18_000, costUsd: 0.21 });
+      this.growContext(S, 4_200);
 
       const test = id('tc');
       this.emitS(S, { type: 'tool.started', data: { toolId: test, kind: 'shell', name: 'Bash', title: 'for i in $(seq 100); do npx vitest run checkout -s || exit 1; done', input: { command: 'for i in $(seq 100); do npx vitest run checkout -s || exit 1; done' } } });
@@ -834,6 +975,7 @@ export class MockCore implements MockHost {
       await this.stream(S, run, 'message.delta', msg, ASSISTANT_REPLY);
       this.emitS(S, { type: 'message.completed', data: { messageId: msg, role: 'assistant', text: ASSISTANT_REPLY } });
       this.usage(S, { inputTokens: 31_200, outputTokens: 2_640, cacheReadTokens: 24_000, costUsd: 0.27 });
+      this.growContext(S, 6_800);
       this.finish(S, run, 'end_turn', { inputTokens: 12_780, outputTokens: 1_430, costUsd: 0.13 });
     } catch (e) {
       if (e instanceof Aborted) {
@@ -842,6 +984,16 @@ export class MockCore implements MockHost {
       }
       throw e;
     }
+  }
+
+  /** Messages grow and free space shrinks (context.updated after a step). */
+  private growContext(sessionId: string, tokens: number): void {
+    let last: ChannelEvent | undefined;
+    for (const ev of this.log(sessionChannel(sessionId))) if (ev.type === 'context.updated') last = ev;
+    if (!last || last.type !== 'context.updated') return;
+    const ctx = last.data;
+    const categories = ctx.categories?.map((c) => (c.id === 'messages' ? { ...c, tokens: c.tokens + tokens } : c.id === 'free' ? { ...c, tokens: Math.max(0, c.tokens - tokens) } : c));
+    this.emitS(sessionId, { type: 'context.updated', data: { ...ctx, used: ctx.used + tokens, ...(categories ? { categories } : {}) } });
   }
 
   private finish(sessionId: string, run: Run, stopReason: 'end_turn' | 'interrupted', usage?: Usage): void {
