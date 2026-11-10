@@ -1,15 +1,18 @@
 // @bizzi/services: NodeExtension implementations for the node role — provisioning (install,
-// secrets), agent logins, and the knowledge methods.
+// migrate, secrets), agent logins, updates (policies, install watching), and the knowledge methods.
 
 import { join } from 'node:path';
 import { KnowledgeStore } from '@bizzi/knowledge';
 import type { Logger } from '@bizzi/protocol';
 import type { RecipeSet } from '@bizzi/provision';
+import { InstallAssessor } from './assess.ts';
 import { createKnowledgeExtension, type KnowledgeExtension, type KnowledgeStoreSource } from './knowledge.ts';
 import { createLoginExtension, type LoginExtension, type LoginOptions } from './login.ts';
 import { createProvisioningExtension, type ProvisioningExtension, type ProvisioningOptions } from './provisioning.ts';
+import { PolicyStore, POLICIES_FILE } from './policies.ts';
 import { createDefaultSecretBackend, type SecretBackend } from './secrets/backends.ts';
 import { SecretStore } from './secrets/store.ts';
+import { createUpdatesExtension, type UpdatesExtension, type UpdatesOptions } from './updates.ts';
 import type { NodeExtension } from './types.ts';
 
 export type { AgentEnvProvider, ExtensionContext, ExtensionMethod, NodeExtension } from './types.ts';
@@ -24,6 +27,31 @@ export {
 } from './knowledge.ts';
 export { createLoginExtension, loginCommand, type LoginCommand, type LoginExtension, type LoginOptions } from './login.ts';
 export { createProvisioningExtension, toWirePlan, type ProvisioningExtension, type ProvisioningOptions } from './provisioning.ts';
+export { InstallAssessor, type AssessorOptions } from './assess.ts';
+export {
+  checkPathOrder,
+  liveSessionsOf,
+  planMigration,
+  runMigration,
+  PATH_STEP_ID,
+  REPROBE_STEP_ID,
+  type MigrationDeps,
+  type MigrationEnv,
+  type MigrationPlan,
+  type MigrationResult,
+  type ShellCheck,
+} from './migrate.ts';
+export {
+  defaultPolicies,
+  PolicyStore,
+  POLICIES_FILE,
+  RESTART_POLICIES,
+  UPDATE_POLICIES,
+  type AgentPolicies,
+  type PolicyStoreOptions,
+} from './policies.ts';
+export { createUpdatesExtension, type UpdatesExtension, type UpdatesOptions } from './updates.ts';
+export { InstallWatcher, type InstallWatcherOptions, type WatchFn, type Watcher } from './watch.ts';
 export {
   EncryptedFileBackend,
   KeychainSecretBackend,
@@ -70,6 +98,8 @@ export interface ServicesOptions {
   claudeHome?: string;
   provisioning?: Partial<Omit<ProvisioningOptions, 'secrets'>>;
   login?: LoginOptions;
+  /** Install watching, periodic probes and auto-updates (all off by default). Policies live in dataDir. */
+  updates?: Omit<UpdatesOptions, 'assessor' | 'policies'>;
 }
 
 export interface Services {
@@ -77,6 +107,7 @@ export interface Services {
   secrets: SecretStore;
   provisioning: ProvisioningExtension;
   login: LoginExtension;
+  updates: UpdatesExtension;
   knowledge?: KnowledgeExtension;
 }
 
@@ -89,7 +120,21 @@ export async function createServices(opts: ServicesOptions): Promise<Services> {
     ...(opts.logger ? { logger: opts.logger.child({ component: 'secrets' }) } : {}),
   });
   const recipes = opts.recipes ? { recipes: opts.recipes } : {};
-  const provisioning = createProvisioningExtension({ ...recipes, ...opts.provisioning, secrets });
+  const p = opts.provisioning ?? {};
+  const assessor =
+    p.assessor ??
+    new InstallAssessor({
+      ...recipes,
+      ...(p.platform ? { platform: p.platform } : {}),
+      ...(p.env ? { env: p.env } : {}),
+      ...(p.home ? { home: p.home } : {}),
+    });
+  const policies = new PolicyStore({
+    path: join(opts.dataDir, POLICIES_FILE),
+    ...(opts.logger ? { logger: opts.logger.child({ component: 'policies' }) } : {}),
+  });
+  const provisioning = createProvisioningExtension({ ...recipes, ...p, assessor, secrets });
+  const updates = createUpdatesExtension({ ...opts.updates, assessor, policies });
   const login = createLoginExtension({ ...recipes, ...opts.login });
   const store: KnowledgeStoreSource | false =
     opts.knowledge ??
@@ -103,10 +148,11 @@ export async function createServices(opts: ServicesOptions): Promise<Services> {
     store === false ? undefined : createKnowledgeExtension({ store, ...(opts.claudeHome ? { claudeHome: opts.claudeHome } : {}) });
   opts.logger?.log('info', 'services ready', { secrets: backend.name, knowledge: knowledge !== undefined });
   return {
-    extensions: [provisioning, login, ...(knowledge ? [knowledge] : [])],
+    extensions: [provisioning, login, updates, ...(knowledge ? [knowledge] : [])],
     secrets,
     provisioning,
     login,
+    updates,
     ...(knowledge ? { knowledge } : {}),
   };
 }

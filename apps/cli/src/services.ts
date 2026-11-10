@@ -16,7 +16,20 @@ interface ServicesModule {
     dataDir: string;
     logger?: Logger;
     knowledge?: ((machineId: string) => unknown) | false;
+    updates?: { watch?: boolean; probeIntervalMs?: number; autoUpdateIntervalMs?: number };
   }) => Promise<{ extensions: unknown[] }>;
+}
+
+/** Re-probe agents this often (also retries watches on paths that didn't exist yet). */
+export const PROBE_INTERVAL_MS = 30 * 60_000;
+
+/**
+ * Automatic agent updates (update policy `auto`, updates.md §6) are opt-in for now:
+ * BIZZI_AUTO_UPDATE_HOURS=<n> checks for new versions every n hours.
+ */
+export function autoUpdateIntervalMs(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const hours = Number(env.BIZZI_AUTO_UPDATE_HOURS);
+  return Number.isFinite(hours) && hours > 0 ? Math.max(hours, 0.25) * 3_600_000 : undefined;
 }
 
 export interface LoadServicesOptions {
@@ -46,6 +59,11 @@ export async function loadServices(opts: LoadServicesOptions, name = SERVICES_PA
       dataDir: opts.dataDir,
       logger,
       knowledge: knowledge ? (machineId) => knowledge.store(machineId) : false,
+      updates: {
+        watch: true,
+        probeIntervalMs: PROBE_INTERVAL_MS,
+        ...(autoUpdateIntervalMs() ? { autoUpdateIntervalMs: autoUpdateIntervalMs() } : {}),
+      },
     });
     return { extensions: services.extensions as NodeExtensions };
   } catch (err) {
