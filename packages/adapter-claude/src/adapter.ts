@@ -15,6 +15,7 @@ import type { McpServerConfig, Options, SettingSource } from '@anthropic-ai/clau
 import { EFFORT_LEVELS, PERMISSION_MODES, isEffort, isPermissionMode } from './mapping.ts';
 import { findClaudeBinary, probeClaude } from './probe.ts';
 import { ClaudeSession } from './session.ts';
+import { keyFingerprint } from './usage.ts';
 import type { QueryFn } from './types.ts';
 
 export interface ClaudeAdapterOptions {
@@ -71,6 +72,8 @@ const STRUCTURED_CAPABILITIES: AgentCapabilities = {
   usage: 'tokens+cost',
   terminal: false,
   questions: true,
+  context: true,
+  accountUsage: true,
 };
 
 export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<string, McpServerConfig> {
@@ -141,6 +144,8 @@ export class ClaudeAdapter implements AgentAdapter {
       else if (found.wrapper) log.log('warn', 'only a shell-wrapped claude was found; SDK flags may conflict', { path: found.path });
     }
 
+    const env: Record<string, string | undefined> = { ...process.env, ...opts.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP };
+    const fingerprint = keyFingerprint({ ...env, ...(this.#opts.sdkOptions?.env ?? {}) });
     const session = new ClaudeSession(
       emit,
       log,
@@ -149,13 +154,18 @@ export class ClaudeAdapter implements AgentAdapter {
         interruptGraceMs: this.#opts.interruptGraceMs ?? 10_000,
         allowBypassPermissions: allowBypass,
         resumed: !!opts.resumeRef,
+        injection: {
+          ...(opts.systemPromptAppend ? { systemPromptAppend: opts.systemPromptAppend } : {}),
+          ...(opts.mcpServers ? { mcpServers: Object.keys(opts.mcpServers) } : {}),
+        },
+        ...(fingerprint ? { keyFingerprint: fingerprint } : {}),
       },
       ref,
     );
 
     const options: Options = {
       cwd: opts.cwd,
-      env: { ...process.env, ...opts.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP },
+      env,
       settingSources: this.#opts.settingSources ?? ['user', 'project', 'local'],
       systemPrompt: opts.systemPromptAppend
         ? { type: 'preset', preset: 'claude_code', append: opts.systemPromptAppend }

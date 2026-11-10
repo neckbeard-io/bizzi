@@ -8,6 +8,8 @@
 //   ask      — item/tool/requestUserInput; the reply is echoed as a message delta
 //   askauto  — item/tool/requestUserInput withdrawn by the server (serverRequest/resolved)
 //   elicit   — mcpServer/elicitation/request (form); the reply is echoed as a message delta
+//   compact  — usage, a context compaction (item + legacy notification), smaller usage, a rate-limit update
+// FAKE_AUTH=chatgpt: a ChatGPT login with rate limits. FAKE_COMPACT_LIMIT: config's auto-compact limit.
 // Token usage grows with each turn (usage(100 * turn number)).
 // Every client message is echoed back as a `fake/received` notification so tests can inspect params.
 
@@ -95,6 +97,22 @@ function threadResponse(id: string, params: any) {
     approvalsReviewer: 'user',
     sandbox,
     reasoningEffort: params?.config?.model_reasoning_effort ?? null,
+  };
+}
+
+function rateSnapshot(over: Record<string, unknown> = {}) {
+  return {
+    limitId: 'codex',
+    limitName: null,
+    normalModelSlug: null,
+    primary: null,
+    secondary: null,
+    credits: null,
+    individualLimit: null,
+    spendControlReached: null,
+    planType: 'pro',
+    rateLimitReachedType: null,
+    ...over,
   };
 }
 
@@ -189,6 +207,33 @@ async function handle(m: Msg): Promise<void> {
         });
       }
       return send({ id, result: { account: null, requiresOpenaiAuth: true } });
+    case 'account/rateLimits/read':
+      if (process.env.FAKE_AUTH !== 'chatgpt') return send({ id, error: { code: -32600, message: 'not a chatgpt login' } });
+      return send({
+        id,
+        result: {
+          ordinaryUsageAllowed: true,
+          rateLimits: rateSnapshot({ primary: { usedPercent: 18, windowDurationMins: 300, resetsAt: 4102444800 }, secondary: { usedPercent: 31.5, windowDurationMins: 10080, resetsAt: 4103049600 } }),
+          rateLimitsByLimitId: null,
+          rateLimitResetCredits: null,
+          accountId: 'acct_fake',
+          rateLimitUpsell: null,
+        },
+      });
+    case 'config/read':
+      if (!process.env.FAKE_COMPACT_LIMIT) return send({ id, error: { code: -32601, message: 'method not found: config/read' } });
+      return send({ id, result: { config: { model_auto_compact_token_limit: Number(process.env.FAKE_COMPACT_LIMIT) }, origins: {}, layers: null } });
+    case 'mcpServerStatus/list':
+      return send({
+        id,
+        result: {
+          data: [
+            { name: 'bizzi_mem', tools: { recall: { name: 'recall', description: 'd'.repeat(400), inputSchema: { type: 'object' } } } },
+            { name: 'other', tools: { big: { name: 'big', description: 'x'.repeat(40000), inputSchema: {} } } },
+          ],
+          nextCursor: null,
+        },
+      });
     case 'thread/start':
       return send({ id, result: threadResponse(THREAD, m.params) });
     case 'thread/resume':
@@ -319,6 +364,18 @@ async function handle(m: Msg): Promise<void> {
           await tick();
           if (interrupted.has(turnId)) return;
           notify('item/agentMessage/delta', { ...base, itemId: 'msg_e', delta: `reply:${JSON.stringify(reply.result)}` });
+          notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
+          return;
+        }
+        case 'compact': {
+          send({ id, result: { turn: turnObj(turnId, 'inProgress') } });
+          notify('turn/started', { threadId: thread, turn: turnObj(turnId, 'inProgress') });
+          notify('thread/tokenUsage/updated', { ...base, tokenUsage: usage(150000) });
+          notify('item/started', { ...base, startedAtMs: 0, item: { type: 'contextCompaction', id: 'cc_1' } });
+          notify('item/completed', { ...base, completedAtMs: 0, item: { type: 'contextCompaction', id: 'cc_1' } });
+          notify('thread/compacted', { threadId: thread, turnId });
+          notify('thread/tokenUsage/updated', { ...base, tokenUsage: { ...usage(150000), last: { ...usage(9000).last } } });
+          notify('account/rateLimits/updated', { rateLimits: rateSnapshot({ primary: { usedPercent: 85, windowDurationMins: 300, resetsAt: 4102444800 }, planType: null }) });
           notify('turn/completed', { threadId: thread, turn: turnObj(turnId, 'completed') });
           return;
         }

@@ -193,7 +193,7 @@ test('tool calls: kinds, titles, results, file changes, plan, subagents', async 
       toolResult('tc', 'ok', false, { task: { id: '7', subject: 'Write docs' } }),
       toolUse('m1', 'tu', 'TaskUpdate', { taskId: '7', status: 'in_progress' }),
       toolResult('tu', 'ok', false, { success: true, taskId: '7', updatedFields: ['status'] }),
-      { type: 'rate_limit_event', rate_limit_info: { status: 'allowed' }, uuid: 'x', session_id: 's' },
+      { type: 'prompt_suggestion', suggestion: 'next', uuid: 'x', session_id: 's' },
       result([u.uuid!], 0.02),
     );
   });
@@ -237,7 +237,7 @@ test('tool calls: kinds, titles, results, file changes, plan, subagents', async 
   assert.deepEqual(c.of('tool.updated'), [{ toolId: 'ta', progress: 'Reading b.ts' }]);
   const raw = c.of('agent.raw');
   assert.equal(raw.length, 1);
-  assert.equal((raw[0]?.payload as { type: string }).type, 'rate_limit_event');
+  assert.equal((raw[0]?.payload as { type: string }).type, 'prompt_suggestion');
   await session.stop();
 });
 

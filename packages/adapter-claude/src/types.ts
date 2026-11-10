@@ -1,7 +1,9 @@
 import type {
+  AccountInfo,
   EffortLevel,
   Options,
   PermissionMode,
+  SDKControlGetContextUsageResponse,
   SDKControlInitializeResponse,
   SDKMessage,
   SDKUserMessage,
@@ -14,6 +16,9 @@ export interface ClaudeQuery extends AsyncIterable<SDKMessage> {
   setModel(model?: string): Promise<void>;
   applyFlagSettings(settings: { effortLevel?: EffortLevel | null }): Promise<void>;
   initializationResult?(): Promise<SDKControlInitializeResponse>;
+  getContextUsage?(opts?: { detail?: 'summary' | 'full' }): Promise<SDKControlGetContextUsageResponse>;
+  accountInfo?(): Promise<AccountInfo>;
+  // The experimental usage query is reached through `readPlanUsage` (usage.ts), never typed here.
   close(): void;
 }
 

@@ -4,11 +4,13 @@ import { extname } from 'node:path';
 import {
   BizziError,
   newId,
+  type AccountUsage,
   type AdapterSession,
   type ApprovalDecision,
   type ApprovalDecisionKind,
   type ApprovalKind,
   type ApprovalRequest,
+  type ContextUsage,
   type EmitFn,
   type InputBlock,
   type Logger,
@@ -60,6 +62,12 @@ import {
 import { AppServerProcess, describeExit, type SpawnSpec } from './process.ts';
 import { isPermissionMode, PERMISSION_MODE_NAMES, PERMISSION_MODES, permissionModeFor, sandboxPolicyFor } from './permissions.ts';
 import { RpcClosedError, RpcError, type IncomingNotification, type IncomingRequest, type RpcId } from './rpc.ts';
+import { approxTokens, CodexRateLimits, codexAccount, contextFromCodex, mcpToolTokens, type CodexAccount } from './usage.ts';
+import type { ConfigReadResponse } from './generated/v2/ConfigReadResponse.ts';
+import type { GetAccountResponse } from './generated/v2/GetAccountResponse.ts';
+import type { GetAccountRateLimitsResponse } from './generated/v2/GetAccountRateLimitsResponse.ts';
+import type { ListMcpServerStatusResponse } from './generated/v2/ListMcpServerStatusResponse.ts';
+import type { ThreadTokenUsage } from './generated/v2/ThreadTokenUsage.ts';
 
 export interface CodexSessionConfig {
   spawn: SpawnSpec;
@@ -372,6 +380,19 @@ export class CodexSession implements AdapterSession {
   #contextWindow: number | undefined;
   /** Notifications received during the handshake (e.g. MCP startup status), replayed once the thread id is known. */
   #preReady: IncomingNotification[] = [];
+  // ---- context + account usage (docs/usage.md)
+  /** Estimated tokens of bizzi's developer instructions (bytes / 4). */
+  #bizziPromptTokens = 0;
+  /** Estimated tokens of bizzi's MCP tool schemas, once Codex has listed them. */
+  #bizziMcpTokens = 0;
+  #bizziServers = new Set<string>();
+  #compactAt: number | undefined;
+  #lastTokenUsage: ThreadTokenUsage | undefined;
+  #lastContext: ContextUsage | undefined;
+  #compactedTurns = new Set<string>();
+  /** undefined = not read yet · null = no plan login (nothing is emitted). */
+  #account: CodexAccount | null | undefined;
+  #rateLimits = new CodexRateLimits();
 
   private constructor(cfg: CodexSessionConfig, emit: EmitFn, logger: Logger) {
     this.#cfg = cfg;
@@ -401,6 +422,7 @@ export class CodexSession implements AdapterSession {
       }
       throw toBizziError(e, 'codex app-server start failed');
     }
+    void s.#collectUsage(opts);
     return s;
   }
 
@@ -799,8 +821,28 @@ export class CodexSession implements AdapterSession {
         this.#emit({ type: 'plan.updated', data: { items } });
         return;
       }
+      case 'account/rateLimits/updated': {
+        const p = n.params as NotificationParams<'account/rateLimits/updated'>;
+        this.#rateLimits.applyUpdate(p.rateLimits);
+        this.#emitAccount();
+        return;
+      }
+      case 'account/updated': {
+        const p = n.params as NotificationParams<'account/updated'>;
+        if (this.#account && p.planType && p.planType !== 'unknown') {
+          this.#account.planType = p.planType;
+          this.#emitAccount();
+        }
+        return;
+      }
+      case 'thread/compacted': {
+        const p = n.params as NotificationParams<'thread/compacted'>;
+        this.#noteCompaction(p.turnId);
+        return;
+      }
       case 'thread/tokenUsage/updated': {
         const p = n.params as NotificationParams<'thread/tokenUsage/updated'>;
+        this.#lastTokenUsage = p.tokenUsage;
         const changed = !sameBreakdown(this.#threadUsage, p.tokenUsage.total);
         this.#threadUsage = p.tokenUsage.total;
         if (p.tokenUsage.modelContextWindow) this.#contextWindow = p.tokenUsage.modelContextWindow;
@@ -809,6 +851,7 @@ export class CodexSession implements AdapterSession {
           if (changed) this.#turn.lastSum = addBreakdown(this.#turn.lastSum, p.tokenUsage.last);
         }
         this.#emit({ type: 'usage.updated', data: toUsage(p.tokenUsage.total, this.#contextWindow) });
+        this.#emitContext();
         return;
       }
       case 'error': {
@@ -851,6 +894,90 @@ export class CodexSession implements AdapterSession {
     }
   }
 
+  // ---- context + account usage
+
+  /** Background reads after start: compaction limit, bizzi's MCP tool schemas, the ChatGPT account and its rate limits. */
+  async #collectUsage(opts: StartSessionOptions): Promise<void> {
+    this.#bizziPromptTokens = approxTokens(opts.systemPromptAppend);
+    for (const name of Object.keys(opts.mcpServers ?? {})) this.#bizziServers.add(name.replace(/[^A-Za-z0-9_-]/g, '_'));
+    const rpc = this.#proc.rpc;
+    const t = this.#cfg.requestTimeoutMs;
+    const quiet = (what: string) => (e: unknown) => {
+      this.#logger.log('debug', `${what} failed`, { error: errMessage(e) });
+      return undefined;
+    };
+    const config = rpc.request<ConfigReadResponse>('config/read', { cwd: opts.cwd }, t).catch(quiet('config/read'));
+    const mcp = this.#bizziServers.size
+      ? rpc
+          .request<ListMcpServerStatusResponse>('mcpServerStatus/list', { threadId: this.#threadId, detail: 'toolsAndAuthOnly', limit: 100 }, t)
+          .catch(quiet('mcpServerStatus/list'))
+      : Promise.resolve(undefined);
+    const account = rpc.request<GetAccountResponse>('account/read', { refreshToken: false }, t).catch(quiet('account/read'));
+
+    const limit = (await config)?.config?.model_auto_compact_token_limit;
+    if (limit !== null && limit !== undefined && Number(limit) > 0) this.#compactAt = Number(limit);
+    void mcp.then((r) => {
+      const n = mcpToolTokens(r, this.#bizziServers);
+      if (n === this.#bizziMcpTokens) return;
+      this.#bizziMcpTokens = n;
+      this.#emitContext();
+    });
+
+    const a = codexAccount((await account)?.account);
+    if (!a) {
+      this.#account = null;
+      return;
+    }
+    const limits = await rpc
+      .request<GetAccountRateLimitsResponse>('account/rateLimits/read', { excludeResetCreditDetails: true }, t)
+      .catch(quiet('account/rateLimits/read'));
+    if (limits) this.#rateLimits.applyRead(limits);
+    if (!a.accountId) a.accountId = this.#rateLimits.accountId ?? '';
+    this.#account = a.accountId ? a : null;
+    this.#emitAccount();
+  }
+
+  #emitContext(): void {
+    const u = this.#lastTokenUsage;
+    if (!u || this.#stopped) return;
+    const ctx = contextFromCodex(u, this.#contextWindow, {
+      bizziTokens: this.#bizziPromptTokens + this.#bizziMcpTokens,
+      ...(this.#compactAt ? { compactAt: this.#compactAt } : {}),
+    });
+    if (!ctx) return;
+    if (this.#lastContext && JSON.stringify(this.#lastContext) === JSON.stringify(ctx)) return;
+    this.#lastContext = ctx;
+    this.#emit({ type: 'context.updated', data: ctx });
+  }
+
+  /** Codex reports compaction both as a (deprecated) `thread/compacted` and a `contextCompaction` item: once per turn. */
+  #noteCompaction(key: string): void {
+    if (this.#compactedTurns.has(key)) return;
+    this.#compactedTurns.add(key);
+    if (this.#compactedTurns.size > 100) this.#compactedTurns.delete(this.#compactedTurns.values().next().value!);
+    const before = this.#lastContext?.used;
+    this.#lastContext = undefined; // the next token-usage update reports the post-compaction size
+    this.#emit({ type: 'context.compacted', data: before !== undefined ? { before } : {} });
+  }
+
+  #emitAccount(): void {
+    const a = this.#account;
+    if (!a || this.#stopped || !this.#rateLimits.known) return;
+    const plan = a.planType ?? this.#rateLimits.planType;
+    const usage: AccountUsage = {
+      agent: 'codex',
+      accountId: a.accountId,
+      label: `codex · ${plan ?? 'chatgpt'} · ${a.email ?? a.accountId}`,
+      billing: 'plan',
+      machines: [],
+      status: this.#rateLimits.status(),
+      observedAt: new Date().toISOString(),
+    };
+    const windows = this.#rateLimits.windows();
+    if (windows.length) usage.windows = windows;
+    this.#emit({ type: 'account.usage', data: usage });
+  }
+
   #onItemStarted(item: ThreadItem): void {
     this.#items.set(item.id, item);
     const tool = toolStartFor(item);
@@ -877,6 +1004,9 @@ export class CodexSession implements AdapterSession {
         return;
       }
       case 'userMessage':
+        return;
+      case 'contextCompaction':
+        this.#noteCompaction(this.#turn?.codexTurnId ?? `item:${item.id}`);
         return;
     }
     const tool = toolStartFor(item);

@@ -3,6 +3,7 @@
 import { randomUUID } from 'node:crypto';
 import { BizziError, newId } from '@bizzi/protocol';
 import type {
+  AccountUsage,
   AdapterSession,
   ApprovalDecision,
   ApprovalResolution,
@@ -23,6 +24,7 @@ import type {
   PermissionResult,
   PermissionUpdate,
   SDKMessage,
+  SDKRateLimitInfo,
   SDKResultMessage,
   SDKUserMessage,
 } from '@anthropic-ai/claude-agent-sdk';
@@ -50,6 +52,8 @@ import {
 import type { PatchHunk } from './mapping.ts';
 import { PushQueue } from './queue.ts';
 import type { ClaudeQuery } from './types.ts';
+import { claudeAccount, contextFromSdk, PlanUsage, readPlanUsage } from './usage.ts';
+import type { BizziInjection, ClaudeAccount } from './usage.ts';
 
 interface ActiveTurn {
   turnId: string;
@@ -94,6 +98,12 @@ export interface SessionConfig {
    */
   resumed?: boolean;
   allowBypassPermissions: boolean;
+  /** What bizzi injected (system-prompt append, MCP servers), for the "bizzi overhead" context row. */
+  injection?: BizziInjection;
+  /** API-key fingerprint (usage.ts `keyFingerprint`), the account id for key logins. */
+  keyFingerprint?: string;
+  /** Minimum interval between experimental plan-usage queries. Default 5 min. */
+  planQueryIntervalMs?: number;
 }
 
 type AnyMsg = SDKMessage & Record<string, unknown>;
@@ -128,6 +138,13 @@ export class ClaudeSession implements AdapterSession {
   #sentUuids = new Set<string>();
   #stderr: string[] = [];
   #done: Promise<void> | undefined;
+  /** undefined = not resolved yet · null = no usable identity (nothing is emitted). */
+  #account: ClaudeAccount | null | undefined;
+  #planUsage = new PlanUsage();
+  #sessionCost: number | undefined;
+  #lastPlanQuery = 0;
+  #ctxBusy = false;
+  #ctxAgain = false;
 
   constructor(emit: EmitFn, log: Logger, cfg: SessionConfig, ref: string | undefined) {
     this.#emit = emit;
@@ -517,6 +534,10 @@ export class ClaudeSession implements AdapterSession {
         this.#emit({ type: 'tool.updated', data: { toolId: String(m.tool_use_id), progress: `running ${secs}s` } });
         return;
       }
+      case 'rate_limit_event':
+        this.#planUsage.applyRateLimit(m.rate_limit_info as SDKRateLimitInfo);
+        this.#emitAccount();
+        return;
       case 'command_lifecycle' as string:
         return; // per-message queued/started/completed; turn tracking uses result uuids instead
       default:
@@ -592,6 +613,15 @@ export class ClaudeSession implements AdapterSession {
           return;
         }
         return this.#raw(m);
+      }
+      case 'compact_boundary': {
+        const meta = m.compact_metadata as { pre_tokens?: unknown; post_tokens?: unknown } | undefined;
+        const data: { before?: number; after?: number } = {};
+        if (typeof meta?.pre_tokens === 'number') data.before = meta.pre_tokens;
+        if (typeof meta?.post_tokens === 'number') data.after = meta.post_tokens;
+        this.#emit({ type: 'context.compacted', data });
+        void this.#refreshContext();
+        return;
       }
       case 'permission_denied': {
         if (typeof m.tool_use_id === 'string') this.#denied.add(m.tool_use_id);
@@ -820,6 +850,8 @@ export class ClaudeSession implements AdapterSession {
       this.#costBaselineKnown = true;
     }
     this.#emit({ type: 'usage.updated', data: cumulative });
+    if (typeof cost === 'number') this.#sessionCost = cost;
+    this.#afterResult();
 
     const turn = this.#active;
     const ids = r.user_message_uuids ?? (r.user_message_uuid ? [r.user_message_uuid] : []);
@@ -843,12 +875,94 @@ export class ClaudeSession implements AdapterSession {
   async #loadCommands(q: ClaudeQuery): Promise<void> {
     try {
       const init = await q.initializationResult?.();
-      if (!init || this.#state !== 'running') return;
-      const commands = (init.commands ?? []).map((c) => (c.description ? { name: c.name, description: c.description } : { name: c.name }));
-      this.#emit({ type: 'session.info', data: { commands } });
+      if (init && this.#state === 'running') {
+        const commands = (init.commands ?? []).map((c) => (c.description ? { name: c.name, description: c.description } : { name: c.name }));
+        this.#emit({ type: 'session.info', data: { commands } });
+      }
     } catch (e) {
       this.#log.log('debug', 'initializationResult failed', { error: String(e) });
     }
+    if (this.#state !== 'running') return;
+    void this.#refreshContext();
+    await this.#loadAccount(q);
+  }
+
+  // ---------------------------------------------------------------- context + account usage
+
+  /** `getContextUsage()` → `context.updated`; coalesces overlapping refreshes. */
+  async #refreshContext(): Promise<void> {
+    const q = this.#q;
+    if (!q?.getContextUsage || this.#state !== 'running') return;
+    if (this.#ctxBusy) {
+      this.#ctxAgain = true;
+      return;
+    }
+    this.#ctxBusy = true;
+    try {
+      do {
+        this.#ctxAgain = false;
+        // 'summary' answers from the last response and local estimates, without token-count API calls.
+        const r = await q.getContextUsage({ detail: 'summary' });
+        if (this.#state !== 'running') return;
+        const ctx = r && contextFromSdk(r, this.#cfg.injection);
+        if (ctx) this.#emit({ type: 'context.updated', data: ctx });
+      } while (this.#ctxAgain);
+    } catch (e) {
+      this.#log.log('debug', 'getContextUsage failed', { error: String(e) });
+    } finally {
+      this.#ctxBusy = false;
+    }
+  }
+
+  async #loadAccount(q: ClaudeQuery): Promise<void> {
+    let info;
+    try {
+      info = await q.accountInfo?.();
+    } catch (e) {
+      this.#log.log('debug', 'accountInfo failed', { error: String(e) });
+    }
+    this.#account = claudeAccount(info, this.#cfg.keyFingerprint) ?? null;
+    if (this.#account?.billing === 'plan') await this.#queryPlan(true);
+    else this.#emitAccount();
+  }
+
+  async #queryPlan(force = false): Promise<void> {
+    const q = this.#q;
+    if (!q || this.#account?.billing !== 'plan' || this.#state !== 'running') return;
+    const now = Date.now();
+    if (!force && now - this.#lastPlanQuery < (this.#cfg.planQueryIntervalMs ?? 5 * 60_000)) return;
+    this.#lastPlanQuery = now;
+    const r = await readPlanUsage(q);
+    if (r) this.#planUsage.applyPlanQuery(r);
+    this.#emitAccount();
+  }
+
+  #afterResult(): void {
+    void this.#refreshContext();
+    if (this.#account?.billing === 'plan') void this.#queryPlan();
+    else this.#emitAccount();
+  }
+
+  #emitAccount(): void {
+    const a = this.#account;
+    if (!a || this.#state !== 'running') return;
+    const windows = this.#planUsage.windows();
+    const spend = a.billing === 'metered' && this.#sessionCost !== undefined ? { usd: this.#sessionCost, period: 'session' } : undefined;
+    let status = this.#planUsage.status();
+    if (!windows.length && !spend && status === 'unknown') return;
+    if (status === 'unknown' && spend) status = 'ok';
+    const usage: AccountUsage = {
+      agent: 'claude',
+      accountId: a.accountId,
+      label: a.label,
+      billing: a.billing,
+      machines: [],
+      status,
+      observedAt: new Date().toISOString(),
+    };
+    if (windows.length) usage.windows = windows;
+    if (spend) usage.spend = spend;
+    this.#emit({ type: 'account.usage', data: usage });
   }
 }
 
