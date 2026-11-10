@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { selectAgents, selectNestedSessions, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
+import { fanoutGroupsEqual, selectAgents, selectFanoutGroups, selectNestedSessions, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
 import { BizziError } from '@bizzi/protocol';
 import type { AgentKind, AgentListing, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
@@ -14,6 +14,7 @@ import { WidgetRow } from '../components/Widget.tsx';
 import { formatRelative } from '../lib/format.ts';
 import { routeHref } from '../lib/router.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, aheadBehind } from '../lib/states.ts';
+import { FanoutDialog } from './fanout/FanoutDialog.tsx';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 
 export function WorkspaceView(props: { workspaceId: string }): ReactNode {
@@ -25,6 +26,8 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
   const git = useBizzi((s) => s.gitStatus[props.workspaceId] ?? null);
   const [creating, setCreating] = useState(false);
   const [newWorktree, setNewWorktree] = useState(false);
+  const [fanout, setFanout] = useState(false);
+  const groups = useBizzi((s) => selectFanoutGroups(s, props.workspaceId), fanoutGroupsEqual);
   const online = useMachineOnline(ws?.machineId);
   const machine = useMachine(ws?.machineId);
   const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
@@ -74,6 +77,11 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
           actions={
             <>
               {ws.kind !== 'dir' ? (
+                <Button size="sm" variant="ghost" icon="tree" disabled={!online} onClick={() => setFanout(true)} title="Fan out: the same prompt to several agents, each in its own worktree, then compare">
+                  <span className="hidden sm:inline">Fan out</span>
+                </Button>
+              ) : null}
+              {ws.kind !== 'dir' ? (
                 <Button size="sm" variant="ghost" icon="branch" disabled={!online} onClick={() => setNewWorktree(true)} title="git worktree add: a new branch in its own directory, as a workspace">
                   <span className="hidden sm:inline">New worktree</span>
                 </Button>
@@ -90,6 +98,18 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       {creating && online ? <NewSessionForm workspaceId={ws.id} onCancel={() => setCreating(false)} /> : null}
       <RepoLine workspace={ws} git={git} worktrees={worktrees} />
       <WidgetRow placement="workspace" machineId={ws.machineId} className="mb-3" />
+      {groups.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted">Fan-outs:</span>
+          {groups.map((g) => (
+            <a key={g.group} href={routeHref({ name: 'fanout', group: g.group })} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-panel-2">
+              <Icon name="tree" size={12} className="text-muted" />
+              <span className="max-w-[16rem] truncate">{g.title}</span>
+              <span className="text-muted">· {g.sessions.length} runs</span>
+            </a>
+          ))}
+        </div>
+      ) : null}
       {rows.length === 0 ? (
         <Empty icon="chat" title="No sessions in this workspace">
           Start one with an installed agent.
@@ -141,6 +161,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       </div>
       <ErrorText error={remove.error ?? removeWorktree.error} />
       {newWorktree ? <WorktreeDialog workspace={ws} onClose={() => setNewWorktree(false)} /> : null}
+      {fanout ? <FanoutDialog workspace={ws} onClose={() => setFanout(false)} /> : null}
     </Page>
   );
 }

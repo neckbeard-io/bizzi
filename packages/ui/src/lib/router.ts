@@ -10,6 +10,8 @@ export type Route =
   | { name: 'workspaces' }
   | { name: 'workspace'; workspaceId: string }
   | { name: 'session'; sessionId: string; tab: SessionTab }
+  /** A fan-out group's compare view (spec §12). */
+  | { name: 'fanout'; group: string }
   /** An `agent.login` terminal session with the login helper. */
   | { name: 'login'; sessionId: string }
   | { name: 'inbox' }
@@ -41,6 +43,8 @@ export function parseHash(hash: string): Route {
       return parts[1] ? { name: 'login', sessionId: parts[1] } : { name: 'machine' };
     case 'w':
       return parts[1] ? { name: 'workspace', workspaceId: parts[1] } : { name: 'workspaces' };
+    case 'fanout':
+      return parts[1] ? { name: 'fanout', group: parts[1] } : { name: 'workspaces' };
     case 's': {
       if (!parts[1]) return { name: 'workspaces' };
       const tab = TABS.includes(parts[2] as SessionTab) ? (parts[2] as SessionTab) : 'chat';
@@ -70,6 +74,8 @@ export function routeHref(r: Route): string {
       return '#/workspaces';
     case 'workspace':
       return `#/w/${encodeURIComponent(r.workspaceId)}`;
+    case 'fanout':
+      return `#/fanout/${encodeURIComponent(r.group)}`;
     case 'session':
       return `#/s/${encodeURIComponent(r.sessionId)}${r.tab === 'chat' ? '' : `/${r.tab}`}`;
   }
