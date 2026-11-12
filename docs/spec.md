@@ -377,11 +377,12 @@ One composer, no navigation: you type what you want, and bizzi decides where it 
 
 **Classifier backends** (pluggable, on the hub, which is the only place that knows every machine):
 
-- **Jev** (TypeSafe, `POST /v1/systemone`, model `typesafe/jev`): built for this. A `Choice` question picks one of up to 255 options and returns a probability per option plus a confidence; several typed questions about the same input go in one request. Reported latency is about 140–280 ms server-side and under a second end to end; input costs $0.042 per million tokens. One request per prompt:
+- **Jev** (TypeSafe, `POST /v1/systemone`, model `typesafe/jev`; a single proprietary, hosted model trained for calibrated decisions, not a wrapper around other LLMs; also on OpenRouter): built for this. A `Choice` question picks one of up to 255 options and returns a probability per option plus a confidence; several typed questions about the same input go in one request. Reported latency is about 140–280 ms server-side and under a second end to end; input costs $0.042 per million tokens. One request per prompt:
   - `Choice` workspace (each option is "machine · workspace", with a short description), at most 255 options; above that, filter by online machines and recent activity first;
   - `Choice` agent;
   - `Noul` "is this a follow-up to the open session?".
-- **Local model** (budgetless, §12.3): the same questions asked of an OpenAI-compatible endpoint with constrained JSON output; slower, but nothing leaves your machines.
+- **Local, same API:** open models that speak Jev's API, so one client serves both: **Laya** (a 421M-parameter open decision model) and **openjev** (an open reproduction of the interface on Qwen3.5-4B). They're different models from Jev, not its weights, and their calibration is unproven; verify licences and accuracy before relying on them.
+- **Local LLM** (budgetless, §12.3): the same questions asked of an OpenAI-compatible endpoint with constrained JSON output. Its probabilities are prompted estimates, not calibrated ones, so the confirm threshold should be stricter.
 - **Off:** steps 1–3 only, and you pick when they don't decide.
 
 **Privacy:** a hosted classifier sees the prompt and the catalogue, including machine descriptions and paths. It is opt-in, per hub. Rules (step 3) run first, so a prompt your routing preferences already place (production investigations, say) never reaches a hosted classifier.
