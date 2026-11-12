@@ -381,8 +381,12 @@ One composer, no navigation: you type what you want, and bizzi decides where it 
   - `Choice` workspace (each option is "machine · workspace", with a short description), at most 255 options; above that, filter by online machines and recent activity first;
   - `Choice` agent;
   - `Noul` "is this a follow-up to the open session?".
-- **Local, same API:** open models that speak Jev's API, so one client serves both: **Laya** (a 421M-parameter open decision model) and **openjev** (an open reproduction of the interface on Qwen3.5-4B). They're different models from Jev, not its weights, and their calibration is unproven; verify licences and accuracy before relying on them.
-- **Local LLM** (budgetless, §12.3): the same questions asked of an OpenAI-compatible endpoint with constrained JSON output. Its probabilities are prompted estimates, not calibrated ones, so the confirm threshold should be stricter.
+- **Local** (budgetless, §12.3), checked 2026-11-11; no open model has been shown to match Jev zero-shot on routing:
+  - **Option-logit readout from the model already on the H200s** (Qwen3.8-27B behind vLLM): score each numbered option from the next-token logits in one forward pass. No new GPU memory; Qwen3.8-27B scored highest on JevBench accuracy and calibration. First thing to try.
+  - **Laya** (Convai Innovations, Apache 2.0, ModernBERT-large, 421M): speaks the `/v1/systemone` API (choice / score / noul, at most 100 options), tens of ms per question, CPU or GPU. Weak zero-shot (Banking77 42.5%), close to Jev only after fine-tuning and temperature fitting (79.4% vs Jev 80.0%), and it degrades above about 20 options. Needs our own labelled routes.
+  - **razorback16/openjev** (Apache 2.0): a Jev-wire-compatible server on vLLM that can front Laya or other models, so the hub's client stays the same whichever model answers.
+  - **A plain local LLM with constrained JSON output:** its probabilities are prompted estimates, not calibrated, so the confirm threshold must be stricter.
+- **Choosing:** build a labelled set of about 300 real routing decisions (prompt → machine · workspace · agent) and compare hosted Jev, Qwen3.8-27B logit readout, fine-tuned Laya, and a 4B openjev variant on accuracy and calibration before picking a default.
 - **Off:** steps 1–3 only, and you pick when they don't decide.
 
 **Privacy:** a hosted classifier sees the prompt and the catalogue, including machine descriptions and paths. It is opt-in, per hub. Rules (step 3) run first, so a prompt your routing preferences already place (production investigations, say) never reaches a hosted classifier.
