@@ -179,14 +179,75 @@ The server's instructions tell agents when to save, and which scope means what.
 
 A periodic job (cheap model) merges duplicates, marks superseded items, flags rules that contradict each other in the same scope, and keeps digests sharp. Every change is an item update with `supersedes`, so it's auditable and reversible.
 
-## 8. Team (later)
+## 8. Claude-first iteration (2026-11-11)
+
+Scope for now: **Claude first, OpenCode second** (to discuss), Codex and agy off. Decisions:
+
+1. **`AGENTS.md` is native.** A workspace's root `AGENTS.md` reaches every agent without bizzi; nested ones are picked up as agents work in those directories. bizzi never copies `AGENTS.md` into its store.
+   - Claude Code (docs, checked 2026-11-11): the fallback is **project-level only**: `AGENTS.md` in the working directory and its parents when there's no `CLAUDE.md`; a subdirectory's `AGENTS.md` loads when Claude reads a file there, unless that directory has a `CLAUDE.md`, `.claude/CLAUDE.md` or `CLAUDE.local.md`. `@path` imports inside `AGENTS.md` are expanded. Setting: `/config` → Project instructions (`claude-md-or-agents-md` default, `claude-md-and-agents-md`, `claude-md`, `managed-only`).
+   - **Unverified for the Agent SDK**, which is what bizzi uses: the SDK docs cover `CLAUDE.md` through `settingSources` but don't mention the `AGENTS.md` fallback. Spike §11.6.
+   - Auto-memory is loaded by the SDK regardless of `settingSources`.
+2. **Claude memories are observed, not converted.**
+   - Claude already reads its own auto-memory natively (the adapter starts sessions with `settingSources: ['user', 'project', 'local']`), so bizzi adds nothing for Claude.
+   - The harvester mirrors each Claude memory into the bizzi store **as a memory** (never a rule suggestion), so other agents get it through the digest and `memory_search`. Under the balanced preset these are live at project scope: no inbox items.
+   - Harvest runs when a workspace is added, on node start, and on a watch of the memory directory (so memories from a plain `claude` in a terminal aren't missed), not only when a bizzi Claude session ends.
+   - Claude sessions don't get Claude-harvested memories from the same machine in their digest (they'd see them twice).
+   - **"Add to AGENTS.md…"** (one-time, explicit): pick memories, preview the diff to the workspace's `AGENTS.md` (appended under a heading you choose), write. bizzi never commits; the picked memories get a `promoted` tag so they aren't offered again.
+
+## 9. Machine and global rules
+
+Rules above the project level, which only bizzi can provide because native instruction files are per machine and per agent.
+
+Example: the laptop has production access (kube contexts, VPN, prod credentials); the mac mini has a GUI (Xcode, simulators, headed browsers) but no production access. Some rules hold everywhere ("never push to main without asking").
+
+### 9.1 Scopes
+
+| Scope | Applies to | Example |
+|---|---|---|
+| `global` | every machine, every project | "Never add AI attribution to commits." |
+| `tag` *(new)* | every machine with that tag | `prod-access`: "Prod clusters: read-only kubectl, always pass `--context`." |
+| `machine` | one machine, every project | mac-mini: "You can open apps and take screenshots; there is no production access here, don't try." |
+| `project`, `workspace`, `session` | as before (§2.1) | |
+
+- **Tags** are user-set labels on a machine (`machine.tags`, already in the model; add a `machine.setTags` method and UI on the machine page). Suggested tags come from facts (`gui` when headful, `always-on`), but a tag like `prod-access` is yours to set: bizzi can't detect it.
+- **Machine × project** ("on the mac mini, in acme, use the iPhone 17 simulator") is a `workspace` rule: a workspace is one project on one machine.
+- Order of injection, general first: global → tag → machine → project → workspace → session, with the existing line that more specific scopes override.
+
+### 9.2 Machine card (generated, not a rule)
+
+Every session gets a short generated block about where it runs, built from facts the node already has: machine name, OS, GUI or headless, always-on or sleeps, tags, and the user's one-paragraph machine description (a free-text field on the machine page). This answers "where am I?" without the user writing a rule, and keeps it current when facts change.
+
+### 9.3 Guardrails
+
+Prose rules are advisory: an agent can misread or ignore "no production access". Real safety comes from the machine not having the credentials. On top of that, a rule can carry an optional **guardrail** form:
+
+- `priority: 'guardrail'`: injected last, after workspace rules, and never overridden by a more specific scope ("more specific overrides" doesn't apply to guardrails).
+- `enforce` *(Claude, launch mode)*: permission deny patterns (e.g. `Bash(kubectl --context prod*:*)`) passed to bizzi-started sessions as SDK `disallowedTools` / a settings overlay. Not projected into `~/.claude/settings.json` (bizzi doesn't edit native settings files).
+
+### 9.4 Replication (not built yet; needed for any of this to work across machines)
+
+Today every node has its own knowledge store, so a global rule written on the laptop never reaches the mac mini.
+
+- Through the hub, append-only with HLC ordering and tombstones (the fields exist already): `global` and `tag` items go to every node; `machine` items go to their machine; project/workspace items to the nodes hosting that project.
+- The hub keeps a copy so any client (phone included) can edit any scope; edits to an offline machine's rules apply when it reconnects.
+- A node works offline from its local copy; local edits queue in the outbox.
+
+### 9.5 Delivery
+
+- **Launch mode** (sessions bizzi starts): the resolver already includes global and machine items; add `tag` and the machine card. Injected via `systemPrompt.append`.
+- **Native sessions** (plain `claude` in a terminal; opt-in): project global + tag + machine rules into a managed block (§4.2) in the machine's user-level instruction file, so they apply outside bizzi too. The file is **`~/.claude/CLAUDE.md`**: Claude reads it, and OpenCode uses it as its global file when there's no `~/.config/opencode/AGENTS.md`. `~/.claude/AGENTS.md` isn't a documented user-level file for Claude (checked 2026-11-11), so bizzi doesn't rely on it. The user's own text outside the block is never touched.
+- **Where you author:** global and tag rules on the Knowledge page; machine rules and the machine description on the machine page.
+
+## 10. Team (later)
 
 `team` scope; project rules and memories shared with members; personal ones stay personal; team-scope writes always go to review by a maintainer. Promote a personal project rule to team or to `AGENTS.md` with one action.
 
-## 9. Spikes
+## 11. Spikes
 
 1. Claude via the SDK: `systemPrompt.append` + injected MCP + skills symlink; what auto-memory files look like for the harvester.
 2. Codex: per-session instruction + MCP injection without touching `~/.codex` (`-c` overrides vs a `CODEX_HOME` overlay).
 3. Ambient MCP: does each agent spawn user-level MCP servers with the project cwd, or send MCP roots, so scope resolution works?
 4. agy: `.agents/rules/*.md` pickup; per-project MCP.
 5. Adoption: how often each agent calls `memory_search` / `memory_add` unprompted, and which tool-description wording works best.
+6. Claude Agent SDK: with `settingSources: ['user', 'project', 'local']`, does a session load the project `AGENTS.md` fallback (no `CLAUDE.md`) and nested `sub/AGENTS.md` on read? Codeword test, `BIZZI_LIVE=1`.
+7. OpenCode: does it expand `@path` imports in `~/.claude/CLAUDE.md` (e.g. `@RTK.md`) when it uses that file as its global fallback?
