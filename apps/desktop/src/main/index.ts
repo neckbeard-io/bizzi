@@ -2,7 +2,7 @@
 // `bizzi://` deep links, and the core supervisor (which runs the core as a separate process).
 // No product logic lives here; the renderer talks to the core directly over WebSocket.
 
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import {
   app,
@@ -21,7 +21,8 @@ import type { LogLevel, ServeReady } from '@bizzi/protocol';
 import { createLogger, fileSink, stderrSink } from '../core/log.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
 import { resolveCoreEntry, resolveCoreRuntime, resolveDataDir } from '../core/runtime.ts';
-import { IPC_BOOTSTRAP, type Bootstrap } from '../shared/ipc.ts';
+import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
+import { IPC_BOOTSTRAP, IPC_CHROME, type Bootstrap } from '../shared/ipc.ts';
 import { buildCsp } from './csp.ts';
 import { trayIcon } from './tray.ts';
 import { APP_ORIGIN, handleAppProtocol, registerAppScheme, resolveUiSource, uiEntryUrl } from './ui.ts';
@@ -42,6 +43,11 @@ const log = createLogger([stderrSink, fileSink(logFile)], { proc: 'desktop' }, (
 const ui = resolveUiSource(env, app.isPackaged, process.resourcesPath, appDir);
 const uiOrigin = ui.kind === 'dev' ? new URL(ui.url).origin : APP_ORIGIN;
 const csp = buildCsp(ui.kind === 'dev' ? { devOrigin: uiOrigin } : {});
+
+const titleBar = titleBarFor(process.platform, env);
+/** The theme's last chrome colours, kept so the next launch's first frame already matches. */
+const chromeFile = join(app.getPath('userData'), 'chrome.json');
+let chrome: ChromeColors = loadChrome();
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -146,6 +152,11 @@ async function onReady(): Promise<void> {
   });
   if (ui.kind === 'dir') handleAppProtocol(ui.dir, csp);
 
+  ipcMain.on(IPC_CHROME, (e, raw: unknown) => {
+    if (win === null || e.sender !== win.webContents || originOf(e.senderFrame?.url ?? '') !== uiOrigin) return;
+    const c = parseChrome(raw);
+    if (c) applyChrome(c);
+  });
   ipcMain.on(IPC_BOOTSTRAP, (e) => {
     const trusted = win !== null && e.sender === win.webContents && originOf(e.senderFrame?.url ?? '') === uiOrigin;
     if (!trusted) log.log('warn', 'refused bootstrap to untrusted frame', { url: e.senderFrame?.url });
@@ -175,7 +186,30 @@ async function onReady(): Promise<void> {
 function bootstrap(): Bootstrap {
   const c = manager.status.connection;
   loadedConn = c;
-  return { connection: c ? { url: c.url, token: c.token } : null, appVersion: app.getVersion(), accentColor: accentColor() };
+  return { connection: c ? { url: c.url, token: c.token } : null, appVersion: app.getVersion(), accentColor: accentColor(), titleBar };
+}
+
+function loadChrome(): ChromeColors {
+  try {
+    return parseChrome(JSON.parse(readFileSync(chromeFile, 'utf8'))) ?? DEFAULT_CHROME;
+  } catch {
+    return DEFAULT_CHROME;
+  }
+}
+
+/** Theme changed in the UI: window background, the Windows/Linux controls overlay, and the saved copy. */
+function applyChrome(c: ChromeColors): void {
+  if (JSON.stringify(c) === JSON.stringify(chrome)) return;
+  chrome = c;
+  if (win) {
+    win.setBackgroundColor(c.background);
+    if (titleBar.style === 'overlay') win.setTitleBarOverlay(overlayFor(c, titleBar.height));
+  }
+  try {
+    writeFileSync(chromeFile, JSON.stringify(c));
+  } catch (err) {
+    log.log('warn', 'could not save chrome colours', { error: String(err) });
+  }
 }
 
 /** The platform accent colour (`rrggbbaa`) for the UI's Device theme; macOS and Windows only. */
@@ -205,6 +239,7 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: 'bizzi',
+    ...windowChromeOptions(titleBar, chrome),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
       contextIsolation: true,

@@ -2,6 +2,16 @@ import type { ReactNode } from 'react';
 import { useIsWide } from '../app/hooks.ts';
 import { IconButton, cx } from './ui.tsx';
 
+/**
+ * Desktop with the native title bar hidden: a themed, draggable strip the height of the title bar
+ * (theming.md §8). The traffic lights (macOS) or window controls (Windows/Linux) sit over it.
+ */
+export function TitleBarStrip(props: { className?: string }): ReactNode {
+  const bar = window.bizzi?.titleBar;
+  if (!bar) return null;
+  return <div aria-hidden className={cx('app-drag shrink-0', props.className)} style={{ height: bar.height }} data-titlebar />;
+}
+
 export function PageHeader(props: { title: ReactNode; subtitle?: ReactNode; back?: () => void; actions?: ReactNode; className?: string }): ReactNode {
   const wide = useIsWide();
   return (

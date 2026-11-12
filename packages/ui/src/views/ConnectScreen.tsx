@@ -5,6 +5,7 @@ import type { FetchLike } from '@bizzi/client';
 import { useAction } from '../app/hooks.ts';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
+import { TitleBarStrip } from '../components/layout.tsx';
 import { Button, Card, ErrorText, Field, Input, cx } from '../components/ui.tsx';
 import {
   MOCK_HUB_URL,
@@ -41,6 +42,8 @@ export function ConnectScreen(props: { error: string | null; pairCode?: string |
 
   return (
     <div className="flex min-h-full items-center justify-center p-4">
+      {/* Transparent over the page background: the window stays draggable before connecting. */}
+      <TitleBarStrip className="fixed inset-x-0 top-0 z-10" />
       <Card className="w-full max-w-md p-6">
         <div className="mb-5 flex items-center gap-2">
           <Logo />

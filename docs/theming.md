@@ -146,10 +146,13 @@ From Chorus's `validateTheme`, applied to built-ins in tests and to imports at l
 - **Terminal:** xterm.js gets the theme's terminal palette (background, foreground, cursor, selection and the 16 ANSI colours). When a theme has none, they're derived from its UI colours. This applies to terminal-mode sessions and login PTYs alike.
 - **Syntax highlighting:** `editorTheme` picks the highlight theme for code blocks and diffs, per variant.
 - **Phone:** the Capacitor status bar and the browser `theme-color` follow the theme's background.
-- **Desktop title bar** (not built yet). Today the Electron window uses the native title bar, which follows the OS appearance, so a dark theme gets a grey strip on top (and a light system with a dark theme gets a light one). The top bar should match the theme:
-  - **macOS:** `titleBarStyle: 'hiddenInset'`, so the traffic lights sit over bizzi's own top strip. The strip is painted by the theme (`sidebar` over the sidebar column, `background` over the main column) and is a drag region (`-webkit-app-region: drag`; buttons and inputs in it `no-drag`). Leave room for the traffic lights at the sidebar's top left (about 78 px; none in full screen, where macOS hides them).
-  - **Windows and Linux:** `titleBarStyle: 'hidden'` with `titleBarOverlay`, so the OS keeps drawing the window controls. Their `color` and `symbolColor` come from the theme and are updated live with `win.setTitleBarOverlay()`.
-  - **Wiring:** `applyTheme` sends `{ background, sidebar, foreground, dark }` to the main process over the preload bridge (`window.bizzi.setChrome`). Main applies the overlay colours, calls `win.setBackgroundColor()` (no white flash on resize or reload) and sets `nativeTheme.themeSource` to the theme's light/dark, so native menus, context menus and scrollbars match too. The last colours are kept with the window state, so the first frame before the UI loads is already right.
+- **Desktop title bar.** The native title bar follows the OS appearance, so a dark theme used to get a grey strip on top. bizzi hides it and paints its own strip, the title bar's height, at the top of each column: `sidebar` over the sidebar and `card` over the main column, so it runs into the page header below. The strip drags the window (`app-drag`); dialogs, menus and the sidebar resize handle opt out (`no-drag`). The connect and connecting screens get a transparent strip, so the window can be dragged before there's a connection. Code: `apps/desktop/src/shared/chrome.ts`, `TitleBarStrip` in `packages/ui/src/components/layout.tsx`.
+  - **macOS:** `titleBarStyle: 'hidden'` (28 px). The traffic lights keep their standard place, over the sidebar strip's left end.
+  - **Windows and Linux:** `titleBarStyle: 'hidden'` with `titleBarOverlay` (32 px), so the OS still draws the window controls, at the main strip's right end. Their colour (`card`) and symbol colour (`foreground`) follow the theme live via `win.setTitleBarOverlay()`.
+  - **Wiring:** `applyTheme` calls `window.bizzi.setChrome({ background, card, sidebar, foreground, dark })`, flattened to `#rrggbb`. Main accepts it only from the app's own frame and only as four `#rrggbb` colours and a boolean. It sets the overlay and `win.setBackgroundColor()` (no white flash on resize or reload), and saves the colours in `chrome.json` in the profile, so the next launch's first frame already matches.
+  - **Not `nativeTheme.themeSource`:** forcing it to the theme's light/dark would also force `prefers-color-scheme` in the page, and the UI's `system` mode reads that, so the mode could never follow the OS again. Native menus and context menus follow the OS appearance.
+  - **Opt out:** `BIZZI_NATIVE_TITLEBAR=1` keeps the native title bar (no strip).
+  - **Known gap:** in macOS full screen the traffic lights hide, but the 28 px strip stays.
   - **Browsers and phones:** nothing extra. The browser `theme-color` and the Capacitor status bar already follow the background.
 - **Later, desktop only:** Chorus's background image layer. It pauses during window resize and while hidden, which keeps it within the performance guardrails (tech-choices D0b).
 
@@ -162,6 +165,6 @@ With the M2 desktop and phone shells:
 3. the built-ins and base16 import;
 4. validation;
 5. density;
-6. the themed desktop title bar (§8).
+6. the themed desktop title bar (§8, done).
 
 Later: `panelStyle`, VS Code import, background images.

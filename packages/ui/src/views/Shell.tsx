@@ -10,6 +10,7 @@ import { sidebarStore, useSidebarPref } from '../app/sidebar.ts';
 import { useServerThemes } from '../app/theme.ts';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
+import { TitleBarStrip } from '../components/layout.tsx';
 import { Button, Spinner, cx } from '../components/ui.tsx';
 import { pickerRequestFromHash } from '../lib/picker.ts';
 import { desktopRedirect, routeHref } from '../lib/router.ts';
@@ -69,9 +70,12 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
 
   if (conn.state === 'connecting' && conn.sessions === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 text-muted">
-        <Spinner size={22} />
-        <div className="text-sm">Connecting to {conn.url}…</div>
+      <div className="flex h-full flex-col">
+        <TitleBarStrip />
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 text-muted">
+          <Spinner size={22} />
+          <div className="text-sm">Connecting to {conn.url}…</div>
+        </div>
       </div>
     );
   }
@@ -94,6 +98,7 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
         <div className="flex min-h-0 flex-1">
           <Sidebar route={shown} />
           <main className="flex min-w-0 flex-1 flex-col">
+            <TitleBarStrip className="bg-panel" />
             <ConnectionBanner />
             <div className="min-h-0 flex-1">{main}</div>
           </main>
@@ -105,6 +110,7 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
   }
   return (
     <div className="flex h-full flex-col">
+      <TitleBarStrip className="bg-panel" />
       <ConnectionBanner />
       <div className="min-h-0 flex-1">{main}</div>
       {fullScreen ? null : <BottomNav route={shown} />}
@@ -266,6 +272,7 @@ function Sidebar(props: { route: Route }): ReactNode {
 
   return (
     <aside className="relative flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }} data-sidebar>
+      <TitleBarStrip />
       <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <Logo size={24} />
         <div className="min-w-0 flex-1">
@@ -413,7 +420,7 @@ function ResizeHandle(props: { width: number; windowWidth: number; auto: boolean
           e.preventDefault();
           setMenu({ x: e.clientX, y: e.clientY });
         }}
-        className="group absolute top-0 -right-1.5 bottom-0 z-20 w-3 cursor-col-resize touch-none outline-none"
+        className="app-no-drag group absolute top-0 -right-1.5 bottom-0 z-20 w-3 cursor-col-resize touch-none outline-none"
       >
         <span
           className={cx(

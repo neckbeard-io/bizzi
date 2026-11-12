@@ -37,6 +37,7 @@ import { BASE16_SCHEMES } from '../src/lib/theme/builtins/base16-schemes.ts';
 import { FLAX_OVERLAP } from '../src/lib/theme/builtins/flax.ts';
 import { scalar } from '../src/lib/theme/base16.ts';
 import { isUnsupported, readThemeFiles } from '../src/lib/theme/custom.ts';
+import { chromeColors } from '../src/lib/theme/apply.ts';
 import { xtermTheme } from '../src/lib/theme/terminal.ts';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
 
@@ -358,6 +359,17 @@ test('index.css element rules sit in a layer, so utilities still colour buttons 
     } else {
       selector += ch;
     }
+  }
+});
+
+test('desktop chrome colours: opaque #rrggbb from the resolved theme, translucent ones flattened', () => {
+  const r = resolveTheme(builtinTheme('tokyo-night')!, 'dark');
+  assert.deepEqual(chromeColors(r), { background: '#1a1b26', card: '#1f2030', sidebar: '#1f2030', foreground: '#c0caf5', dark: true });
+  const glass = resolveTheme({ id: 'glass', name: 'Glass', variants: { light: { colors: { background: '#ffffff', card: 'rgba(0,0,0,0.5)' } } } }, 'light');
+  assert.equal(chromeColors(glass).card, '#808080');
+  for (const t of BUILTIN_THEMES) for (const mode of ['light', 'dark'] as const) {
+    const c = chromeColors(resolveTheme(t, mode));
+    for (const v of [c.background, c.card, c.sidebar, c.foreground]) assert.match(v, /^#[0-9a-f]{6}$/, `${t.id} ${mode}`);
   }
 });
 

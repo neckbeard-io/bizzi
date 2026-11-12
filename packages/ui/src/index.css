@@ -247,6 +247,23 @@
   }
 }
 
+/*
+ * Desktop title bar strip (theming.md §8): drag the window by it. Dialogs and menus that open over it
+ * stay clickable.
+ */
+@utility app-drag {
+  -webkit-app-region: drag;
+}
+@utility app-no-drag {
+  -webkit-app-region: no-drag;
+}
+@layer base {
+  [role='dialog'],
+  [role='menu'] {
+    -webkit-app-region: no-drag;
+  }
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom);
 }

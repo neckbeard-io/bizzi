@@ -1,5 +1,7 @@
 // The DOM side of theming (theming.md §2): write a resolved theme's tokens as CSS custom properties on
 // :root, clearing the previous theme's first so switching never leaves stale values.
+import type { ChromeColors } from '../connection.ts';
+import { flatten, toHex } from './color.ts';
 import { themeCssVars } from './resolve.ts';
 import type { Density, ResolvedTheme } from './types.ts';
 
@@ -29,6 +31,19 @@ export function applyTheme(r: ResolvedTheme, density: Density, root: HTMLElement
     document.head.appendChild(meta);
   }
   meta.content = r.colors.background;
+  // Desktop: the window background and the themed title bar strip's OS controls follow the theme too.
+  try {
+    window.bizzi?.setChrome?.(chromeColors(r));
+  } catch {
+    // An older desktop shell without setChrome, or a page outside Electron.
+  }
+}
+
+/** The colours the desktop window chrome needs, as opaque `#rrggbb` (themes may use rgba()). */
+export function chromeColors(r: ResolvedTheme): ChromeColors {
+  const bg = toHex(flatten(r.colors.background, r.dark ? '#000000' : '#ffffff'));
+  const opaque = (c: string) => toHex(flatten(c, bg));
+  return { background: bg, card: opaque(r.colors.card), sidebar: opaque(r.colors.sidebar), foreground: opaque(r.colors.foreground), dark: r.dark };
 }
 
 /** Remove everything applyTheme wrote (back to the stylesheet's bizzi Default). */
