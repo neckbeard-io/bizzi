@@ -26,13 +26,24 @@ export interface MachineInfo {
   /** A display/GUI session is available to agents (macOS Aqua session, or a virtual X display). */
   headful: boolean;
   alwaysOn: boolean;
+  /** User-set labels (`gui`, `prod-access`, …); see `isMachineTag`. Set with `machine.set`. */
   tags: string[];
+  /** User-written paragraph about what the machine is for; part of the machine card (knowledge.md §9.2). */
+  description?: string;
   online: boolean;
   roles: MachineRole[];
   bizziVersion: string;
   /** Set by the hub: last time the machine's node was connected. */
   lastSeenAt?: string;
 }
+
+/** A machine tag: lowercase letters, digits, `.`, `_` and `-`, starting with a letter or digit, at most 64 characters. */
+export function isMachineTag(v: unknown): v is string {
+  return typeof v === 'string' && /^[a-z0-9][a-z0-9._-]{0,63}$/.test(v);
+}
+
+/** Longest machine description `machine.set` accepts, in characters. */
+export const MAX_MACHINE_DESCRIPTION = 2000;
 
 export type AgentAuthState = 'ok' | 'missing' | 'expired' | 'unknown';
 
@@ -358,10 +369,12 @@ export interface SecretInfo {
 
 // ---- knowledge (wire shape; see docs/knowledge.md)
 
-export type KnowledgeScopeLevel = 'global' | 'machine' | 'project' | 'workspace' | 'session' | 'team';
+export type KnowledgeScopeLevel = 'global' | 'tag' | 'machine' | 'project' | 'workspace' | 'session' | 'team';
 
 export interface KnowledgeScope {
   level: KnowledgeScopeLevel;
+  /** `tag` scope: applies on every machine with this tag. */
+  tag?: string;
   machineId?: string;
   projectId?: string;
   workspaceId?: string;

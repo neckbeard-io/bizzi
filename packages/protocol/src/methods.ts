@@ -90,6 +90,11 @@ export interface Methods {
   unsubscribe: { params: { ch: string }; result: Empty };
 
   'machines.list': { params: Empty; result: { machines: MachineInfo[] } };
+  /**
+   * Set a machine's user-owned fields (knowledge.md §9.1–9.2): `tags` replaces the list, `description`
+   * replaces the text (`''` clears it). Emits `machine.updated`.
+   */
+  'machine.set': { params: MachineTarget & { tags?: string[]; description?: string }; result: { machine: MachineInfo } };
   'agents.list': { params: MachineTarget & { refresh?: boolean }; result: { agents: AgentListing[] } };
 
   'workspaces.list': { params: MachineTarget; result: { workspaces: WorkspaceInfo[] } };
