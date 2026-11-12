@@ -213,7 +213,7 @@ export function ToolCard(props: { item: ToolItem }): ReactNode {
         <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{t.title}</span>
         {t.approvalId ? <Badge tone="warn">needs approval</Badge> : null}
         {t.progress && t.status === 'running' ? <span className="shrink-0 text-xs text-muted">{t.progress}</span> : null}
-        {t.status === 'running' ? <Spinner size={14} className="shrink-0 text-accent" /> : <Badge tone={TOOL_STATUS_TONE[t.status]}>{t.status}</Badge>}
+        {t.status === 'running' ? <Spinner size={14} className="shrink-0 text-accent-text" /> : <Badge tone={TOOL_STATUS_TONE[t.status]}>{t.status}</Badge>}
         <Icon name={open ? 'chevronDown' : 'chevronRight'} size={14} className="shrink-0 text-muted" />
       </button>
       {open ? (
@@ -228,7 +228,7 @@ export function ToolCard(props: { item: ToolItem }): ReactNode {
             <div>
               <div className="mb-1 text-[11px] font-medium text-muted uppercase">Output</div>
               {out.truncated > 0 ? (
-                <button type="button" className="mb-1 text-xs text-accent" onClick={() => setFull(true)}>
+                <button type="button" className="mb-1 text-xs text-accent-text" onClick={() => setFull(true)}>
                   {out.truncated.toLocaleString()} earlier characters hidden. Show all
                 </button>
               ) : null}

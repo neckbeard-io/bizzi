@@ -162,6 +162,15 @@ export function contrastFailures(theme: Theme): string[] {
     check(r.mutedForeground, r.card, 4.5, 'muted foreground on card');
     check(r.mutedForeground, r.sidebar, 4.5, 'muted foreground on sidebar');
     check(r.destructive, r.background, 3, 'destructive on background');
+    // Filled controls and tinted surfaces: the text each one carries (buttons, badges, hover rows).
+    check(r.primaryForeground, r.primary, 4.5, 'primary foreground on primary');
+    check(r.sidebarPrimaryForeground, r.sidebarPrimary, 4.5, 'sidebar primary foreground on sidebar primary');
+    check(r.primaryText, r.primarySoft, 4.5, 'accent text on the soft primary fill');
+    check(r.primaryText, r.card, 4.5, 'accent text on card');
+    check(r.secondaryForeground, r.secondary, 4.5, 'secondary foreground on secondary');
+    check(r.accentForeground, r.accent, 4.5, 'accent foreground on accent');
+    check(r.sidebarAccentForeground, r.sidebarAccent, 4.5, 'sidebar accent foreground on sidebar accent');
+    check(r.popoverForeground, r.popover, 4.5, 'popover foreground on popover');
     // A theme's own state colours must pass as given (derived ones fall back silently).
     const own = STATE_KEYS.filter((k) => v.colors?.[k]);
     if (own.length > 0) {

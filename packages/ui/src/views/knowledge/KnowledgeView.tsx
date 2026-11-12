@@ -121,7 +121,7 @@ export function KnowledgeView(): ReactNode {
         </div>
         {suggestions > 0 ? (
           <div className="mx-auto w-full max-w-4xl px-3 pb-2 md:px-5">
-            <a href="#/inbox" className="inline-flex items-center gap-1.5 text-xs text-accent hover:underline">
+            <a href="#/inbox" className="inline-flex items-center gap-1.5 text-xs text-accent-text hover:underline">
               <Icon name="sparkle" size={13} />
               {suggestions} suggestion{suggestions === 1 ? '' : 's'} waiting in the inbox
             </a>
@@ -218,7 +218,7 @@ const KnowledgeRow = memo(function KnowledgeRow(props: { item: KnowledgeItemInfo
         <div className={cx('mt-1 text-sm whitespace-pre-wrap text-muted', !expanded && long && 'line-clamp-3')}>{it.body}</div>
       ) : null}
       {long ? (
-        <button type="button" className="mt-0.5 text-xs text-accent hover:underline" onClick={() => setExpanded((e) => !e)}>
+        <button type="button" className="mt-0.5 text-xs text-accent-text hover:underline" onClick={() => setExpanded((e) => !e)}>
           {expanded ? 'Show less' : 'Show more'}
         </button>
       ) : null}

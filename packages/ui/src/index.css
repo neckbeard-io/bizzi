@@ -47,6 +47,7 @@
   --diff-hunk: #eef1fb;
   --diff-hunk-foreground: #3949ab;
   --primary-soft: #eef0ff;
+  --primary-text: #4f46e5;
   --state-waiting: #b45309;
   --state-working: #4f46e5;
   --state-done: #0369a1;
@@ -95,6 +96,7 @@
   --diff-hunk: #1b1f3a;
   --diff-hunk-foreground: #a5b4fc;
   --primary-soft: #23244a;
+  --primary-text: #8b93ff;
   --state-waiting: #fbbf24;
   --state-working: #8b93ff;
   --state-done: #38bdf8;
@@ -138,6 +140,8 @@
   --color-accent: var(--primary);
   --color-accent-fg: var(--primary-foreground);
   --color-accent-soft: var(--primary-soft);
+  /* Accent-coloured text: the primary, nudged to 4.5:1 on every surface it sits on (resolve.ts). */
+  --color-accent-text: var(--primary-text);
   --color-ok: var(--ok);
   --color-warn: var(--warn);
   --color-err: var(--err);
@@ -155,6 +159,7 @@
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-soft: var(--primary-soft);
+  --color-primary-text: var(--primary-text);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-surface-muted: var(--muted);
@@ -200,40 +205,46 @@
   --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
 }
 
-html,
-body,
-#root {
-  height: 100%;
-}
+/*
+ * Element resets live in the base layer. Unlayered CSS beats every layer, so a bare `button { color:
+ * inherit }` here would override Tailwind utilities (`text-accent-fg`, `text-sm`, …) on every button and input.
+ */
+@layer base {
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
 
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--foreground);
-  font-family: var(--font-sans);
-  font-size: var(--font-size-base, 14px);
-  line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
-  -webkit-tap-highlight-color: transparent;
-  overscroll-behavior: none;
-}
+  body {
+    margin: 0;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base, 14px);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    overscroll-behavior: none;
+  }
 
-button,
-select,
-input,
-textarea {
-  font: inherit;
-  color: inherit;
-}
+  button,
+  select,
+  input,
+  textarea {
+    font: inherit;
+    color: inherit;
+  }
 
-:focus-visible {
-  outline: 2px solid var(--primary);
-  outline-offset: 1px;
-}
+  :focus-visible {
+    outline: 2px solid var(--primary);
+    outline-offset: 1px;
+  }
 
-/* Dialog panels take focus programmatically (for Escape / screen readers); no ring around the whole panel. */
-[role='dialog']:focus-visible {
-  outline: none;
+  /* Dialog panels take focus programmatically (for Escape / screen readers); no ring around the whole panel. */
+  [role='dialog']:focus-visible {
+    outline: none;
+  }
 }
 
 .pb-safe {
@@ -292,7 +303,7 @@ textarea {
   margin-top: 0.15em;
 }
 .md a {
-  color: var(--primary);
+  color: var(--primary-text);
   text-decoration: underline;
   text-underline-offset: 2px;
 }

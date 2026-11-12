@@ -224,7 +224,7 @@ function PairingModal(props: { kind: DeviceKind; autoCreate?: boolean; onClose: 
           </div>
           <div className="flex w-full min-w-0 items-center gap-2 rounded-md border border-border bg-panel-2 px-2 py-1.5">
             <Icon name="link" size={14} className="shrink-0 text-muted" />
-            <a href={pairing.result.pairUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate font-mono text-xs text-accent hover:underline">
+            <a href={pairing.result.pairUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 flex-1 truncate font-mono text-xs text-accent-text hover:underline">
               {pairing.result.pairUrl}
             </a>
             <CopyButton text={pairing.result.pairUrl} label="Copy link" />

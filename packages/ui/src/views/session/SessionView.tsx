@@ -203,7 +203,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
         </div>
       ) : null}
       {isLogin ? (
-        <a href={`#/login/${encodeURIComponent(sessionId)}`} className="flex shrink-0 items-center gap-2 border-b border-border bg-accent-soft px-3 py-1.5 text-xs text-accent md:px-5">
+        <a href={`#/login/${encodeURIComponent(sessionId)}`} className="flex shrink-0 items-center gap-2 border-b border-border bg-accent-soft px-3 py-1.5 text-xs text-accent-text md:px-5">
           <Icon name="key" size={14} /> This is a login session. Open the login helper for links and codes.
         </a>
       ) : null}

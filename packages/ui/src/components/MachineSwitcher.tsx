@@ -86,7 +86,7 @@ export function MachineSwitcher(props: { className?: string }): ReactNode {
                   {m.hostname} · {machinePresence(m)}
                 </span>
               </span>
-              {m.id === selectedId ? <Icon name="check" size={14} className="text-accent" /> : null}
+              {m.id === selectedId ? <Icon name="check" size={14} className="text-accent-text" /> : null}
             </button>
           ))}
           <a href={routeHref({ name: 'machines' })} onClick={() => setOpen(false)} className="block border-t border-border px-2.5 py-2 text-xs text-muted hover:bg-panel-2 hover:text-fg">

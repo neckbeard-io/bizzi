@@ -273,7 +273,7 @@ function LoginHelper(props: {
 function Step(props: { n: number; title: string; hint?: string; children: ReactNode }): ReactNode {
   return (
     <section className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent">{props.n}</span>
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-accent-soft text-xs font-semibold text-accent-text">{props.n}</span>
       <div className="flex min-w-0 flex-1 flex-col gap-2">
         <div>
           <div className="font-medium">{props.title}</div>

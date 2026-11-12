@@ -20,7 +20,7 @@ export function JobProgress(props: { job: InstallJob; onDismiss?: () => void; cl
     >
       <div className="flex items-center gap-2 text-sm">
         {state === 'running' ? (
-          <Spinner size={14} className="shrink-0 text-accent" />
+          <Spinner size={14} className="shrink-0 text-accent-text" />
         ) : (
           <Icon name={state === 'ok' ? 'check' : 'alert'} size={15} className={cx('shrink-0', state === 'ok' ? 'text-ok' : 'text-err')} />
         )}

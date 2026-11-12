@@ -337,6 +337,30 @@ test('index.css paints bizzi Default exactly (defaults.ts and the stylesheet agr
   }
 });
 
+test('index.css element rules sit in a layer, so utilities still colour buttons and inputs', () => {
+  // Unlayered CSS beats every @layer: an unlayered `button { color: inherit }` hid the primary button
+  // text in Tokyo Night (text-accent-fg lost to the inherited foreground, which equals its primary).
+  const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  // Top-level selectors only: anything nested in `@layer … { }` (or another at-rule) is skipped.
+  let depth = 0;
+  let selector = '';
+  for (const ch of css) {
+    if (ch === '{') {
+      const sel = selector.trim();
+      if (depth === 0 && !sel.startsWith('@')) assert.doesNotMatch(sel, /^(html|body|button|select|input|textarea|:focus)|[\s,]+(button|select|input|textarea)\b/, `unlayered element rule: ${sel}`);
+      depth++;
+      selector = '';
+    } else if (ch === '}') {
+      depth--;
+      selector = '';
+    } else if (ch === ';') {
+      selector = '';
+    } else {
+      selector += ch;
+    }
+  }
+});
+
 // ---------------------------------------------------------------- files
 
 test('import: .bizzi-theme and .chorus-theme JSON, failures listed for junk', () => {

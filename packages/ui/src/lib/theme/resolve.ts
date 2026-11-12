@@ -166,6 +166,10 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   diff('diffDel', 'diffDelForeground', colors.err);
   diff('diffHunk', 'diffHunkForeground', colors.info);
   colors.primarySoft = c.primarySoft ?? mix(card, primary, dark ? 0.2 : 0.1);
+  // Accent-coloured text sits on the page, the card, the sidebar and the soft fill: readable on all of them.
+  let primaryText = c.primaryText ?? primary;
+  if (!c.primaryText) for (const s of [card, bg, colors.sidebar, colors.primarySoft]) primaryText = ensureContrast(primaryText, s, 4.5, fg);
+  colors.primaryText = primaryText;
 
   // State colours (§3): own → derived from status → bizzi defaults → defaults nudged to contrast.
   const surfaces = { sidebar: colors.sidebar, card };

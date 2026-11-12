@@ -173,6 +173,15 @@ export function base16ToTheme(scheme: Base16Scheme): Theme {
     return contrast('#ffffff', blue) >= contrast('#000000', blue) ? '#ffffff' : '#000000';
   })();
   const destructive = pickForContrast(bg, 3, [at('base08')], extreme);
+  // Hover and selected surfaces (secondary, muted, accent) carry body and muted text. Some schemes'
+  // base02 sits too close to base05 (Solarized), so step it back toward the card until both read.
+  const tinted = ((): string => {
+    for (const w of [1, 0.8, 0.6, 0.4, 0.2]) {
+      const c = mix(surface, raised, w);
+      if (contrast(fg, c) >= 4.5 && contrast(mutedForeground, c) >= 3) return c;
+    }
+    return surface;
+  })();
 
   const colors: ThemeColors = {
     background: bg,
@@ -183,11 +192,11 @@ export function base16ToTheme(scheme: Base16Scheme): Theme {
     popoverForeground: fg,
     primary: blue,
     primaryForeground: onPrimary,
-    secondary: raised,
+    secondary: tinted,
     secondaryForeground: fg,
-    muted: raised,
+    muted: tinted,
     mutedForeground,
-    accent: raised,
+    accent: tinted,
     accentForeground: fg,
     destructive,
     border,
@@ -197,7 +206,7 @@ export function base16ToTheme(scheme: Base16Scheme): Theme {
     sidebarForeground: fg,
     sidebarPrimary: blue,
     sidebarPrimaryForeground: onPrimary,
-    sidebarAccent: raised,
+    sidebarAccent: tinted,
     sidebarAccentForeground: fg,
     sidebarBorder: border,
     sidebarRing: blue,

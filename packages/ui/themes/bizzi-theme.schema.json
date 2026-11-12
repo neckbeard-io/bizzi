@@ -82,6 +82,7 @@
         "diffHunk": { "$ref": "#/$defs/color" },
         "diffHunkForeground": { "$ref": "#/$defs/color" },
         "primarySoft": { "$ref": "#/$defs/color" },
+        "primaryText": { "$ref": "#/$defs/color" },
         "stateWaiting": { "$ref": "#/$defs/color" },
         "stateWorking": { "$ref": "#/$defs/color" },
         "stateDone": { "$ref": "#/$defs/color" },

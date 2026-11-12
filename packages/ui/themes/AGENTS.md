@@ -15,7 +15,7 @@ Guidance for agents (and people) asked for a theme, e.g. "make me a theme like N
 Every token is optional. The quickest theme is three colours per variant, `background`, `foreground` and `primary`; everything else is derived (surfaces step from background toward foreground, borders at about 20%, muted text at about 72%, text on the primary is near-black or white). Add tokens only to override a derived one:
 
 - surfaces: `card`, `popover`, `secondary`, `muted` (a surface), `accent` (hover surface), `sidebar`, `border`, `input`, `ring`, and their `*Foreground` text colours;
-- bizzi's own: `ok`, `warn`, `err`, `info`, `code`, `diffAdd`/`diffDel`/`diffHunk` (+ `*Foreground`), `primarySoft`, and the agent state colours `stateWaiting`, `stateWorking`, `stateDone`, `stateFailed`, `stateIdle`.
+- bizzi's own: `ok`, `warn`, `err`, `info`, `code`, `diffAdd`/`diffDel`/`diffHunk` (+ `*Foreground`), `primarySoft`, `primaryText` (accent-coloured text; usually leave it out and bizzi derives a readable one from the primary), and the agent state colours `stateWaiting`, `stateWorking`, `stateDone`, `stateFailed`, `stateIdle`.
 
 With a terminal `ansi` palette, status and diff colours come from its red, yellow, green and blue. State colours come from the status colours (waiting = warn, failed = err, done = info, working = primary, idle = muted text). Usually leave the state colours out: if the derived ones clash, bizzi swaps in its defaults for just those.
 

@@ -128,7 +128,7 @@ function ContextBreakdownModal(props: { ctx: ContextUsage; onClose: () => void }
         ))}
       </ul>
       {bizzi ? (
-        <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent">
+        <p className="mt-3 rounded-md bg-accent-soft px-3 py-2 text-xs text-accent-text">
           bizzi overhead: {formatTokens(bizzi.tokens)} for the knowledge rules and the knowledge and agent-to-agent MCP tools bizzi injects (estimated from what it sends).
         </p>
       ) : null}

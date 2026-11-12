@@ -128,7 +128,7 @@ function ModeTile(props: { icon: IconName; title: string; subtitle: string; acti
         props.active ? 'border-accent bg-accent-soft' : 'border-border hover:bg-panel-2',
       )}
     >
-      <Icon name={props.icon} size={20} className={props.active ? 'text-accent' : 'text-muted'} />
+      <Icon name={props.icon} size={20} className={props.active ? 'text-accent-text' : 'text-muted'} />
       <span className="min-w-0">
         <span className="block text-sm font-medium">{props.title}</span>
         <span className="block truncate text-xs text-muted">{props.subtitle}</span>

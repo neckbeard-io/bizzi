@@ -219,7 +219,7 @@ function ThemeCard(props: { entry: Entry; mode: ThemeMode; selected: boolean; on
         )}
         <div className="mt-1 flex items-center gap-1 px-0.5">
           <span className="min-w-0 flex-1 truncate text-xs font-medium">{e.name}</span>
-          {props.selected ? <Icon name="check" size={12} className="shrink-0 text-accent" /> : null}
+          {props.selected ? <Icon name="check" size={12} className="shrink-0 text-accent-text" /> : null}
         </div>
         <div className="flex items-center gap-1 px-0.5 text-[11px] text-muted">
           {broken ? <Badge tone="err">needs fixing</Badge> : variants.length === 1 ? `${variants[0]} only` : 'light · dark'}

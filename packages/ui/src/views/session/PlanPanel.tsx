@@ -31,7 +31,7 @@ export function PlanPanel(props: { sessionId: string }): ReactNode {
                 {p.status === 'completed' ? (
                   <Icon name="check" size={16} className="mt-0.5 shrink-0 text-ok" />
                 ) : p.status === 'in_progress' ? (
-                  <Spinner size={14} className="mt-1 shrink-0 text-accent" />
+                  <Spinner size={14} className="mt-1 shrink-0 text-accent-text" />
                 ) : (
                   <span className="mt-1 ml-0.5 h-3 w-3 shrink-0 rounded-full border border-muted" />
                 )}

@@ -325,7 +325,7 @@ export function WorkspacePicker(props: { machineId: string | null; initialPath?:
               ) : completeError ? (
                 <span className="text-err">{errorInfo(completeError).message}</span>
               ) : existing ? (
-                <span className="text-accent">Already a workspace: {existing.name}</span>
+                <span className="text-accent-text">Already a workspace: {existing.name}</span>
               ) : exists === false && entries.length > 0 ? (
                 <span>
                   {entries.length} matching folder{entries.length === 1 ? '' : 's'} · <Kbd>Tab</Kbd> completes
@@ -468,7 +468,7 @@ export function WorkspacePicker(props: { machineId: string | null; initialPath?:
 
 function EntryIcon(props: { entry: BrowseEntry }): ReactNode {
   const e = props.entry;
-  return <Icon name={e.git ? 'git' : e.kind === 'symlink' ? 'link' : 'folder'} size={16} className={cx('shrink-0', e.git ? 'text-accent' : 'text-muted')} />;
+  return <Icon name={e.git ? 'git' : e.kind === 'symlink' ? 'link' : 'folder'} size={16} className={cx('shrink-0', e.git ? 'text-accent-text' : 'text-muted')} />;
 }
 
 function EntryBadges(props: { entry: BrowseEntry }): ReactNode {
@@ -506,7 +506,7 @@ function Chip(props: { entry: BrowseEntry; label: string; title?: string; onClic
     >
       <EntryIcon entry={props.entry} />
       {props.label}
-      {props.entry.workspaceId ? <Icon name="check" size={11} className="text-accent" /> : null}
+      {props.entry.workspaceId ? <Icon name="check" size={11} className="text-accent-text" /> : null}
     </button>
   );
 }

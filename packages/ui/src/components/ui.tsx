@@ -62,7 +62,7 @@ export function IconButton(props: ButtonHTMLAttributes<HTMLButtonElement> & { ic
 
 const TONE: Record<Tone, string> = {
   neutral: 'bg-panel-2 text-muted border-border',
-  accent: 'bg-accent-soft text-accent border-transparent',
+  accent: 'bg-accent-soft text-accent-text border-transparent',
   ok: 'text-ok border-current/30 bg-transparent',
   warn: 'text-warn border-current/30 bg-transparent',
   err: 'text-err border-current/30 bg-transparent',

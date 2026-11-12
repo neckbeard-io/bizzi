@@ -496,7 +496,7 @@ function BottomNav(props: { route: Route }): ReactNode {
             type="button"
             onClick={() => navigate(n.route)}
             aria-current={active ? 'page' : undefined}
-            className={cx('relative flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]', active ? 'text-accent' : 'text-muted')}
+            className={cx('relative flex h-14 flex-1 flex-col items-center justify-center gap-0.5 text-[11px]', active ? 'text-accent-text' : 'text-muted')}
           >
             <Icon name={n.icon} size={20} />
             {n.label}

@@ -46,8 +46,8 @@ type LayoutTokens = Partial<{
 bizzi's UI (`packages/ui/src/index.css`) has tokens Chorus doesn't: status colours (`ok`, `warn`, `err`, `info`), code background, diff colours (`add`, `del`, `hunk`), and the agent state colours of the sidebar marks (spec §11.1: waiting, working, done-unseen, failed, idle). Plan:
 
 1. Rename bizzi's tokens to Chorus's names where they're the same idea (`bg` → `background`, `panel` → `card`, `fg` → `foreground`, `accent` → `primary`, …), so themes from Chorus and Terax drop in unchanged.
-2. Add bizzi-only optional tokens: `ok`, `warn`, `err`, `info`, `code`, `diffAdd`, `diffAddForeground`, `diffDel`, `diffDelForeground`, `diffHunk`, plus `stateWaiting`, `stateWorking`, `stateDone`, `stateFailed`, `stateIdle`.
-3. **Derive what a theme leaves out.** Status and diff colours come from the theme's ANSI palette (red, yellow, green, blue), which every theme with a terminal palette has. Failing that, they come from bizzi's defaults. State colours derive from the status colours (waiting = warn, failed = err, done = info, working = primary, idle = muted foreground).
+2. Add bizzi-only optional tokens: `ok`, `warn`, `err`, `info`, `code`, `diffAdd`, `diffAddForeground`, `diffDel`, `diffDelForeground`, `diffHunk`, `primarySoft` (tinted primary fill), `primaryText` (accent-coloured text: links, accent badges, selected labels), plus `stateWaiting`, `stateWorking`, `stateDone`, `stateFailed`, `stateIdle`.
+3. **Derive what a theme leaves out.** Status and diff colours come from the theme's ANSI palette (red, yellow, green, blue), which every theme with a terminal palette has. Failing that, they come from bizzi's defaults. State colours derive from the status colours (waiting = warn, failed = err, done = info, working = primary, idle = muted foreground). `primaryText` is the primary nudged toward the foreground until it reads at 4.5:1 on the page, the card, the sidebar and `primarySoft`; it equals the primary whenever the primary already passes. A primary can be a fine fill and still too faint as text on its own soft tint: Dracula's `#bd93f9` was 3.5:1 there.
 
 **Colour carries state** (spec §11.1), so state colours must stay readable and distinct in every theme: at least 3:1 against `sidebar` and `card`, and the five clearly distinguishable from each other. When a derived set fails, bizzi's defaults for those tokens are used instead.
 
@@ -130,6 +130,8 @@ From Chorus's `validateTheme`, applied to built-ins in tests and to imports at l
 
 - foreground on background at least 4.5:1, and muted foreground at least 4.5:1 on the raised surfaces (`card`, `sidebar`). Light themes fail here most often.
 - destructive readable on background.
+- **every fill carries readable text**, at 4.5:1: `primaryForeground` on `primary` (buttons), `sidebarPrimaryForeground` on `sidebarPrimary`, `primaryText` on `primarySoft` and on `card` (accent badges), and the foreground of each surface pair (`secondary`, `accent`, `sidebarAccent`, `popover`). The base16 converter steps a scheme's `base02` back toward the card when it's too close to the text (Solarized).
+- **Utilities must win over element CSS.** Unlayered CSS beats every `@layer`, so element resets in `index.css` (`button`, `input`, `body`, `:focus-visible`) live in `@layer base`. An unlayered `button { color: inherit }` once overrode `text-accent-fg` on every button: Tokyo Night's primary equals its foreground, so primary buttons went blank. A test fails on any unlayered element rule.
 - **Invariant safety tokens:** approval prompts, permission-mode badges (e.g. bypass permissions) and destructive confirmations use fixed high-contrast tokens that no theme can override. A theme must never be able to camouflage "this agent can run anything".
 - An import that fails gets a list of failures and stays usable as a preview, but isn't applied until fixed.
 
@@ -144,6 +146,11 @@ From Chorus's `validateTheme`, applied to built-ins in tests and to imports at l
 - **Terminal:** xterm.js gets the theme's terminal palette (background, foreground, cursor, selection and the 16 ANSI colours). When a theme has none, they're derived from its UI colours. This applies to terminal-mode sessions and login PTYs alike.
 - **Syntax highlighting:** `editorTheme` picks the highlight theme for code blocks and diffs, per variant.
 - **Phone:** the Capacitor status bar and the browser `theme-color` follow the theme's background.
+- **Desktop title bar** (not built yet). Today the Electron window uses the native title bar, which follows the OS appearance, so a dark theme gets a grey strip on top (and a light system with a dark theme gets a light one). The top bar should match the theme:
+  - **macOS:** `titleBarStyle: 'hiddenInset'`, so the traffic lights sit over bizzi's own top strip. The strip is painted by the theme (`sidebar` over the sidebar column, `background` over the main column) and is a drag region (`-webkit-app-region: drag`; buttons and inputs in it `no-drag`). Leave room for the traffic lights at the sidebar's top left (about 78 px; none in full screen, where macOS hides them).
+  - **Windows and Linux:** `titleBarStyle: 'hidden'` with `titleBarOverlay`, so the OS keeps drawing the window controls. Their `color` and `symbolColor` come from the theme and are updated live with `win.setTitleBarOverlay()`.
+  - **Wiring:** `applyTheme` sends `{ background, sidebar, foreground, dark }` to the main process over the preload bridge (`window.bizzi.setChrome`). Main applies the overlay colours, calls `win.setBackgroundColor()` (no white flash on resize or reload) and sets `nativeTheme.themeSource` to the theme's light/dark, so native menus, context menus and scrollbars match too. The last colours are kept with the window state, so the first frame before the UI loads is already right.
+  - **Browsers and phones:** nothing extra. The browser `theme-color` and the Capacitor status bar already follow the background.
 - **Later, desktop only:** Chorus's background image layer. It pauses during window resize and while hidden, which keeps it within the performance guardrails (tech-choices D0b).
 
 ## 9. Phasing
@@ -154,6 +161,7 @@ With the M2 desktop and phone shells:
 2. the model and `applyTheme`;
 3. the built-ins and base16 import;
 4. validation;
-5. density.
+5. density;
+6. the themed desktop title bar (§8).
 
 Later: `panelStyle`, VS Code import, background images.

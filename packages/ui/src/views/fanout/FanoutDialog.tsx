@@ -300,7 +300,7 @@ function PreflightLine(props: { preflight: RunPreflight; onSwap: (() => void) | 
           ) : null}
         </span>
         {props.onSwap ? (
-          <button type="button" className="ml-auto inline-flex items-center gap-1 text-accent hover:underline" onClick={props.onSwap} title="Run this one on a budgetless model instead">
+          <button type="button" className="ml-auto inline-flex items-center gap-1 text-accent-text hover:underline" onClick={props.onSwap} title="Run this one on a budgetless model instead">
             <Icon name="bolt" size={12} />
             Use {AGENT_LABEL[p.swap!.agent]}
             {p.swap!.model ? ` · ${p.swap!.model}` : ''} (budgetless)

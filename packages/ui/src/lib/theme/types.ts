@@ -63,6 +63,8 @@ export const BIZZI_COLOR_KEYS = [
   'diffHunkForeground',
   /** Tinted primary surface (badges, selected chips). */
   'primarySoft',
+  /** Accent-coloured text (links, accent badges); derived from the primary when omitted. */
+  'primaryText',
   'stateWaiting',
   'stateWorking',
   'stateDone',

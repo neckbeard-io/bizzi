@@ -321,7 +321,7 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
   if (installed.length === 0) {
     return (
       <Card className="mb-4 p-4 text-sm text-muted">
-        No agents are installed on this machine. See <a href={routeHref({ name: 'machine' })} className="text-accent underline">Machine</a> to install one.
+        No agents are installed on this machine. See <a href={routeHref({ name: 'machine' })} className="text-accent-text underline">Machine</a> to install one.
       </Card>
     );
   }

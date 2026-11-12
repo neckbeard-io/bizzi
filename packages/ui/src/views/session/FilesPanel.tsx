@@ -47,7 +47,7 @@ export function FilesPanel(props: { workspaceId: string }): ReactNode {
         {crumbs.map((c, i) => (
           <span key={i} className="flex items-center gap-1">
             <span className="text-muted">/</span>
-            <button type="button" className="rounded px-1 py-0.5 whitespace-nowrap hover:text-accent" onClick={() => setDir(crumbs.slice(0, i + 1).join('/'))}>
+            <button type="button" className="rounded px-1 py-0.5 whitespace-nowrap hover:text-accent-text" onClick={() => setDir(crumbs.slice(0, i + 1).join('/'))}>
               {c}
             </button>
           </span>
@@ -89,7 +89,7 @@ function EntryList(props: { entries: FsEntry[]; onOpen: (e: FsEntry) => void }):
               className="absolute left-0 flex w-full items-center gap-2 px-3 text-left text-sm hover:bg-panel-2"
               style={{ top: 0, height: vi.size, transform: `translateY(${vi.start}px)` }}
             >
-              <Icon name={e.type === 'dir' ? 'folder' : 'file'} size={15} className={cx('shrink-0', e.type === 'dir' ? 'text-accent' : 'text-muted')} />
+              <Icon name={e.type === 'dir' ? 'folder' : 'file'} size={15} className={cx('shrink-0', e.type === 'dir' ? 'text-accent-text' : 'text-muted')} />
               <span className="min-w-0 flex-1 truncate">{e.name}</span>
               {e.type === 'file' ? <span className="shrink-0 text-xs text-muted">{formatBytes(e.size)}</span> : null}
             </button>
