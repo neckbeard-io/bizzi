@@ -373,11 +373,24 @@ One composer, no navigation: you type what you want, and bizzi decides where it 
 1. **Explicit:** `@mac-mini`, `#acme-shop`, `/codex` in the text, or a target picked by hand, always win.
 2. **Continuation:** a follow-up while a routed session is live goes to that session unless you change the target.
 3. **Rules:** your routing preferences (knowledge.md §9.3): "production investigations → `prod-access`", "UI and screenshots → `gui`", "long runs → `always-on`".
-4. **Quick classifier:** a cheap or budgetless model (§6.5 chat/utility) gets the prompt plus a compact catalogue (machines with tags, descriptions and online state; workspaces with project, path, branch and recent activity) and returns a ranked target with a one-line reason. Budgetless local models are preferred, since this runs on every prompt.
+4. **Quick classifier:** a decision model picks from a numbered catalogue: machines with tags, descriptions and online state; workspaces with project, path, branch and recent activity; agents. It returns probabilities per option, never free text, so its output can only ever be one of the listed targets.
+
+**Classifier backends** (pluggable, on the hub, which is the only place that knows every machine):
+
+- **Jev** (TypeSafe, `POST /v1/systemone`, model `typesafe/jev`): built for this. A `Choice` question picks one of up to 255 options and returns a probability per option plus a confidence; several typed questions about the same input go in one request. Reported latency is about 140–280 ms server-side and under a second end to end; input costs $0.042 per million tokens. One request per prompt:
+  - `Choice` workspace (each option is "machine · workspace", with a short description), at most 255 options; above that, filter by online machines and recent activity first;
+  - `Choice` agent;
+  - `Noul` "is this a follow-up to the open session?".
+- **Local model** (budgetless, §12.3): the same questions asked of an OpenAI-compatible endpoint with constrained JSON output; slower, but nothing leaves your machines.
+- **Off:** steps 1–3 only, and you pick when they don't decide.
+
+**Privacy:** a hosted classifier sees the prompt and the catalogue, including machine descriptions and paths. It is opt-in, per hub. Rules (step 3) run first, so a prompt your routing preferences already place (production investigations, say) never reaches a hosted classifier.
+
+Reference: Browser Use's ultrafast mode uses Jev the same way: structured state with numbered options in, a typed choice out, one round trip per decision ([jev-ultrafast](https://github.com/browser-use/jev-ultrafast)).
 
 **Confirm, don't guess:**
 
-- The chosen target and its reason are shown before sending. Above a confidence threshold, Enter sends; below it, bizzi shows the top two or three targets to pick from.
+- The chosen target and its reason are shown before sending. Above a confidence threshold (the classifier's own confidence, or the gap between the top two probabilities), Enter sends; below it, bizzi shows the top two or three targets to pick from.
 - Only online machines are offered; a sleeping laptop shows as "asleep" (§8), never as the silent choice.
 - Overrides are recorded, and repeated overrides suggest a routing preference ("you always move prod questions to the laptop: make it a rule?").
 - Where no workspace fits, offer "new workspace" (folder picker) or a scratch workspace on the chosen machine.
