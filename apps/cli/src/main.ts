@@ -6,6 +6,7 @@ import { hub, HUB_HELP } from './hub.ts';
 import { pair, PAIR_HELP } from './pair.ts';
 import { serve, SERVE_HELP } from './serve.ts';
 import { status, STATUS_HELP } from './status.ts';
+import { trustSystemCertificates } from './tls.ts';
 import { UsageError } from './util.ts';
 
 const HELP = `Usage: bizzi <command> [options]
@@ -29,6 +30,7 @@ export function cliVersion(): string {
 }
 
 async function main(argv: string[]): Promise<void> {
+  trustSystemCertificates();
   const [cmd, ...rest] = argv;
   switch (cmd) {
     case 'serve':
