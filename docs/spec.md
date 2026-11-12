@@ -355,6 +355,33 @@ Rules: colour only carries state; everything else is muted text. No chat preview
 
 **Phone:** same structure; bottom nav Machines · Inbox · Knowledge · Settings, where Machines is the tree and tapping a machine tile opens its page. Rows 1 and 2 only (row 3 folds into a PR icon on row 1). More than three marks collapse to counts (`⚠1 ◐2 ●3`). 44 px hit targets; tapping row 2 jumps straight to the waiting session; the Inbox tab badge is the total waiting count across machines; machine sections collapse and remember their state.
 
+### 11.2 One-pane mode (later)
+
+One composer, no navigation: you type what you want, and bizzi decides where it runs. The tree and session views stay available; one-pane mode is a front door, not a replacement.
+
+```
+┌───────────────────────────────────────────────────────────┐
+│ why are checkout 502s up since 14:00?                     │
+│                                                           │
+│ → laptop · acme-shop · Claude      prod-access, prod logs │
+│   [Send]  change: mac-mini · vps · workspace… · agent…    │
+└───────────────────────────────────────────────────────────┘
+```
+
+**Routing, cheapest first:**
+
+1. **Explicit:** `@mac-mini`, `#acme-shop`, `/codex` in the text, or a target picked by hand, always win.
+2. **Continuation:** a follow-up while a routed session is live goes to that session unless you change the target.
+3. **Rules:** your routing preferences (knowledge.md §9.3): "production investigations → `prod-access`", "UI and screenshots → `gui`", "long runs → `always-on`".
+4. **Quick classifier:** a cheap or budgetless model (§6.5 chat/utility) gets the prompt plus a compact catalogue (machines with tags, descriptions and online state; workspaces with project, path, branch and recent activity) and returns a ranked target with a one-line reason. Budgetless local models are preferred, since this runs on every prompt.
+
+**Confirm, don't guess:**
+
+- The chosen target and its reason are shown before sending. Above a confidence threshold, Enter sends; below it, bizzi shows the top two or three targets to pick from.
+- Only online machines are offered; a sleeping laptop shows as "asleep" (§8), never as the silent choice.
+- Overrides are recorded, and repeated overrides suggest a routing preference ("you always move prod questions to the laptop: make it a rule?").
+- Where no workspace fits, offer "new workspace" (folder picker) or a scratch workspace on the chosen machine.
+
 ## 12. Orchestration
 
 Three things that look alike:
@@ -433,7 +460,7 @@ Budgetless doesn't mean unlimited: GPU capacity is the limit, so a provider can 
 | **M2 provisioning + breadth** | install/update/login recipes; supported-version alerts, method migration, update policy, restart-on-new-version (§7); OpenCode adapter; terminal mode + agy; desktop + phone shells; headful Mac install; context bar, per-login usage meters, `http`/`command` widgets ([usage.md](usage.md) §5) | install and log in Codex on a fresh Linux box entirely from the phone; all four agents usable | Built: recipes with supported versions, adopted-install detection, `agent.migrate`, update/restart policies and install watching; OpenCode adapter; terminal mode (`@bizzi/pty`: agy, shell, OSC 7501); Electron and Capacitor shells; context bar, `usage.list`, `http`/`command` widgets; themes. In progress: restart-and-resume on a new agent version (updates.md §5). |
 | **M3 knowledge** | rules + memory store, MCP server, injection, harvest, acceptance policy, inbox | a rule set in Claude applies to Codex in the same workspace, on another machine too | Built on each node: `@bizzi/knowledge` store, bizzi-memory MCP server, session-start injection, Claude/Codex harvest, acceptance policy and inbox (`knowledge.*`). Open: the store has replication primitives (HLC, `changesSince`/`applyRemote`) but nothing syncs it through the hub yet, so the "another machine" half of the exit criterion isn't met. |
 | **M4 orchestration (one machine)** | worktrees as workspaces; agent-to-agent MCP tools (§12.1); guardrails (§12.2); billing classes and budgetless providers (§12.3); fan-out + compare view; helper budgets, preflight and tree view ([usage.md](usage.md) §2) | Claude asks Codex to review its change in a worktree on the same machine, waits, reads the findings and fixes them, while you watch both from the phone; local-model helpers don't count toward the budget | Built: `worktree.*`, `seen_through`, the bizzi-agents MCP tools (`@bizzi/orchestration`), guardrails and `orchestration.settings.*`, billing classes, session and tree budgets, helpers nested in the sidebar. In progress: fan-out + compare view, baselines and the preflight. `npm run smoke:v12` covers the one-machine flow offline. |
-| **M5 later** | cross-machine agent-to-agent via the hub (§12.4), pipelines/watchers, container workspaces, fork-to-machine, tool bridging, API chat, colour/tags per machine and workspace (sidebar and headers), team (orgs, sharing, Postgres; deprioritized, decision 1) | | Not started. |
+| **M5 later** | cross-machine agent-to-agent via the hub (§12.4), one-pane mode with routing (§11.2), pipelines/watchers, container workspaces, fork-to-machine, tool bridging, API chat, colour/tags per machine and workspace (sidebar and headers), team (orgs, sharing, Postgres; deprioritized, decision 1) | | Not started. |
 
 ## 14. Open questions
 

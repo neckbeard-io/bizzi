@@ -198,7 +198,7 @@ Scope for now: **Claude first, OpenCode second** (to discuss), Codex and agy off
 
 Rules above the project level, which only bizzi can provide because native instruction files are per machine and per agent.
 
-Example: the laptop has production access (kube contexts, VPN, prod credentials); the mac mini has a GUI (Xcode, simulators, headed browsers) but no production access. Some rules hold everywhere ("never push to main without asking").
+Example: the laptop has production access (kube contexts, VPN, prod credentials), and production investigations always happen there. The mac mini has a GUI (Xcode, simulators, headed browsers) and will never have production access. Some rules hold everywhere ("never push to main without asking").
 
 ### 9.1 Scopes
 
@@ -206,7 +206,7 @@ Example: the laptop has production access (kube contexts, VPN, prod credentials)
 |---|---|---|
 | `global` | every machine, every project | "Never add AI attribution to commits." |
 | `tag` *(new)* | every machine with that tag | `prod-access`: "Prod clusters: read-only kubectl, always pass `--context`." |
-| `machine` | one machine, every project | mac-mini: "You can open apps and take screenshots; there is no production access here, don't try." |
+| `machine` | one machine, every project | mac-mini: "Use the iPhone 17 simulator for UI checks; take screenshots of what you build." |
 | `project`, `workspace`, `session` | as before (§2.1) | |
 
 - **Tags** are user-set labels on a machine (`machine.tags`, already in the model; add a `machine.setTags` method and UI on the machine page). Suggested tags come from facts (`gui` when headful, `always-on`), but a tag like `prod-access` is yours to set: bizzi can't detect it.
@@ -217,12 +217,13 @@ Example: the laptop has production access (kube contexts, VPN, prod credentials)
 
 Every session gets a short generated block about where it runs, built from facts the node already has: machine name, OS, GUI or headless, always-on or sleeps, tags, and the user's one-paragraph machine description (a free-text field on the machine page). This answers "where am I?" without the user writing a rule, and keeps it current when facts change.
 
-### 9.3 Guardrails
+### 9.3 Capabilities: what a machine is for
 
-Prose rules are advisory: an agent can misread or ignore "no production access". Real safety comes from the machine not having the credentials. On top of that, a rule can carry an optional **guardrail** form:
+"No production access" on the mac mini isn't a restriction to enforce; it's a fact about the machine, like "has a GUI". Facts decide **where work goes**; rules decide **how work is done** once it's there.
 
-- `priority: 'guardrail'`: injected last, after workspace rules, and never overridden by a more specific scope ("more specific overrides" doesn't apply to guardrails).
-- `enforce` *(Claude, launch mode)*: permission deny patterns (e.g. `Bash(kubectl --context prod*:*)`) passed to bizzi-started sessions as SDK `disallowedTools` / a settings overlay. Not projected into `~/.claude/settings.json` (bizzi doesn't edit native settings files).
+- A machine's capabilities are its tags plus its description: `gui`, `always-on`, `gpu` (suggested from facts) and ones only you know (`prod-access`). The mac mini simply doesn't have `prod-access`.
+- **Routing preferences** live on the user, not on a session: "production investigations → the machine tagged `prod-access`", "UI work and screenshots → `gui`", "long test runs → `always-on`". They're used by one-pane mode ([spec.md](spec.md) §11.2) and, later, by cross-machine helpers (spec §12.4).
+- The machine card (§9.2) tells an agent what its machine is for, so an agent on the mac mini asked for a prod investigation can say "that belongs on the laptop" instead of trying.
 
 ### 9.4 Replication (not built yet; needed for any of this to work across machines)
 
