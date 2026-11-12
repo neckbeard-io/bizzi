@@ -67,9 +67,10 @@ export {
   knowledgeForSession,
   mcpServerArgs,
   mcpServerSpec,
+  renderMachineCard,
   renderRules,
 } from './digest.ts';
-export type { DigestOptions, KnowledgeDigest, McpSpecOptions, SessionKnowledgeOptions } from './digest.ts';
+export type { DigestOptions, KnowledgeDigest, MachineCardFacts, McpSpecOptions, SessionKnowledgeOptions } from './digest.ts';
 export { acceptItem, acceptItems, isForgetRequest, listInbox, rejectItem, rejectItems } from './inbox.ts';
 export type { AcceptOptions, InboxFilter, InboxGroup } from './inbox.ts';
 export { MCP_SERVER_VERSION, createKnowledgeMcpServer, parseServerConfig, serverInstructions } from './mcp-tools.ts';

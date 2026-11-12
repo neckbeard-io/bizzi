@@ -148,3 +148,15 @@ test('mock 1.2: provisioning alerts, migrate, policies, restart a stale session'
   assert.equal(next.onLimit, 'queue');
   await assert.rejects(store.setOrchestrationSettings({ machineId: 'm_laptop', settings: { maxDepth: 9 } }), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
 });
+
+test('mock: machine.set updates tags and description through the store', async (t) => {
+  const { store, until } = await connect(t);
+  const next = await store.setMachine({ machineId: 'm_mini', tags: ['gui', 'Always-On'], description: 'Builds.' });
+  assert.deepEqual(next.tags, ['gui', 'always-on']);
+  await until(() => store.getState().machines.m_mini?.description === 'Builds.');
+  assert.equal(store.getState().machines.m_mini?.online, true);
+  await store.setMachine({ machineId: 'm_mini', description: '' });
+  await until(() => store.getState().machines.m_mini?.description === undefined);
+  await assert.rejects(store.setMachine({ machineId: 'm_mini', tags: ['bad tag'] }), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
+  await assert.rejects(store.setMachine({ machineId: 'm_server', tags: [] }), (e: unknown) => e instanceof BizziError && e.code === 'machine_offline');
+});

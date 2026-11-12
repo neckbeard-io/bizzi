@@ -10,6 +10,7 @@ import { join } from 'node:path';
 import {
   BizziError,
   GLOBAL_CHANNEL,
+  isMachineTag,
   type AgentKind,
   type ChannelEvent,
   type KnowledgeInboxCard,
@@ -53,7 +54,7 @@ import type { ExtensionContext, NodeExtension } from './types.ts';
 
 const STATUSES = ['active', 'suggested', 'superseded', 'deleted'] as const satisfies readonly KnowledgeStatus[];
 const TYPES = ['rule', 'memory'] as const;
-const LEVELS = ['global', 'machine', 'project', 'workspace', 'session', 'team'] as const;
+const LEVELS = ['global', 'tag', 'machine', 'project', 'workspace', 'session', 'team'] as const;
 const DECISIONS = ['live', 'notice', 'suggest'] as const;
 
 export type KnowledgeStoreSource = KnowledgeStore | ((machineId: string) => KnowledgeStore);
@@ -82,6 +83,7 @@ export interface KnowledgeExtension extends NodeExtension {
 
 export function toWireScope(scope: KnowledgeScope): WireScope {
   const out: WireScope = { level: scope.level };
+  if (scope.tag !== undefined) out.tag = scope.tag;
   if (scope.machineId !== undefined) out.machineId = scope.machineId;
   if (scope.projectId !== undefined) out.projectId = scope.projectId;
   if (scope.workspaceId !== undefined) out.workspaceId = scope.workspaceId;
@@ -127,7 +129,10 @@ function parseScope(v: unknown, machineId: string): KnowledgeScope {
   const raw = v as Record<string, unknown>;
   if (!isScopeLevel(raw.level)) throw new BizziError('bad_request', `scope.level must be one of ${LEVELS.join(', ')}`);
   const scope: KnowledgeScope = { level: raw.level };
-  for (const k of ['machineId', 'projectId', 'workspaceId', 'sessionId'] as const) {
+  if (scope.level === 'tag' && !isMachineTag(raw.tag)) {
+    throw new BizziError('bad_request', 'scope.tag must be a machine tag (lowercase letters, digits, ".", "_" or "-")');
+  }
+  for (const k of ['tag', 'machineId', 'projectId', 'workspaceId', 'sessionId'] as const) {
     const x = raw[k];
     if (x === undefined || x === null) continue;
     if (typeof x !== 'string') throw new BizziError('bad_request', `scope.${k} must be a string`);

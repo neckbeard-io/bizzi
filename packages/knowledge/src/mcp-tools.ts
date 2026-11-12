@@ -11,7 +11,7 @@ import { addKnowledge, defaultScopeLevel, forgetKnowledge, originFromContext, up
 import type { WriteResult } from './pipeline.ts';
 import { loadSettings } from './policy.ts';
 import { rankMemories } from './resolver.ts';
-import { contextHasLevel } from './scope.ts';
+import { contextHasLevel, scopeLabel } from './scope.ts';
 import type { KnowledgeStore } from './store.ts';
 import type { KnowledgeContext, KnowledgeItem, SessionScopeLevel } from './types.ts';
 import { MEMORY_KINDS, SESSION_SCOPE_LEVELS } from './types.ts';
@@ -21,7 +21,8 @@ export const MCP_SERVER_VERSION = '0.0.1';
 const SCOPE_GUIDE =
   'Scopes: "workspace" = only this directory on this machine; "project" = this project on every machine and ' +
   'workspace; "machine" = this machine, every project (e.g. local paths, installed tools); "global" = you, ' +
-  'everywhere (personal style and preferences); "session" = this session only (scratch notes).';
+  'everywhere (personal style and preferences); "session" = this session only (scratch notes). "tag" items apply ' +
+  'on every machine with that tag; the user sets them, so you see them but cannot write at that scope.';
 
 export function serverInstructions(ctx: KnowledgeContext): string {
   const available = SESSION_SCOPE_LEVELS.filter((l) => contextHasLevel(l, ctx));
@@ -56,6 +57,7 @@ function itemSummary(i: KnowledgeItem): Record<string, unknown> {
     id: i.id,
     type: i.type,
     scope: i.scope.level,
+    ...(i.scope.tag ? { tag: i.scope.tag } : {}),
     ...(i.kind ? { kind: i.kind } : {}),
     title: i.title,
     body: i.body,
@@ -139,7 +141,7 @@ export function createKnowledgeMcpServer(store: KnowledgeStore, ctx: KnowledgeCo
         if (items.length === 0) return text(`No ${args.type ?? 'memory'} items match "${args.query}".`, { results: [] });
         const lines = items.map(
           ({ item }) =>
-            `[${item.id}] (${item.scope.level}${item.kind ? `, ${item.kind}` : ''}) ${item.title}\n${item.body}`.trim(),
+            `[${item.id}] (${scopeLabel(item.scope)}${item.kind ? `, ${item.kind}` : ''}) ${item.title}\n${item.body}`.trim(),
         );
         return text(lines.join('\n\n'), {
           results: items.map(({ item, score }) => ({ ...itemSummary(item), score: Number(score.toFixed(4)) })),
@@ -353,6 +355,7 @@ export function parseServerConfig(argv: string[], env: Record<string, string | u
       db: { type: 'string' },
       agent: { type: 'string' },
       'machine-id': { type: 'string' },
+      'machine-tag': { type: 'string', multiple: true },
       'project-id': { type: 'string' },
       'workspace-id': { type: 'string' },
       'session-id': { type: 'string' },
@@ -366,6 +369,7 @@ export function parseServerConfig(argv: string[], env: Record<string, string | u
   const projectId = values['project-id'] ?? env.BIZZI_PROJECT_ID;
   const workspaceId = values['workspace-id'] ?? env.BIZZI_WORKSPACE_ID;
   const sessionId = values['session-id'] ?? env.BIZZI_SESSION_ID;
+  const machineTags = values['machine-tag'] ?? (env.BIZZI_MACHINE_TAGS ? env.BIZZI_MACHINE_TAGS.split(',').filter(Boolean) : []);
   if (!dbPath) throw new BizziError('bad_request', 'missing --db (or BIZZI_KNOWLEDGE_DB)');
   if (!machineId) throw new BizziError('bad_request', 'missing --machine-id (or BIZZI_MACHINE_ID)');
   if (!agent || !(AGENT_KINDS as readonly string[]).includes(agent)) {
@@ -376,6 +380,7 @@ export function parseServerConfig(argv: string[], env: Record<string, string | u
     context: {
       agent: agent as AgentKind,
       machineId,
+      ...(machineTags.length > 0 ? { machineTags } : {}),
       ...(projectId ? { projectId } : {}),
       ...(workspaceId ? { workspaceId } : {}),
       ...(sessionId ? { sessionId } : {}),

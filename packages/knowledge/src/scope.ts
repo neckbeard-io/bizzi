@@ -4,6 +4,7 @@ import { SCOPE_LEVELS } from './types.ts';
 
 const ID_FIELD: Readonly<Record<ScopeLevel, keyof KnowledgeScope | null>> = {
   global: null,
+  tag: 'tag',
   machine: 'machineId',
   project: 'projectId',
   workspace: 'workspaceId',
@@ -40,7 +41,7 @@ export function scopeForLevel(level: ScopeLevel, ctx: Partial<KnowledgeContext> 
 
 /** Can this context write/see at `level`? */
 export function contextHasLevel(level: ScopeLevel, ctx: Partial<KnowledgeContext>): boolean {
-  if (level === 'team') return false;
+  if (level === 'team' || level === 'tag') return false;
   const field = ID_FIELD[level];
   if (field === null) return true;
   const id = (ctx as Record<string, unknown>)[field];
@@ -51,6 +52,8 @@ export function scopeMatches(scope: KnowledgeScope, ctx: KnowledgeContext): bool
   switch (scope.level) {
     case 'global':
       return true;
+    case 'tag':
+      return scope.tag !== undefined && (ctx.machineTags ?? []).includes(scope.tag);
     case 'machine':
       return scope.machineId === ctx.machineId;
     case 'project':
@@ -79,5 +82,5 @@ export function scopeEquals(a: KnowledgeScope, b: KnowledgeScope): boolean {
 }
 
 export function scopeLabel(scope: KnowledgeScope): string {
-  return scope.level;
+  return scope.level === 'tag' && scope.tag ? `tag ${scope.tag}` : scope.level;
 }

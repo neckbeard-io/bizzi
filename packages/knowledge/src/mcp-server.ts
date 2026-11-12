@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Entry point: the bizzi-memory MCP server over stdio, one process per agent session.
-//   node src/mcp-server.ts --db <knowledge.db> --agent claude --machine-id m_… [--project-id p_…]
-//        [--workspace-id w_…] [--session-id s_…]
-// The same values can come from BIZZI_KNOWLEDGE_DB, BIZZI_AGENT, BIZZI_MACHINE_ID, BIZZI_PROJECT_ID,
-// BIZZI_WORKSPACE_ID and BIZZI_SESSION_ID. stdout carries the MCP protocol; logs go to stderr.
+//   node src/mcp-server.ts --db <knowledge.db> --agent claude --machine-id m_… [--machine-tag gui …]
+//        [--project-id p_…] [--workspace-id w_…] [--session-id s_…]
+// The same values can come from BIZZI_KNOWLEDGE_DB, BIZZI_AGENT, BIZZI_MACHINE_ID, BIZZI_MACHINE_TAGS
+// (comma-separated), BIZZI_PROJECT_ID, BIZZI_WORKSPACE_ID and BIZZI_SESSION_ID. stdout carries the MCP protocol; logs go to stderr.
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { LogLevel, Logger } from '@bizzi/protocol';

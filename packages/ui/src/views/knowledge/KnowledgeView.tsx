@@ -177,7 +177,7 @@ function KnowledgeList(props: { items: KnowledgeItemInfo[]; ctx: ScopeContext; o
   );
 }
 
-const SCOPE_ICON: Record<KnowledgeScopeLevel, IconName> = { global: 'user', machine: 'machine', project: 'git', workspace: 'folder', session: 'chat', team: 'user' };
+const SCOPE_ICON: Record<KnowledgeScopeLevel, IconName> = { global: 'user', tag: 'tag', machine: 'machine', project: 'git', workspace: 'folder', session: 'chat', team: 'user' };
 
 const VIA_LABEL: Record<KnowledgeItemInfo['source']['via'], string> = { ui: 'added by you', tool: 'saved by', harvest: 'imported from', extract: 'extracted from' };
 

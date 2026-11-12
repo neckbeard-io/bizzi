@@ -33,6 +33,23 @@ function changedIds(h: Harness): string[][] {
 }
 
 describe('knowledge extension', () => {
+  it('tag scope: added by you with a valid tag, listed by level', async () => {
+    const { ext, h } = await setup();
+    const { item } = await h.call(ext, 'knowledge.add', {
+      type: 'rule',
+      title: 'Prod clusters: read-only kubectl',
+      body: 'Always pass --context.',
+      scope: { level: 'tag', tag: 'prod-access' },
+    });
+    assert.deepEqual(item.scope, { level: 'tag', tag: 'prod-access' });
+    assert.equal(item.status, 'active');
+    const { items } = await h.call(ext, 'knowledge.list', { scopeLevel: 'tag' });
+    assert.deepEqual(items.map((i: KnowledgeItemInfo) => i.id), [item.id]);
+    for (const tag of [undefined, '', 'Has Space', 'UPPER']) {
+      await assert.rejects(h.call(ext, 'knowledge.add', { type: 'rule', title: 'x', body: '', scope: { level: 'tag', tag } }), isCode('bad_request'));
+    }
+  });
+
   it('add / list / update / forget through the methods, emitting knowledge.changed', async () => {
     const { ext, h, opened } = await setup();
     const machineId = h.node.machine.id;

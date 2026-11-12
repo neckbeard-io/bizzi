@@ -13,7 +13,10 @@ import type {
 } from '@bizzi/protocol';
 
 /** Scope levels a person picks from (session is ephemeral, team is later). */
-export const SCOPE_LEVELS: readonly KnowledgeScopeLevel[] = ['global', 'machine', 'project', 'workspace'];
+export const SCOPE_LEVELS: readonly KnowledgeScopeLevel[] = ['global', 'tag', 'machine', 'project', 'workspace'];
+
+/** Scope levels agents can write at: tag rules are yours only (knowledge.md §9.5). */
+export const AGENT_SCOPE_LEVELS: readonly KnowledgeScopeLevel[] = ['global', 'machine', 'project', 'workspace'];
 
 /** Agents knowledge can be limited to (plain shells don't read knowledge). */
 export const KNOWLEDGE_AGENTS: readonly AgentKind[] = AGENT_KINDS.filter((a) => a !== 'shell');
@@ -22,6 +25,7 @@ export const MEMORY_KINDS: readonly string[] = ['fact', 'preference', 'decision'
 
 export const SCOPE_HELP: Record<KnowledgeScopeLevel, string> = {
   global: 'You, everywhere, on every machine',
+  tag: 'Every machine with this tag, every project',
   machine: 'One machine, every project on it',
   project: 'One project, on every machine and workspace',
   workspace: 'Only this directory on this machine',
@@ -52,6 +56,8 @@ export function projectName(projectId: string, ctx: ScopeContext): string {
 /** "global", "machine · server-a", "workspace · acme-shop", "project · acme". */
 export function scopeLabel(scope: KnowledgeScope, ctx: ScopeContext): string {
   switch (scope.level) {
+    case 'tag':
+      return scope.tag ? `tag · ${scope.tag}` : 'tag';
     case 'machine': {
       const id = scope.machineId;
       return id ? `machine · ${ctx.machines[id]?.name ?? id}` : 'machine';
@@ -73,13 +79,13 @@ export function scopeLabel(scope: KnowledgeScope, ctx: ScopeContext): string {
 
 export function sameScope(a: KnowledgeScope | undefined, b: KnowledgeScope | undefined): boolean {
   if (!a || !b) return a === b;
-  return a.level === b.level && a.machineId === b.machineId && a.projectId === b.projectId && a.workspaceId === b.workspaceId && a.sessionId === b.sessionId;
+  return a.level === b.level && a.tag === b.tag && a.machineId === b.machineId && a.projectId === b.projectId && a.workspaceId === b.workspaceId && a.sessionId === b.sessionId;
 }
 
 /** Stable key for grouping by scope (`knowledge.accept` takes one scope per call). */
 export function scopeKey(scope: KnowledgeScope | undefined): string {
   if (!scope) return '';
-  return [scope.level, scope.machineId ?? '', scope.projectId ?? '', scope.workspaceId ?? '', scope.sessionId ?? ''].join('|');
+  return [scope.level, scope.tag ?? '', scope.machineId ?? '', scope.projectId ?? '', scope.workspaceId ?? '', scope.sessionId ?? ''].join('|');
 }
 
 /**
@@ -95,6 +101,12 @@ export function retargetScope(item: Pick<KnowledgeItemInfo, 'scope' | 'source'>,
   switch (level) {
     case 'global':
       return { level: 'global' };
+    case 'tag': {
+      // The first tag of the machine it came from; null when that machine has none.
+      const machineId = item.scope.machineId ?? workspace?.machineId ?? session?.machineId ?? item.source.machineId;
+      const tag = machineId ? ctx.machines[machineId]?.tags[0] : undefined;
+      return tag ? { level: 'tag', tag } : null;
+    }
     case 'machine': {
       const machineId = item.scope.machineId ?? workspace?.machineId ?? session?.machineId ?? item.source.machineId;
       return machineId ? { level: 'machine', machineId } : null;
@@ -143,6 +155,14 @@ export interface ProjectOption {
   label: string;
 }
 
+/** Every tag set on any known machine, plus extra ones (e.g. the item being edited), sorted. */
+export function knownTags(ctx: Pick<ScopeContext, 'machines'>, extra: readonly (string | undefined)[] = []): string[] {
+  const tags = new Set<string>();
+  for (const m of Object.values(ctx.machines)) for (const t of m.tags) tags.add(t);
+  for (const e of extra) if (e) tags.add(e);
+  return [...tags].sort();
+}
+
 /** Projects known from workspace links, plus any extra ids (e.g. the item being edited). */
 export function projectOptions(ctx: ScopeContext, extra: readonly (string | undefined)[] = []): ProjectOption[] {
   const ids = new Set<string>();
@@ -154,6 +174,8 @@ export function projectOptions(ctx: ScopeContext, extra: readonly (string | unde
 /** Whether a scope names the id its level needs. */
 export function scopeComplete(scope: KnowledgeScope): boolean {
   switch (scope.level) {
+    case 'tag':
+      return !!scope.tag;
     case 'machine':
       return !!scope.machineId;
     case 'project':

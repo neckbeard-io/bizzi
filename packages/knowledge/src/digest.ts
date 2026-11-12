@@ -4,8 +4,9 @@
 
 import { fileURLToPath } from 'node:url';
 import { BizziError } from '@bizzi/protocol';
-import type { McpServerSpec, StartSessionOptions } from '@bizzi/protocol';
+import type { MachineInfo, McpServerSpec, StartSessionOptions } from '@bizzi/protocol';
 import { rankMemories, resolveRules } from './resolver.ts';
+import { scopeLabel } from './scope.ts';
 import type { RankedMemory } from './resolver.ts';
 import type { KnowledgeStore } from './store.ts';
 import type { KnowledgeContext, KnowledgeItem, ScopeLevel } from './types.ts';
@@ -33,6 +34,8 @@ export interface DigestOptions {
   memoryExcerptChars?: number;
   /** Include the paragraph about the bizzi-memory tools. Default true. */
   includeToolsNote?: boolean;
+  /** The machine the session runs on: adds the machine card (knowledge.md §9.2). */
+  machine?: MachineCardFacts;
   /** Clock for recency ranking (tests). */
   now?: number;
 }
@@ -48,8 +51,12 @@ export interface KnowledgeDigest {
   memoryTokens: number;
 }
 
+/** What the machine card is built from: facts the node has plus the user's tags and description. */
+export type MachineCardFacts = Pick<MachineInfo, 'name' | 'os' | 'arch' | 'headful' | 'alwaysOn' | 'tags' | 'description'>;
+
 const LEVEL_TITLE: Record<ScopeLevel, string> = {
   global: 'Global (everywhere)',
+  tag: 'Tag (every machine with this tag)',
   machine: 'Machine (this machine, every project)',
   project: 'Project (this project, every machine)',
   workspace: 'Workspace (only this directory on this machine)',
@@ -59,7 +66,7 @@ const LEVEL_TITLE: Record<ScopeLevel, string> = {
 
 export const RULES_PREAMBLE =
   'These rules come from bizzi and apply to this session. They are listed from the most general scope to the ' +
-  'most specific (global, machine, project, workspace, session). When two rules conflict, the more specific ' +
+  'most specific (global, tag, machine, project, workspace, session). When two rules conflict, the more specific ' +
   'scope (later in this list) overrides the more general one.';
 
 export const TOOLS_NOTE =
@@ -92,22 +99,43 @@ function ruleLine(r: KnowledgeItem): string {
 }
 
 function memoryLine(m: KnowledgeItem, excerptChars: number): string {
-  const tag = m.kind ? `${m.scope.level}, ${m.kind}` : m.scope.level;
+  const tag = m.kind ? `${scopeLabel(m.scope)}, ${m.kind}` : scopeLabel(m.scope);
   const body = excerpt(m.body, excerptChars);
   return `- (${tag}) **${oneLine(m.title)}**${body ? ` — ${body}` : ''} [${m.id}]`;
+}
+
+function levelTitle(scope: KnowledgeItem['scope']): string {
+  return scope.level === 'tag' && scope.tag ? `Tag \`${scope.tag}\` (every machine with this tag)` : LEVEL_TITLE[scope.level];
 }
 
 export function renderRules(rules: KnowledgeItem[]): string {
   if (rules.length === 0) return '';
   const out = ['## Rules', RULES_PREAMBLE];
-  let level: ScopeLevel | undefined;
+  let heading: string | undefined;
   for (const r of rules) {
-    if (r.scope.level !== level) {
-      level = r.scope.level;
-      out.push('', `### ${LEVEL_TITLE[level]}`);
+    const title = levelTitle(r.scope);
+    if (title !== heading) {
+      heading = title;
+      out.push('', `### ${title}`);
     }
     out.push(ruleLine(r));
   }
+  return out.join('\n');
+}
+
+const OS_NAME: Record<MachineInfo['os'], string> = { darwin: 'macOS', linux: 'Linux', win32: 'Windows', other: 'an unknown OS' };
+
+/**
+ * The machine card (knowledge.md §9.2): where this session runs, generated from facts so it stays
+ * current. Says "always on" only when the node knows it; it never guesses that a machine sleeps.
+ */
+export function renderMachineCard(m: MachineCardFacts): string {
+  const facts = [`${OS_NAME[m.os]} (${m.arch})`, m.headful ? 'has a GUI session (apps, simulators, headed browsers)' : 'headless (no GUI)'];
+  if (m.alwaysOn) facts.push('always on');
+  const out = ['## This machine', `You are running on **${oneLine(m.name)}**: ${facts.join(', ')}.`];
+  if (m.tags.length > 0) out.push(`Tags: ${m.tags.map((t) => `\`${t}\``).join(', ')}.`);
+  const description = m.description?.trim();
+  if (description) out.push('', 'What the user says this machine is for:', description);
   return out.join('\n');
 }
 
@@ -139,6 +167,7 @@ export function buildKnowledgeDigest(context: KnowledgeContext, opts: DigestOpti
   }
 
   const sections: string[] = [];
+  if (opts.machine) sections.push(renderMachineCard(opts.machine));
   const rulesText = renderRules(rules);
   if (rulesText) sections.push(rulesText);
   let memoryTokens = 0;
@@ -176,6 +205,7 @@ export interface McpSpecOptions {
 /** Command line that runs the bizzi-memory MCP server over stdio for this context. */
 export function mcpServerArgs(context: KnowledgeContext, dbPath: string): string[] {
   const args = [MCP_SERVER_ENTRY, '--db', dbPath, '--agent', context.agent, '--machine-id', context.machineId];
+  for (const tag of context.machineTags ?? []) args.push('--machine-tag', tag);
   if (context.projectId) args.push('--project-id', context.projectId);
   if (context.workspaceId) args.push('--workspace-id', context.workspaceId);
   if (context.sessionId) args.push('--session-id', context.sessionId);

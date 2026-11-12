@@ -120,7 +120,9 @@ export function decide(settings: Pick<KnowledgeSettings, 'policy' | 'projects'>,
     // §8: team-scope writes always go to review (even yours, until maintainers exist).
     decision = 'suggest';
   } else {
-    decision = policyTable(settings, input.projectId)[input.source][input.scope];
+    // A tag reaches every machine carrying it, so it takes global's row.
+    const level = input.scope === 'tag' ? 'global' : input.scope;
+    decision = policyTable(settings, input.projectId)[input.source][level];
   }
   return {
     decision,

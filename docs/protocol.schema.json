@@ -46,6 +46,15 @@
         "$ref": "#/$defs/result:machines.list"
       }
     },
+    "machine.set": {
+      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2): `tags` replaces the list, `description` replaces the text (`''` clears it). Emits `machine.updated`.",
+      "params": {
+        "$ref": "#/$defs/params:machine.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:machine.set"
+      }
+    },
     "agents.list": {
       "params": {
         "$ref": "#/$defs/params:agents.list"
@@ -2142,6 +2151,10 @@
         "level": {
           "$ref": "#/$defs/KnowledgeScopeLevel"
         },
+        "tag": {
+          "description": "`tag` scope: applies on every machine with this tag.",
+          "type": "string"
+        },
         "machineId": {
           "type": "string"
         },
@@ -2163,6 +2176,7 @@
       "type": "string",
       "enum": [
         "global",
+        "tag",
         "machine",
         "project",
         "workspace",
@@ -2229,10 +2243,15 @@
           "type": "boolean"
         },
         "tags": {
+          "description": "User-set labels (`gui`, `prod-access`, …); see `isMachineTag`. Set with `machine.set`.",
           "type": "array",
           "items": {
             "type": "string"
           }
+        },
+        "description": {
+          "description": "User-written paragraph about what the machine is for; part of the machine card (knowledge.md §9.2).",
+          "type": "string"
         },
         "online": {
           "type": "boolean"
@@ -2288,6 +2307,7 @@
         "subscribe",
         "unsubscribe",
         "machines.list",
+        "machine.set",
         "agents.list",
         "workspaces.list",
         "workspace.create",
@@ -2654,6 +2674,25 @@
             },
             "params": {
               "$ref": "#/$defs/params:machines.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "machine.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:machine.set"
             }
           }
         },
@@ -5685,6 +5724,27 @@
         }
       ]
     },
+    "params:machine.set": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "tags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "description": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
     "params:machines.list": {
       "$ref": "#/$defs/Empty"
     },
@@ -6595,6 +6655,17 @@
       },
       "required": [
         "item"
+      ]
+    },
+    "result:machine.set": {
+      "type": "object",
+      "properties": {
+        "machine": {
+          "$ref": "#/$defs/MachineInfo"
+        }
+      },
+      "required": [
+        "machine"
       ]
     },
     "result:machines.list": {

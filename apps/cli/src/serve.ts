@@ -119,6 +119,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
     ...(knowledge ? { prepareStart: knowledge.prepareStart } : {}),
     ...(extensions.length > 0 ? { extensions } : {}),
   });
+  knowledge?.bindMachine(() => node.machine);
   let server: BizziServer;
   try {
     server = await startServer(node, { host: values.host, port, token, logger });

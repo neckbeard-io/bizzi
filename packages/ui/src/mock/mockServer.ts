@@ -2,7 +2,7 @@
 // It speaks the real wire protocol through a WebSocket-like object, so the client code path is the same.
 // By default it plays a hub with two machines (this laptop online, server-a offline); `role: 'node'`
 // makes it a single node instead.
-import { BizziError, GLOBAL_CHANNEL, PROTOCOL_VERSION, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, PROTOCOL_VERSION, isMachineTag, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
 import type {
   AgentKind,
   ApprovalDecisionKind,
@@ -459,6 +459,25 @@ export class MockCore implements MockHost {
         return {};
       case 'machines.list':
         return { machines: this.machines().map((m) => ({ ...m })) };
+      case 'machine.set': {
+        const m = this.requireOnline(p.machineId);
+        const next: MachineInfo = { ...m };
+        if (p.tags !== undefined) {
+          if (!Array.isArray(p.tags)) throw new BizziError('bad_request', 'tags must be an array of strings');
+          const tags = [...new Set(p.tags.map((t) => String(t).trim().toLowerCase()))];
+          const bad = tags.find((t) => !isMachineTag(t));
+          if (bad !== undefined) throw new BizziError('bad_request', `invalid tag ${JSON.stringify(bad)}`);
+          next.tags = tags;
+        }
+        if (p.description !== undefined) {
+          const text = String(p.description).trim();
+          if (text) next.description = text;
+          else delete next.description;
+        }
+        this.machineMap.set(m.id, next);
+        this.emit(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...next } } });
+        return { machine: { ...next } };
+      }
       case 'workspaces.list': {
         // The hub answers from its replica, so offline machines still list their workspaces.
         const m = this.targetMachine(p.machineId);

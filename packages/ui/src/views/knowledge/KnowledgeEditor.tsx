@@ -6,7 +6,7 @@ import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
 import { useTargetMachineId } from '../../app/machine.ts';
 import { Button, Checkbox, ErrorText, Field, Input, Modal, Segmented, Select, Textarea } from '../../components/ui.tsx';
-import { KNOWLEDGE_AGENTS, MEMORY_KINDS, SCOPE_HELP, SCOPE_LEVELS, parseTags, projectOptions, scopeComplete } from '../../lib/knowledge.ts';
+import { KNOWLEDGE_AGENTS, MEMORY_KINDS, SCOPE_HELP, SCOPE_LEVELS, knownTags, parseTags, projectOptions, scopeComplete } from '../../lib/knowledge.ts';
 import type { ScopeContext } from '../../lib/knowledge.ts';
 
 export type EditorTarget = { mode: 'new'; type: 'rule' | 'memory' } | { mode: 'edit'; item: KnowledgeItemInfo };
@@ -27,6 +27,8 @@ export function KnowledgeEditor(props: { target: EditorTarget; onClose: () => vo
   const [body, setBody] = useState(editing?.body ?? '');
   const [level, setLevel] = useState<KnowledgeScopeLevel>(editing?.scope.level ?? 'global');
   const [scopeMachine, setScopeMachine] = useState(editing?.scope.machineId ?? machineId ?? '');
+  const tagOptions = useMemo(() => knownTags(ctx, [editing?.scope.tag]), [ctx, editing]);
+  const [scopeTag, setScopeTag] = useState(editing?.scope.tag ?? tagOptions[0] ?? '');
   const firstWs = Object.values(ctx.workspaces ?? {}).find((w) => w.machineId === machineId)?.id ?? '';
   const [scopeWorkspace, setScopeWorkspace] = useState(editing?.scope.workspaceId ?? firstWs);
   const projects = useMemo(() => projectOptions(ctx, [editing?.scope.projectId]), [ctx, editing]);
@@ -40,7 +42,9 @@ export function KnowledgeEditor(props: { target: EditorTarget; onClose: () => vo
   const levels = editing && !SCOPE_LEVELS.includes(editing.scope.level) ? [...SCOPE_LEVELS, editing.scope.level] : SCOPE_LEVELS;
 
   const scope: KnowledgeScope =
-    level === 'machine'
+    level === 'tag'
+      ? { level, tag: scopeTag.trim().toLowerCase() }
+      : level === 'machine'
       ? { level, machineId: scopeMachine }
       : level === 'workspace'
         ? { level, workspaceId: scopeWorkspace }
@@ -116,7 +120,21 @@ export function KnowledgeEditor(props: { target: EditorTarget; onClose: () => vo
             ))}
           </Select>
         </Field>
-        {level === 'machine' ? (
+        {level === 'tag' ? (
+          <Field label="Tag" hint={tagOptions.length ? undefined : 'No machine has a tag yet; set tags on a machine page, or type one.'}>
+            {tagOptions.length ? (
+              <Select value={scopeTag} onChange={(e) => setScopeTag(e.target.value)}>
+                {tagOptions.map((t) => (
+                  <option key={t} value={t}>
+                    {t}
+                  </option>
+                ))}
+              </Select>
+            ) : (
+              <Input value={scopeTag} onChange={(e) => setScopeTag(e.target.value)} placeholder="prod-access" spellCheck={false} autoCapitalize="off" />
+            )}
+          </Field>
+        ) : level === 'machine' ? (
           <Field label="Machine">
             <Select value={scopeMachine} onChange={(e) => setScopeMachine(e.target.value)}>
               {!scopeMachine ? <option value="">Choose a machine</option> : null}

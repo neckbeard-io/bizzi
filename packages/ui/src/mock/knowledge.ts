@@ -101,6 +101,16 @@ const SEED: Seed[] = [
     ageMin: 60 * 24 * 20,
   },
   {
+    id: 'k_prod_kubectl',
+    type: 'rule',
+    scope: { level: 'tag', tag: 'prod-access' },
+    title: 'Prod clusters: read-only kubectl, always pass --context',
+    body: 'get, describe, logs, top and events only. Never apply, edit, delete, exec or read Secrets.',
+    tags: ['k8s'],
+    source: { machineId: LAPTOP, via: 'ui' },
+    ageMin: 60 * 24 * 3,
+  },
+  {
     id: 'k_gui',
     type: 'memory',
     kind: 'reference',
@@ -206,7 +216,7 @@ const SEED: Seed[] = [
 ];
 
 const PRESETS = new Set(['trusting', 'balanced', 'strict']);
-const LEVELS = new Set<KnowledgeScopeLevel>(['global', 'machine', 'project', 'workspace', 'session', 'team']);
+const LEVELS = new Set<KnowledgeScopeLevel>(['global', 'tag', 'machine', 'project', 'workspace', 'session', 'team']);
 
 export class MockKnowledge implements MockModule {
   private readonly host: MockHost;
@@ -369,6 +379,6 @@ function scopeParam(v: unknown): KnowledgeScope | null {
   const s = v as Record<string, unknown>;
   if (typeof s.level !== 'string' || !LEVELS.has(s.level as KnowledgeScopeLevel)) throw new BizziError('bad_request', 'invalid scope');
   const out: KnowledgeScope = { level: s.level as KnowledgeScopeLevel };
-  for (const k of ['machineId', 'projectId', 'workspaceId', 'sessionId'] as const) if (typeof s[k] === 'string' && s[k]) out[k] = s[k] as string;
+  for (const k of ['tag', 'machineId', 'projectId', 'workspaceId', 'sessionId'] as const) if (typeof s[k] === 'string' && s[k]) out[k] = s[k] as string;
   return out;
 }

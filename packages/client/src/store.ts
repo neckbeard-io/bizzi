@@ -1129,6 +1129,23 @@ export class BizziStore {
     return settings;
   }
 
+  /** Set a machine's tags and/or description (knowledge.md §9); `machine.updated` follows. */
+  async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string }): Promise<MachineInfo> {
+    const { machineId, ...rest } = params;
+    const { machine } = await this.client.request('machine.set', { ...this.target(machineId), ...rest });
+    // Keep the hub's view of presence; only the user fields changed.
+    const prev = this.state.machines[machine.id];
+    const next: MachineInfo = prev ? { ...prev, tags: machine.tags } : machine;
+    if (prev) {
+      if (machine.description) next.description = machine.description;
+      else delete next.description;
+    }
+    const p: Partial<BizziState> = { machines: { ...this.state.machines, [machine.id]: next } };
+    if (this.state.machine?.id === machine.id) p.machine = next;
+    this.patch(p);
+    return next;
+  }
+
   async setOrchestrationSettings(params: { machineId?: string | null; workspaceId?: string; settings: Partial<OrchestrationSettings> }): Promise<OrchestrationSettings> {
     const t = this.target(params.machineId);
     const base = params.workspaceId ? { ...t, workspaceId: params.workspaceId } : t;

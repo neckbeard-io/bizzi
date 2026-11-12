@@ -10,9 +10,10 @@ import { useIsHub, useMachine, useMachineOnline, useTargetMachineId } from '../a
 import { Icon } from '../components/icons.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
-import { Badge, Button, Card, CopyButton, Empty, ErrorText, Spinner, cx } from '../components/ui.tsx';
+import { Badge, Button, Card, CopyButton, Empty, ErrorText, Field, Input, Spinner, Textarea, cx } from '../components/ui.tsx';
 import { WidgetRow } from '../components/Widget.tsx';
 import { machinePresence } from '../lib/format.ts';
+import { parseTags } from '../lib/knowledge.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, RESTART_POLICY_LABEL, UPDATE_POLICY_LABEL, pendingUpdatesLabel } from '../lib/states.ts';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
@@ -78,7 +79,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
     >
       {!online && machine ? <OfflineBanner machine={machine} /> : null}
       {agents ? <UnsupportedBanner agents={agents} machineName={name} /> : null}
-      {machine ? <MachineCard machine={machine} /> : null}
+      {machine ? <MachineCard machine={machine} online={online} /> : null}
       <WidgetRow placement="machine" machineId={machineId} className="mt-3 rounded-lg border border-border bg-panel px-4 py-2" />
 
       <MachineWorkspaces machineId={machineId} online={online} />
@@ -206,7 +207,7 @@ function Fact(props: { label: string; children: ReactNode }): ReactNode {
   );
 }
 
-function MachineCard(props: { machine: MachineInfo }): ReactNode {
+function MachineCard(props: { machine: MachineInfo; online: boolean }): ReactNode {
   const m = props.machine;
   return (
     <Card className="p-4">
@@ -227,9 +228,104 @@ function MachineCard(props: { machine: MachineInfo }): ReactNode {
         <Fact label="Power">{m.alwaysOn ? 'always on' : 'may sleep'}</Fact>
         <Fact label="Roles">{m.roles.join(', ')}</Fact>
         <Fact label="Version">{m.bizziVersion}</Fact>
-        <Fact label="Tags">{m.tags.length ? m.tags.join(', ') : '–'}</Fact>
       </div>
+      <MachinePurpose machine={m} online={props.online} />
     </Card>
+  );
+}
+
+/** Tags suggested from facts the node knows; tags like `prod-access` are yours to add (knowledge.md §9.1). */
+function suggestedTags(m: MachineInfo): string[] {
+  const out: string[] = [];
+  if (m.headful) out.push('gui');
+  if (m.alwaysOn) out.push('always-on');
+  return out.filter((t) => !m.tags.includes(t));
+}
+
+/** Tags and description: what the machine is for. Sessions get both in their machine card, and tag rules follow the tags. */
+function MachinePurpose(props: { machine: MachineInfo; online: boolean }): ReactNode {
+  const m = props.machine;
+  const store = useStore();
+  const [editing, setEditing] = useState(false);
+  const [tags, setTags] = useState('');
+  const [description, setDescription] = useState('');
+  const save = useAction(async () => {
+    await store.setMachine({ machineId: m.id, tags: parseTags(tags).map((t) => t.toLowerCase()), description });
+    setEditing(false);
+  });
+  const start = (): void => {
+    setTags(m.tags.join(', '));
+    setDescription(m.description ?? '');
+    setEditing(true);
+  };
+  const current = parseTags(tags).map((t) => t.toLowerCase());
+  const suggestions = suggestedTags({ ...m, tags: current });
+
+  if (!editing) {
+    return (
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="mb-1 flex flex-wrap items-center gap-1">
+              {m.tags.length ? (
+                m.tags.map((t) => (
+                  <Badge key={t}>
+                    <Icon name="tag" size={11} />
+                    {t}
+                  </Badge>
+                ))
+              ) : (
+                <span className="text-xs text-muted">No tags</span>
+              )}
+            </div>
+            {m.description ? (
+              <p className="text-sm whitespace-pre-wrap">{m.description}</p>
+            ) : (
+              <p className="text-xs text-muted">No description. Say what this machine is for; every session started here is told.</p>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" icon="edit" disabled={!props.online} onClick={start} title={props.online ? 'Edit tags and description' : 'The machine is offline'}>
+            Edit
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <form
+      className="mt-3 grid gap-3 border-t border-border pt-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        void save.run();
+      }}
+    >
+      <Field label="Tags" hint="Comma separated. Rules scoped to a tag apply on every machine that has it.">
+        <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="prod-access, gui" spellCheck={false} autoCapitalize="off" autoFocus />
+      </Field>
+      {suggestions.length ? (
+        <div className="-mt-1 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+          Suggested:
+          {suggestions.map((t) => (
+            <Button key={t} size="sm" variant="ghost" icon="plus" onClick={() => setTags(current.length ? `${current.join(', ')}, ${t}` : t)}>
+              {t}
+            </Button>
+          ))}
+        </div>
+      ) : null}
+      <Field label="What it's for" hint="Every session started on this machine gets this in its machine card.">
+        <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Work laptop with production access. Production investigations happen here." />
+      </Field>
+      <ErrorText error={save.error} />
+      <div className="flex justify-end gap-2">
+        <Button variant="ghost" onClick={() => setEditing(false)}>
+          Cancel
+        </Button>
+        <Button variant="primary" type="submit" busy={save.busy}>
+          Save
+        </Button>
+      </div>
+    </form>
   );
 }
 

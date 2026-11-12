@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import os from 'node:os';
+import { BizziError, MAX_MACHINE_DESCRIPTION, isMachineTag } from '@bizzi/protocol';
 import type { MachineInfo } from '@bizzi/protocol';
 
 export function detectOs(platform: string = process.platform): MachineInfo['os'] {
@@ -44,4 +45,56 @@ export function buildMachineInfo(opts: { id: string; name?: string; version: str
     roles: ['node'],
     bizziVersion: opts.version,
   };
+}
+
+/** The user-owned part of MachineInfo, persisted by the node (machine.set). */
+export interface MachineUserFields {
+  tags: string[];
+  description?: string;
+}
+
+/** Validate `machine.set` tags: an array of machine tags (see isMachineTag), lowercased, deduped, at most 32. */
+export function parseMachineTags(v: unknown): string[] {
+  if (!Array.isArray(v)) throw new BizziError('bad_request', 'tags must be an array of strings');
+  const out: string[] = [];
+  for (const raw of v) {
+    if (typeof raw !== 'string') throw new BizziError('bad_request', 'tags must be an array of strings');
+    const tag = raw.trim().toLowerCase();
+    if (!isMachineTag(tag)) {
+      throw new BizziError('bad_request', `invalid tag ${JSON.stringify(raw)}: use letters, digits, '.', '_' or '-' (at most 64)`);
+    }
+    if (!out.includes(tag)) out.push(tag);
+  }
+  if (out.length > 32) throw new BizziError('bad_request', 'at most 32 tags');
+  return out;
+}
+
+/** Validate a `machine.set` description: trimmed; '' clears it. */
+export function parseMachineDescription(v: unknown): string {
+  if (typeof v !== 'string') throw new BizziError('bad_request', 'description must be a string');
+  const text = v.trim();
+  if (text.length > MAX_MACHINE_DESCRIPTION) {
+    throw new BizziError('bad_request', `description is longer than ${MAX_MACHINE_DESCRIPTION} characters`);
+  }
+  return text;
+}
+
+/** Read persisted user fields (a JSON string from the node's meta table); bad data is ignored. */
+export function readMachineUserFields(json: string | undefined): MachineUserFields {
+  if (!json) return { tags: [] };
+  try {
+    const raw = JSON.parse(json) as { tags?: unknown; description?: unknown };
+    const tags = Array.isArray(raw.tags) ? raw.tags.filter(isMachineTag) : [];
+    const description = typeof raw.description === 'string' && raw.description ? raw.description : undefined;
+    return { tags, ...(description ? { description } : {}) };
+  } catch {
+    return { tags: [] };
+  }
+}
+
+/** Copy user fields onto a MachineInfo in place. */
+export function applyMachineUserFields(machine: MachineInfo, fields: MachineUserFields): void {
+  machine.tags = [...fields.tags];
+  if (fields.description) machine.description = fields.description;
+  else delete machine.description;
 }

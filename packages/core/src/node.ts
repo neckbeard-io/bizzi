@@ -22,7 +22,14 @@ import { BaselineTracker, baselinesExtension } from './baselines.ts';
 import { FsBrowser, MAX_COMPLETE_LIMIT, type BrowserOptions } from './browse.ts';
 import { EventBus, type EventListener } from './bus.ts';
 import { nullLogger } from './logger.ts';
-import { buildMachineInfo } from './machine.ts';
+import {
+  applyMachineUserFields,
+  buildMachineInfo,
+  parseMachineDescription,
+  parseMachineTags,
+  readMachineUserFields,
+  type MachineUserFields,
+} from './machine.ts';
 import { parseBudget } from './budget.ts';
 import { OrchestrationSettingsStore, Orchestrator } from './orchestration.ts';
 import { Restarts } from './restart.ts';
@@ -140,9 +147,13 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'fs.browse',
   'fs.complete',
   'fs.suggest',
+  'machine.set',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
+
+/** Meta key for the machine's user-owned fields (tags, description), which survive restarts. */
+const MACHINE_USER_META = 'machineUser';
 
 export interface Subscription {
   lastSeq: number;
@@ -195,6 +206,7 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       store.setMeta('machineId', machineId);
     }
     const machine = buildMachineInfo({ id: machineId, name: opts.machineName, version: opts.version });
+    applyMachineUserFields(machine, readMachineUserFields(store.getMeta(MACHINE_USER_META)));
     const machineJson = JSON.stringify(machine);
     if (store.getMeta('machineInfo') !== machineJson) {
       store.setMeta('machineInfo', machineJson);
@@ -443,6 +455,20 @@ class Node implements BizziNode {
     return {
       hello: () => ({ protocol: PROTOCOL_VERSION, serverVersion: this.version, machine: this.machine, role: 'node' }),
       'machines.list': () => ({ machines: [this.machine] }),
+      'machine.set': (p) => {
+        const cur = readMachineUserFields(this.#store.getMeta(MACHINE_USER_META));
+        const next: MachineUserFields = { tags: p.tags === undefined ? cur.tags : parseMachineTags(p.tags) };
+        const description = p.description === undefined ? cur.description : parseMachineDescription(p.description);
+        if (description) next.description = description;
+        this.#store.setMeta(MACHINE_USER_META, JSON.stringify(next));
+        applyMachineUserFields(this.machine, next);
+        const machineJson = JSON.stringify(this.machine);
+        if (this.#store.getMeta('machineInfo') !== machineJson) {
+          this.#store.setMeta('machineInfo', machineJson);
+          this.bus.append(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...this.machine } } });
+        }
+        return { machine: { ...this.machine, tags: [...this.machine.tags] } };
+      },
       'agents.list': async (p) => ({ agents: await this.registry.list(optBool(p, 'refresh') ?? false) }),
 
       'workspaces.list': () => ({ workspaces: ws.list() }),

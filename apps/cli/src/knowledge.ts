@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import type { PrepareStart } from '@bizzi/core';
 import type { KnowledgeStore } from '@bizzi/knowledge';
-import type { Logger } from '@bizzi/protocol';
+import type { Logger, MachineInfo } from '@bizzi/protocol';
 
 type KnowledgeModule = typeof import('@bizzi/knowledge');
 
@@ -12,8 +12,10 @@ type KnowledgeModule = typeof import('@bizzi/knowledge');
 export interface KnowledgeRuntime {
   /** The shared store, opened on first use (after the node, and its machine id, exists). */
   store(machineId: string): KnowledgeStore;
-  /** Session-start hook: scoped rules, the memory digest and the bizzi-memory MCP server. */
+  /** Session-start hook: the machine card, scoped rules, the memory digest and the bizzi-memory MCP server. */
   prepareStart: PrepareStart;
+  /** The node's machine (tags, description) for the card and tag rules; read at each session start. */
+  bindMachine(machine: () => MachineInfo): void;
   close(): void;
 }
 
@@ -31,19 +33,25 @@ export async function createKnowledgeRuntime(dataDir: string, logger: Logger): P
     store ??= new mod.KnowledgeStore({ path: join(dataDir, 'knowledge.db'), machineId, logger: logger.child({ component: 'knowledge' }) });
     return store;
   };
+  let machine: (() => MachineInfo) | undefined;
   return {
     store: open,
+    bindMachine(fn) {
+      machine = fn;
+    },
     prepareStart: (session, workspace) => {
       // Terminal sessions type into a TUI; they get no injected prompt or MCP server for now.
       if (session.mode !== 'structured') return {};
+      const m = machine?.();
       const context = {
         agent: session.agent,
         machineId: session.machineId,
+        ...(m && m.tags.length > 0 ? { machineTags: [...m.tags] } : {}),
         workspaceId: workspace.id,
         sessionId: session.id,
         ...(workspace.projectId ? { projectId: workspace.projectId } : {}),
       };
-      return mod.knowledgeForSession(context, { store: open(session.machineId) });
+      return mod.knowledgeForSession(context, { store: open(session.machineId), ...(m ? { machine: m } : {}) });
     },
     close() {
       store?.close();

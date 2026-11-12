@@ -205,17 +205,21 @@ Example: the laptop has production access (kube contexts, VPN, prod credentials)
 | Scope | Applies to | Example |
 |---|---|---|
 | `global` | every machine, every project | "Never add AI attribution to commits." |
-| `tag` *(new)* | every machine with that tag | `prod-access`: "Prod clusters: read-only kubectl, always pass `--context`." |
+| `tag` | every machine with that tag | `prod-access`: "Prod clusters: read-only kubectl, always pass `--context`." |
 | `machine` | one machine, every project | mac-mini: "Use the iPhone 17 simulator for UI checks; take screenshots of what you build." |
 | `project`, `workspace`, `session` | as before (§2.1) | |
 
-- **Tags** are user-set labels on a machine (`machine.tags`, already in the model; add a `machine.setTags` method and UI on the machine page). Suggested tags come from facts (`gui` when headful, `always-on`), but a tag like `prod-access` is yours to set: bizzi can't detect it.
+- **Tags** are user-set labels on a machine (`MachineInfo.tags`), set with `machine.set { tags?, description? }` from the machine page. A tag is lowercase letters, digits, `.`, `_` and `-` (at most 64 characters, at most 32 per machine). The node stores them and they survive restarts. The machine page suggests tags from facts (`gui` when headful, `always-on`), but a tag like `prod-access` is yours to set: bizzi can't detect it.
+- **Who writes tag items:** only you (Knowledge page, `knowledge.add` with `scope: { level: 'tag', tag }`). Agents see tag rules and memories but can't write at that scope, because a machine can have several tags and the agent can't know which one you mean. For the acceptance policy, `tag` uses the `global` row.
 - **Machine × project** ("on the mac mini, in acme, use the iPhone 17 simulator") is a `workspace` rule: a workspace is one project on one machine.
-- Order of injection, general first: global → tag → machine → project → workspace → session, with the existing line that more specific scopes override.
+- Order of injection, general first: global → tag → machine → project → workspace → session, with the existing line that more specific scopes override. Tag rules are grouped by tag name.
+- **Built (2026-11-11):** the `tag` scope in the store (schema v2 adds `machine_tag`; older databases migrate on open), visibility from the machine's tags (passed to the bizzi-memory MCP server as `--machine-tag`), `machine.set`, the tag picker in the knowledge editor, and tags and description on the machine page. Tags are read when a session starts, so a running session keeps the tags it started with.
 
 ### 9.2 Machine card (generated, not a rule)
 
-Every session gets a short generated block about where it runs, built from facts the node already has: machine name, OS, GUI or headless, always-on or sleeps, tags, and the user's one-paragraph machine description (a free-text field on the machine page). This answers "where am I?" without the user writing a rule, and keeps it current when facts change.
+Every session gets a short generated block about where it runs, built from facts the node already has: machine name, OS, GUI or headless, always-on, tags, and the user's one-paragraph machine description (a free-text field on the machine page, at most 2000 characters). This answers "where am I?" without the user writing a rule, and keeps it current when facts change.
+
+Built: `renderMachineCard` in `@bizzi/knowledge` puts it first in the launch-mode digest (`## This machine`, before the rules). It says "always on" only when the node reports it. The node never detects whether a machine sleeps (`alwaysOn` is false unless set), so the card doesn't claim that it does.
 
 ### 9.3 Capabilities: what a machine is for
 
@@ -235,7 +239,7 @@ Today every node has its own knowledge store, so a global rule written on the la
 
 ### 9.5 Delivery
 
-- **Launch mode** (sessions bizzi starts): the resolver already includes global and machine items; add `tag` and the machine card. Injected via `systemPrompt.append`.
+- **Launch mode** (sessions bizzi starts): global, tag, machine and narrower items, plus the machine card, injected via `systemPrompt.append`. Built.
 - **Native sessions** (plain `claude` in a terminal; opt-in): project global + tag + machine rules into a managed block (§4.2) in the machine's user-level instruction file, so they apply outside bizzi too. The file is **`~/.claude/CLAUDE.md`**: Claude reads it, and OpenCode uses it as its global file when there's no `~/.config/opencode/AGENTS.md`. `~/.claude/AGENTS.md` isn't a documented user-level file for Claude (checked 2026-11-11), so bizzi doesn't rely on it. The user's own text outside the block is never touched.
 - **Where you author:** global and tag rules on the Knowledge page; machine rules and the machine description on the machine page.
 

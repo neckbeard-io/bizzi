@@ -94,7 +94,7 @@ export interface KnowledgeStoreOptions {
   disableFts?: boolean;
 }
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS items (
   id TEXT PRIMARY KEY,
   type TEXT NOT NULL,
   scope_level TEXT NOT NULL,
+  machine_tag TEXT,
   machine_id TEXT,
   project_id TEXT,
   workspace_id TEXT,
@@ -223,6 +224,7 @@ export class KnowledgeStore {
     if (opts.path !== ':memory:') this.#db.exec('PRAGMA journal_mode = WAL');
     this.#db.exec('PRAGMA foreign_keys = ON');
     this.#db.exec(SCHEMA);
+    this.#migrate();
     let fts = false;
     if (!opts.disableFts) {
       try {
@@ -233,7 +235,9 @@ export class KnowledgeStore {
       }
     }
     this.ftsAvailable = fts;
-    this.#db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run('schema_version', String(SCHEMA_VERSION));
+    this.#db
+      .prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
+      .run('schema_version', String(SCHEMA_VERSION));
     this.#syncClock();
   }
 
@@ -536,6 +540,13 @@ export class KnowledgeStore {
 
   // ---- internals -----------------------------------------------------------------------------
 
+  /** Bring a database from an older schema up to date (columns only; CREATE IF NOT EXISTS covers tables). */
+  #migrate(): void {
+    const cols = new Set((this.#db.prepare('PRAGMA table_info(items)').all() as Row[]).map((r) => String(r.name)));
+    // v2: `tag` scope.
+    if (!cols.has('machine_tag')) this.#db.exec('ALTER TABLE items ADD COLUMN machine_tag TEXT');
+  }
+
   #syncClock(): void {
     const h = this.maxHlc();
     if (h) this.#clock.observe(h);
@@ -552,6 +563,7 @@ export class KnowledgeStore {
     const values: SQLInputValue[] = [
       item.type,
       s.level,
+      s.tag ?? null,
       s.machineId ?? null,
       s.projectId ?? null,
       s.workspaceId ?? null,
@@ -575,16 +587,16 @@ export class KnowledgeStore {
     if (mode === 'insert') {
       this.#db
         .prepare(
-          `INSERT INTO items(type, scope_level, machine_id, project_id, workspace_id, session_id, team_id, applies_to,
-             kind, title, body, tags, source, source_session_id, status, supersedes, notice_pending, content_hash,
-             created_at, updated_at, hlc, id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          `INSERT INTO items(type, scope_level, machine_tag, machine_id, project_id, workspace_id, session_id, team_id,
+             applies_to, kind, title, body, tags, source, source_session_id, status, supersedes, notice_pending,
+             content_hash, created_at, updated_at, hlc, id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(...values, item.id);
     } else {
       this.#db
         .prepare(
-          `UPDATE items SET type = ?, scope_level = ?, machine_id = ?, project_id = ?, workspace_id = ?, session_id = ?,
+          `UPDATE items SET type = ?, scope_level = ?, machine_tag = ?, machine_id = ?, project_id = ?, workspace_id = ?, session_id = ?,
              team_id = ?, applies_to = ?, kind = ?, title = ?, body = ?, tags = ?, source = ?, source_session_id = ?,
              status = ?, supersedes = ?, notice_pending = ?, content_hash = ?, created_at = ?, updated_at = ?, hlc = ?
            WHERE id = ?`,
@@ -598,13 +610,14 @@ function visibleClause(ctx: KnowledgeContext, t: string): { sql: string; params:
   const sql = `${t}.status = 'active'
     AND (${t}.applies_to IS NULL OR EXISTS (SELECT 1 FROM json_each(${t}.applies_to) WHERE json_each.value = ?))
     AND (${t}.scope_level = 'global'
+      OR (${t}.scope_level = 'tag' AND ${t}.machine_tag IN (SELECT value FROM json_each(?)))
       OR (${t}.scope_level = 'machine' AND ${t}.machine_id = ?)
       OR (${t}.scope_level = 'project' AND ${t}.project_id = ?)
       OR (${t}.scope_level = 'workspace' AND ${t}.workspace_id = ?)
       OR (${t}.scope_level = 'session' AND ${t}.session_id = ?))`;
   return {
     sql,
-    params: [ctx.agent, ctx.machineId, ctx.projectId ?? null, ctx.workspaceId ?? null, ctx.sessionId ?? null],
+    params: [ctx.agent, JSON.stringify(ctx.machineTags ?? []), ctx.machineId, ctx.projectId ?? null, ctx.workspaceId ?? null, ctx.sessionId ?? null],
   };
 }
 
@@ -637,6 +650,7 @@ function validateNew(item: Pick<NewKnowledgeItem, 'type' | 'title' | 'body' | 's
 
 function rowToItem(r: Row): KnowledgeItem {
   const scope: KnowledgeScope = { level: String(r.scope_level) as ScopeLevel };
+  if (r.machine_tag != null) scope.tag = String(r.machine_tag);
   if (r.machine_id != null) scope.machineId = String(r.machine_id);
   if (r.project_id != null) scope.projectId = String(r.project_id);
   if (r.workspace_id != null) scope.workspaceId = String(r.workspace_id);

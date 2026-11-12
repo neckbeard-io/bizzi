@@ -6,14 +6,21 @@ import type { KnowledgeStore } from './store.ts';
 import type { KnowledgeContext, KnowledgeItem, SessionScopeLevel } from './types.ts';
 import { SCOPE_SPECIFICITY } from './types.ts';
 
-/** Visible active rules, general first: global, machine, project, workspace, session; oldest first within a level. */
+/**
+ * Visible active rules, general first: global, tag, machine, project, workspace, session; tag rules
+ * grouped by tag name; oldest first within a group.
+ */
 export function resolveRules(store: KnowledgeStore, ctx: KnowledgeContext): KnowledgeItem[] {
   return orderRules(store.visible(ctx, 'rule'));
 }
 
 export function orderRules(rules: KnowledgeItem[]): KnowledgeItem[] {
+  const tag = (i: KnowledgeItem) => i.scope.tag ?? '';
   return [...rules].sort(
-    (a, b) => SCOPE_SPECIFICITY[a.scope.level] - SCOPE_SPECIFICITY[b.scope.level] || compareHlc(a.hlc, b.hlc),
+    (a, b) =>
+      SCOPE_SPECIFICITY[a.scope.level] - SCOPE_SPECIFICITY[b.scope.level] ||
+      (tag(a) < tag(b) ? -1 : tag(a) > tag(b) ? 1 : 0) ||
+      compareHlc(a.hlc, b.hlc),
   );
 }
 

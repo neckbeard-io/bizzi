@@ -6,7 +6,7 @@ import { useAction } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { SectionTitle } from '../../components/layout.tsx';
 import { Card, ErrorText, Select, Spinner, cx } from '../../components/ui.tsx';
-import { PRESETS, SCOPE_HELP, SCOPE_LEVELS } from '../../lib/knowledge.ts';
+import { AGENT_SCOPE_LEVELS, PRESETS, SCOPE_HELP } from '../../lib/knowledge.ts';
 
 /** Acceptance preset (what goes live vs. into the inbox) and the default scope for agent writes. */
 export function KnowledgeSettings(): ReactNode {
@@ -97,13 +97,13 @@ export function KnowledgeSettings(): ReactNode {
           onChange={(e) => void save.run({ defaultAgentScope: e.target.value as KnowledgeScopeLevel })}
           aria-label="Default agent scope"
         >
-          {SCOPE_LEVELS.map((l) => (
+          {AGENT_SCOPE_LEVELS.map((l) => (
             <option key={l} value={l}>
               {l}
               {l === 'project' ? ' (recommended)' : ''}
             </option>
           ))}
-          {!SCOPE_LEVELS.includes(settings.defaultAgentScope) ? <option value={settings.defaultAgentScope}>{settings.defaultAgentScope}</option> : null}
+          {!AGENT_SCOPE_LEVELS.includes(settings.defaultAgentScope) ? <option value={settings.defaultAgentScope}>{settings.defaultAgentScope}</option> : null}
         </Select>
       </Card>
       <ErrorText error={save.error} className="mt-2" />

@@ -7,6 +7,7 @@ import {
   cardSummary,
   filterByAgent,
   groupByScope,
+  knownTags,
   matchesAgent,
   parseTags,
   projectOptions,
@@ -70,6 +71,19 @@ test('scope labels resolve names and fall back to ids', () => {
   assert.equal(scopeLabel({ level: 'project', projectId: 'p_acme' }, CTX), 'project · acme-shop');
   assert.equal(scopeLabel({ level: 'project', projectId: 'p_other' }, CTX), 'project · other');
   assert.equal(scopeLabel({ level: 'session', sessionId: 's_1' }, CTX), 'session · Fix it');
+  assert.equal(scopeLabel({ level: 'tag', tag: 'prod-access' }, CTX), 'tag · prod-access');
+});
+
+test('tag scope: retarget uses the source machine\'s first tag; known tags across machines', () => {
+  const tagged: ScopeContext = { ...CTX, machines: { ...CTX.machines, m_a: { ...machine('m_a', 'laptop'), tags: ['prod-access', 'gui'] } } };
+  assert.deepEqual(retargetScope(item({}), 'tag', tagged), { level: 'tag', tag: 'prod-access' });
+  assert.equal(retargetScope(item({}), 'tag', CTX), null);
+  const own = item({ scope: { level: 'tag', tag: 'gui' } });
+  assert.deepEqual(retargetScope(own, 'tag', CTX), { level: 'tag', tag: 'gui' });
+  assert.equal(scopeComplete({ level: 'tag' }), false);
+  assert.equal(scopeComplete({ level: 'tag', tag: 'gui' }), true);
+  assert.equal(sameScope({ level: 'tag', tag: 'a' }, { level: 'tag', tag: 'b' }), false);
+  assert.deepEqual(knownTags(tagged, ['zeta', undefined, 'gui']), ['gui', 'prod-access', 'zeta']);
 });
 
 test('retargetScope fills ids from the item scope, then its source session', () => {

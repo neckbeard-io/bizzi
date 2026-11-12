@@ -6,28 +6,34 @@ import type { AgentKind } from '@bizzi/protocol';
 export type KnowledgeType = 'rule' | 'memory';
 export const KNOWLEDGE_TYPES: readonly KnowledgeType[] = ['rule', 'memory'];
 
-/** `team` is reserved: accepted by the store, never visible to sessions yet, always reviewed. */
-export type ScopeLevel = 'global' | 'machine' | 'project' | 'workspace' | 'session' | 'team';
-export const SCOPE_LEVELS: readonly ScopeLevel[] = ['global', 'machine', 'project', 'workspace', 'session', 'team'];
-/** Scope levels an agent session can see and write today. */
-export type SessionScopeLevel = Exclude<ScopeLevel, 'team'>;
+/**
+ * `tag` applies on every machine with that tag (§9.1); sessions see it, but only you write it.
+ * `team` is reserved: accepted by the store, never visible to sessions yet, always reviewed.
+ */
+export type ScopeLevel = 'global' | 'tag' | 'machine' | 'project' | 'workspace' | 'session' | 'team';
+export const SCOPE_LEVELS: readonly ScopeLevel[] = ['global', 'tag', 'machine', 'project', 'workspace', 'session', 'team'];
+/** Scope levels an agent session can write (and the rows of the acceptance policy). */
+export type SessionScopeLevel = Exclude<ScopeLevel, 'team' | 'tag'>;
 export const SESSION_SCOPE_LEVELS: readonly SessionScopeLevel[] = ['global', 'machine', 'project', 'workspace', 'session'];
 
 /**
  * Specificity used for rule ordering and memory ranking. Higher = more specific.
- * Rules conflict by specificity: session > workspace > project > machine > global.
+ * Rules conflict by specificity: session > workspace > project > machine > tag > global.
  */
 export const SCOPE_SPECIFICITY: Readonly<Record<ScopeLevel, number>> = {
   global: 0,
   team: 0,
-  machine: 1,
-  project: 2,
-  workspace: 3,
-  session: 4,
+  tag: 1,
+  machine: 2,
+  project: 3,
+  workspace: 4,
+  session: 5,
 };
 
 export interface KnowledgeScope {
   level: ScopeLevel;
+  /** `tag` scope: the machine tag it applies to. */
+  tag?: string;
   machineId?: string;
   projectId?: string;
   workspaceId?: string;
@@ -89,6 +95,8 @@ export interface KnowledgeItem {
 export interface KnowledgeContext {
   agent: AgentKind;
   machineId: string;
+  /** The machine's tags (sees `tag` items for these). */
+  machineTags?: string[];
   projectId?: string;
   workspaceId?: string;
   sessionId?: string;
