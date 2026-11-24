@@ -27,6 +27,7 @@ import type {
   OrchestrationSettings,
   QuestionAnswers,
   RestartPolicy,
+  RouteSuggestion,
   SecretInfo,
   SessionEvent,
   SessionInfo,
@@ -1179,6 +1180,14 @@ export class BizziStore {
   async deleteSecret(params: { machineId?: string | null; agent: AgentKind; name: string }): Promise<void> {
     const { machineId, ...rest } = params;
     await this.client.request('agent.deleteSecret', { ...this.target(machineId), ...rest });
+  }
+
+  // ---------------------------------------------------------------- routing
+
+  /** One-pane mode (spec §11.2): where `text` should run. Through a hub: across every online machine. */
+  async suggestRoute(text: string): Promise<RouteSuggestion> {
+    const { suggestion } = await this.client.request('route.suggest', { text });
+    return suggestion;
   }
 
   // ---------------------------------------------------------------- knowledge

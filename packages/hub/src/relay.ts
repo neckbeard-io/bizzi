@@ -23,6 +23,7 @@ import {
   type WidgetValue,
   type WorkspaceInfo,
 } from '@bizzi/protocol';
+import { Router, remoteScorers } from '@bizzi/routing';
 import type { Auth } from './auth.ts';
 import type { HubBus } from './bus.ts';
 import { KnowledgeSync } from './knowledge-sync.ts';
@@ -58,6 +59,8 @@ export interface RelayOptions {
   version: string;
   /** Public base URL (https://bizzi.example.com), used for pairUrl / clientUrl. */
   publicUrl?: string;
+  /** One-pane routing (spec §11.2); default: explicit tokens only. */
+  router?: Router;
 }
 
 export class Relay {
@@ -69,6 +72,8 @@ export class Relay {
   readonly machine: MachineInfo;
   /** Knowledge replication between the linked nodes (knowledge.md §9.4). */
   readonly knowledge: KnowledgeSync;
+  /** Routes prompts across every online machine (`route.suggest`). */
+  readonly router: Router;
   publicUrl?: string;
   readonly #links = new Map<string, LinkHandle>();
   readonly #clients = new Set<ClientHandle>();
@@ -81,6 +86,7 @@ export class Relay {
     this.logger = o.logger;
     this.version = o.version;
     this.knowledge = new KnowledgeSync({ store: o.store, logger: o.logger });
+    this.router = o.router ?? new Router({ logger: o.logger });
     if (o.publicUrl) this.publicUrl = o.publicUrl.replace(/\/+$/, '');
     let hubId = this.store.getMeta('hubId');
     if (!hubId) {
@@ -372,6 +378,18 @@ export class Relay {
       }
       case 'usage.list':
         return { accounts: this.listUsage() };
+      // The hub is the one place that knows every machine, so it routes (spec §11.2); never relayed.
+      case 'route.suggest': {
+        const machines = this.listMachines();
+        // Without a classifier of its own the hub borrows a machine's: the model may be reachable only from there.
+        const remote = this.router.backend ? [] : remoteScorers(machines, (machineId, params) => this.#scoreOn(machineId, params), this.router.via);
+        const suggestion = await this.router.suggest(
+          p.text,
+          { machines, workspaces: this.store.listWorkspaces(), sessions: this.store.listSessions({}) },
+          { remote },
+        );
+        return { suggestion };
+      }
       case 'widgets.list': {
         const machineId = this.#optMachine(p);
         if (!machineId) return { widgets: this.store.listWidgets() };
@@ -469,6 +487,13 @@ export class Relay {
     const all = this.store.listMachines();
     if (all.length === 1) return all[0]!.info.id;
     throw new BizziError('bad_request', 'machineId is required when talking to a hub');
+  }
+
+  /** One `route.score` on a machine's node, for a borrowed routing classifier. */
+  #scoreOn(machineId: string, params: { text: string; options: string[] }): Promise<unknown> {
+    const link = this.#links.get(machineId);
+    if (!link) return Promise.reject(new BizziError('machine_offline', `machine ${machineId} is offline`));
+    return link.request('route.score', { ...params, machineId });
   }
 
   #optMachine(p: Record<string, unknown>): string | undefined {

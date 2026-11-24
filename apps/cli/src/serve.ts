@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
+import { createRoutingExtension, routerOptionsFromEnv, type RouterOptions } from '@bizzi/routing';
 import { loadAdapters } from './adapters.ts';
 import { createKnowledgeRuntime } from './knowledge.ts';
 import { startHubLink } from './link.ts';
@@ -29,6 +30,10 @@ export const SERVE_HELP = `Usage: bizzi serve [options]
   --log-level <level>  debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
   --connect <url>      link to a hub (default: $BIZZI_HUB_URL, else the URL saved by "bizzi pair");
                        with no saved credential, $BIZZI_PAIR_CODE pairs on first start
+
+Routing (route.suggest over this machine's workspaces): BIZZI_ROUTER_URL, BIZZI_ROUTER_MODEL and the
+other BIZZI_ROUTER_* variables, as for "bizzi hub serve". The model only has to be reachable from this
+machine; a hub without a classifier of its own borrows this one (route.score).
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
 SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting.`;
@@ -108,7 +113,15 @@ export async function serve(argv: string[], version: string): Promise<void> {
 
   // ---- agent-to-agent MCP tools (@bizzi/orchestration), on a loopback port of their own
   const orchestration = values['no-agents-mcp'] ? undefined : await loadOrchestration(logger);
-  const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : [])];
+  // ---- one-pane routing among this machine's workspaces (a hub routes across machines itself)
+  let routerOpts: RouterOptions;
+  try {
+    routerOpts = routerOptionsFromEnv();
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+  const routing = createRoutingExtension({ ...routerOpts, logger: logger.child({ component: 'router' }) });
+  const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : []), routing];
 
   const node = await createNode({
     dataDir,

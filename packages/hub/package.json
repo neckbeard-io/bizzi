@@ -13,6 +13,7 @@
   "dependencies": {
     "@bizzi/core": "*",
     "@bizzi/protocol": "*",
+    "@bizzi/routing": "*",
     "ws": "^8.22.1"
   },
   "devDependencies": {

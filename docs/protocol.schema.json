@@ -521,6 +521,24 @@
         "$ref": "#/$defs/result:knowledge.sync.push"
       }
     },
+    "route.suggest": {
+      "description": "Where should this prompt run? On a hub: across every online machine. On a node: its own workspaces. Explicit `@machine`, `#workspace` and `/agent` tokens win; otherwise the configured logprob classifier scores the targets. Read-only: nothing is started.",
+      "params": {
+        "$ref": "#/$defs/params:route.suggest"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.suggest"
+      }
+    },
+    "route.score": {
+      "description": "One option-logit readout through this machine's classifier (`MachineInfo.routing`). A hub without a classifier of its own borrows a machine's this way: the model only has to be reachable from that machine, not run on it. `probabilities` has one entry per option, normalized over the letters.",
+      "params": {
+        "$ref": "#/$defs/params:route.score"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.score"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -2422,6 +2440,22 @@
         "lastSeenAt": {
           "description": "Set by the hub: last time the machine's node was connected.",
           "type": "string"
+        },
+        "routing": {
+          "description": "This machine's node can reach a routing classifier (`BIZZI_ROUTER_URL`; the model may run elsewhere on its network). A hub without one of its own borrows it with `route.score`.",
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "maxOptions": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "model",
+            "maxOptions"
+          ]
         }
       },
       "required": [
@@ -2517,6 +2551,8 @@
         "knowledge.settings.set",
         "knowledge.sync.pull",
         "knowledge.sync.push",
+        "route.suggest",
+        "route.score",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -3909,6 +3945,44 @@
               "type": "string"
             },
             "method": {
+              "const": "route.suggest"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.suggest"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.score"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.score"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "pairing.create"
             },
             "params": {
@@ -4096,6 +4170,109 @@
         "when-idle",
         "ask",
         "manual"
+      ]
+    },
+    "RouteCandidate": {
+      "type": "object",
+      "properties": {
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "label": {
+          "description": "\"laptop · acme-shop\"",
+          "type": "string"
+        },
+        "probability": {
+          "description": "0–1. A logprob readout for `classifier`; 1 for `explicit` and `single`.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "machineId",
+        "workspaceId",
+        "label",
+        "probability"
+      ]
+    },
+    "RouteSuggestion": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.",
+          "type": "string",
+          "enum": [
+            "explicit",
+            "single",
+            "classifier",
+            "none"
+          ]
+        },
+        "candidates": {
+          "description": "Best first, at most 3: the choices to offer when asking. Empty when nothing decided.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteCandidate"
+          }
+        },
+        "confidence": {
+          "description": "1 − entropy / ln(N) over the targets scored; 1 for explicit and single.",
+          "type": "number"
+        },
+        "confident": {
+          "description": "confidence ≥ the router's threshold: send without asking.",
+          "type": "boolean"
+        },
+        "agent": {
+          "description": "Agent named with `/agent` in the text.",
+          "$ref": "#/$defs/AgentKind"
+        },
+        "text": {
+          "description": "The prompt with the routing tokens it used removed.",
+          "type": "string"
+        },
+        "offered": {
+          "description": "Targets offered to the classifier (online machines, at most the backend's option limit).",
+          "type": "number"
+        },
+        "classifier": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "via": {
+              "description": "The machine whose classifier the hub borrowed (`route.score`); absent when the router's own scored.",
+              "type": "string"
+            },
+            "ms": {
+              "type": "number"
+            },
+            "letterMass": {
+              "description": "Share of the next-token probability that fell on option letters (low = the model wanted to say something else).",
+              "type": "number"
+            }
+          },
+          "required": [
+            "model",
+            "ms",
+            "letterMass"
+          ]
+        },
+        "note": {
+          "description": "Why nothing was decided: no classifier, its error, several matches, or a token problem (\"vps is offline\", \"no workspace matches @mac-mini and #bizzi\").",
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "candidates",
+        "confidence",
+        "confident",
+        "text",
+        "offered"
       ]
     },
     "SecretInfo": {
@@ -6103,6 +6280,42 @@
         "questionId"
       ]
     },
+    "params:route.score": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "text",
+            "options"
+          ]
+        }
+      ]
+    },
+    "params:route.suggest": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ]
+    },
     "params:session.create": {
       "type": "object",
       "properties": {
@@ -7013,6 +7226,43 @@
     },
     "result:question.respond": {
       "$ref": "#/$defs/Empty"
+    },
+    "result:route.score": {
+      "type": "object",
+      "properties": {
+        "probabilities": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "letterMass": {
+          "type": "number"
+        },
+        "ms": {
+          "type": "number"
+        },
+        "model": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "probabilities",
+        "letterMass",
+        "ms",
+        "model"
+      ]
+    },
+    "result:route.suggest": {
+      "type": "object",
+      "properties": {
+        "suggestion": {
+          "$ref": "#/$defs/RouteSuggestion"
+        }
+      },
+      "required": [
+        "suggestion"
+      ]
     },
     "result:session.create": {
       "type": "object",

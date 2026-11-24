@@ -6,6 +6,7 @@ import { parseArgs } from 'node:util';
 import { createJsonLogger, isLogLevel } from '@bizzi/core';
 import { Auth, HubStore, startHub, type HubOptions } from '@bizzi/hub';
 import type { DeviceKind } from '@bizzi/protocol';
+import { routerOptionsFromEnv } from '@bizzi/routing';
 import { resolveDir, UsageError } from './util.ts';
 
 export const HUB_HELP = `Usage: bizzi hub <command> [options]
@@ -22,6 +23,10 @@ bizzi hub serve [options]
   --ui-dir <dir>        serve a built UI at / (default: $BIZZI_UI_DIR)
   --log-level <level>   debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
   Push: set BIZZI_NTFY_URL (ntfy topic URL) and optionally BIZZI_NTFY_TOKEN.
+  Routing: set BIZZI_ROUTER_URL and BIZZI_ROUTER_MODEL (an OpenAI-compatible endpoint that returns
+  logprobs), optionally BIZZI_ROUTER_API_KEY, BIZZI_ROUTER_BODY (JSON) and BIZZI_ROUTER_THRESHOLD.
+  Without a URL the hub borrows the classifier of an online node that has one (always-on first);
+  BIZZI_ROUTER_VIA=<machine> names the one to try first.
   On first start (no devices yet) a setup code is printed to stderr and written to <data-dir>/setup-code.
 
 bizzi hub code [options]
@@ -101,6 +106,13 @@ async function hubServe(argv: string[], version: string): Promise<void> {
     opts.ntfy = { url: process.env.BIZZI_NTFY_URL };
     if (process.env.BIZZI_NTFY_TOKEN) opts.ntfy.token = process.env.BIZZI_NTFY_TOKEN;
   }
+  try {
+    opts.router = routerOptionsFromEnv();
+  } catch (err) {
+    throw new UsageError((err as Error).message);
+  }
+  if (opts.router.backend) logger.log('info', 'routing classifier enabled', { url: opts.router.backend.url, model: opts.router.backend.model });
+  else logger.log('info', "routing borrows a node's classifier when one is online", opts.router.via ? { via: opts.router.via } : {});
   const server = await startHub(opts);
   process.stdout.write(
     JSON.stringify({ event: 'hub-ready', url: server.url, clientUrl: server.clientUrl, nodeUrl: server.nodeUrl, pid: process.pid }) + '\n',

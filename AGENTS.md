@@ -14,6 +14,7 @@ packages/
   pty/               @bizzi/pty           node-pty terminal host + terminal-mode adapter (agy, shell, any TUI)
   knowledge/         @bizzi/knowledge     rules + memory store, resolver, policy, MCP server
   orchestration/     @bizzi/orchestration bizzi-agents MCP tools for agent-to-agent helpers (loopback HTTP)
+  routing/           @bizzi/routing       one-pane routing: explicit tokens + option-logit classifier (route.suggest)
   provision/         @bizzi/provision     ADE detection, install/login recipes
   services/          @bizzi/services      node extensions: provisioning, secrets, login, knowledge methods
   hub/               @bizzi/hub           hub role: relay, replica, routing, device pairing/auth; node→hub link

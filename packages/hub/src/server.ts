@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import { extname, join, normalize, resolve, sep } from 'node:path';
 import type { Duplex } from 'node:stream';
 import { BizziError, type Logger, type PairResponse } from '@bizzi/protocol';
+import { Router, type RouterOptions } from '@bizzi/routing';
 import { WebSocketServer } from 'ws';
 import { Auth, RateLimitedError, type AuthOptions } from './auth.ts';
 import { HubBus } from './bus.ts';
@@ -37,6 +38,8 @@ export interface HubOptions {
   maxBufferedBytes?: number;
   /** Serve a built UI (index.html + assets) from this directory at `/`. */
   uiDir?: string;
+  /** One-pane routing (spec §11.2): the logprob classifier and threshold. Default: explicit tokens only. */
+  router?: RouterOptions;
   /** ntfy push notifications. */
   ntfy?: { url: string; token?: string; debounceMs?: number; minTurnMs?: number; fetch?: typeof fetch };
   /** Called with a freshly issued setup code (default: logged at warn level). */
@@ -69,7 +72,15 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
   try {
     const bus = new HubBus(store, logger.child({ component: 'bus' }));
     const auth = new Auth(store, opts.auth);
-    const relay = new Relay({ store, bus, auth, logger, version: opts.version, ...(opts.publicUrl ? { publicUrl: opts.publicUrl } : {}) });
+    const relay = new Relay({
+      store,
+      bus,
+      auth,
+      logger,
+      version: opts.version,
+      router: new Router({ ...opts.router, logger: logger.child({ component: 'router' }) }),
+      ...(opts.publicUrl ? { publicUrl: opts.publicUrl } : {}),
+    });
 
     const setupCode = auth.issueSetupCode();
     if (setupCode) {

@@ -35,6 +35,11 @@ export interface MachineInfo {
   bizziVersion: string;
   /** Set by the hub: last time the machine's node was connected. */
   lastSeenAt?: string;
+  /**
+   * This machine's node can reach a routing classifier (`BIZZI_ROUTER_URL`; the model may run elsewhere
+   * on its network). A hub without one of its own borrows it with `route.score`.
+   */
+  routing?: { model: string; maxOptions: number };
 }
 
 /** A machine tag: lowercase letters, digits, `.`, `_` and `-`, starting with a letter or digit, at most 64 characters. */
@@ -452,6 +457,49 @@ export interface KnowledgeRecord {
   updatedAt: string;
   /** Hybrid logical clock of the last change: `<15-digit ms>-<6-digit counter>-<machine id>`. */
   hlc: string;
+}
+
+// ---- routing (spec §11.2: one-pane mode decides where a prompt runs)
+
+export interface RouteCandidate {
+  machineId: string;
+  workspaceId: string;
+  /** "laptop · acme-shop" */
+  label: string;
+  /** 0–1. A logprob readout for `classifier`; 1 for `explicit` and `single`. */
+  probability: number;
+}
+
+export interface RouteSuggestion {
+  /**
+   * explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must
+   * pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists ·
+   * classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or
+   * the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.
+   */
+  source: 'explicit' | 'single' | 'classifier' | 'none';
+  /** Best first, at most 3: the choices to offer when asking. Empty when nothing decided. */
+  candidates: RouteCandidate[];
+  /** 1 − entropy / ln(N) over the targets scored; 1 for explicit and single. */
+  confidence: number;
+  /** confidence ≥ the router's threshold: send without asking. */
+  confident: boolean;
+  /** Agent named with `/agent` in the text. */
+  agent?: AgentKind;
+  /** The prompt with the routing tokens it used removed. */
+  text: string;
+  /** Targets offered to the classifier (online machines, at most the backend's option limit). */
+  offered: number;
+  classifier?: {
+    model: string;
+    /** The machine whose classifier the hub borrowed (`route.score`); absent when the router's own scored. */
+    via?: string;
+    ms: number;
+    /** Share of the next-token probability that fell on option letters (low = the model wanted to say something else). */
+    letterMass: number;
+  };
+  /** Why nothing was decided: no classifier, its error, several matches, or a token problem ("vps is offline", "no workspace matches @mac-mini and #bizzi"). */
+  note?: string;
 }
 
 // ---- hub: devices and pairing

@@ -55,6 +55,8 @@ export interface NodeExtension {
   stop?(): void | Promise<void>;
   /** Runs after NodeOptions.prepareStart (and earlier extensions) when an adapter session starts; results are merged. */
   prepareStart?: PrepareStart;
+  /** Add what this extension provides to the machine's MachineInfo (e.g. `routing`), before it's published. */
+  describeMachine?(machine: MachineInfo): void;
 }
 
 export interface ExtensionContext {
@@ -105,6 +107,8 @@ const UNIMPLEMENTED = [
   'knowledge.settings.set',
   'knowledge.sync.pull',
   'knowledge.sync.push',
+  'route.suggest',
+  'route.score',
   'pairing.create',
   'devices.list',
   'device.revoke',
@@ -145,6 +149,7 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'knowledge.settings.set',
   'knowledge.sync.pull',
   'knowledge.sync.push',
+  'route.score',
   'orchestration.settings.get',
   'orchestration.settings.set',
   'baselines.list',
@@ -211,6 +216,7 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     }
     const machine = buildMachineInfo({ id: machineId, name: opts.machineName, version: opts.version });
     applyMachineUserFields(machine, readMachineUserFields(store.getMeta(MACHINE_USER_META)));
+    for (const ext of opts.extensions ?? []) ext.describeMachine?.(machine);
     const machineJson = JSON.stringify(machine);
     if (store.getMeta('machineInfo') !== machineJson) {
       store.setMeta('machineInfo', machineJson);

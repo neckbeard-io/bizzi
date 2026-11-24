@@ -22,6 +22,7 @@ import type {
   OrchestrationSettings,
   QuestionAnswers,
   RestartPolicy,
+  RouteSuggestion,
   SecretInfo,
   SessionBudget,
   SessionInfo,
@@ -326,6 +327,23 @@ export interface Methods {
   };
   /** Merge items from other machines: last writer by HLC wins. `applied` counts the ones that were newer. */
   'knowledge.sync.push': { params: MachineTarget & { items: KnowledgeRecord[] }; result: { applied: number } };
+
+  // ---- routing (spec §11.2)
+  /**
+   * Where should this prompt run? On a hub: across every online machine. On a node: its own workspaces.
+   * Explicit `@machine`, `#workspace` and `/agent` tokens win; otherwise the configured logprob classifier
+   * scores the targets. Read-only: nothing is started.
+   */
+  'route.suggest': { params: { text: string }; result: { suggestion: RouteSuggestion } };
+  /**
+   * One option-logit readout through this machine's classifier (`MachineInfo.routing`). A hub without a
+   * classifier of its own borrows a machine's this way: the model only has to be reachable from that
+   * machine, not run on it. `probabilities` has one entry per option, normalized over the letters.
+   */
+  'route.score': {
+    params: MachineTarget & { text: string; options: string[] };
+    result: { probabilities: number[]; letterMass: number; ms: number; model: string };
+  };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */
