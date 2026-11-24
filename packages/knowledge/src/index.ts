@@ -4,6 +4,7 @@ export * from './types.ts';
 export { HybridLogicalClock, compareHlc, formatHlc, parseHlc } from './hlc.ts';
 export type { HlcTimestamp } from './hlc.ts';
 export { KnowledgeStore, contentHash, detectFts5, queryTokens } from './store.ts';
+export { parseRemoteItem } from './replica.ts';
 export type {
   HarvestRecord,
   ItemPatch,

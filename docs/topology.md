@@ -166,7 +166,7 @@ Because a session never changes hands, each event log has exactly one writer: no
 |---|---|---|---|
 | Session events | the owning node | outbox → hub → subscribers, by `(session, seq)` | none (single writer) |
 | Machine/workspace config | that machine's node, or a client through the hub | field-level last-writer-wins with hybrid logical clocks | rare; the losing value is recorded |
-| Rules & memories | any agent or client, anywhere | append-only + tombstones | union; consolidation dedupes ([knowledge.md](knowledge.md)) |
+| Rules & memories | any agent or client, anywhere | hub pulls each node's changes by HLC and pushes them to every other node; tombstones for forgets ([knowledge.md](knowledge.md) §9.4) | last writer by HLC per item; consolidation dedupes |
 | Blobs | anyone | content-addressed, fetched lazily | none |
 
 ## 6. Later: deliberate cross-machine moves (not takeover)

@@ -25,3 +25,4 @@ export { Auth, FailureLimiter, RateLimitedError, type AuthOptions } from './auth
 export { HubStore, publicDevice, type DeviceRow } from './store.ts';
 export { NtfyPusher, USAGE_PUSH_THRESHOLDS, type PushOptions, type PushStateStore } from './push.ts';
 export { Relay, CLOSE_REVOKED } from './relay.ts';
+export { KnowledgeSync, type KnowledgeSyncOptions } from './knowledge-sync.ts';

@@ -1,6 +1,6 @@
 // SQLite persistence for the hub role: devices, pairing codes, nonces, tokens, machines, the replica of
-// every node's session channels, the routing index (workspaces/sessions → machine) and the hub's own
-// re-sequenced global log.
+// every node's session channels, the routing index (workspaces/sessions → machine), the hub's own
+// re-sequenced global log and the knowledge replica (knowledge.md §9.4).
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -15,6 +15,7 @@ import type {
   Ed25519PublicJwk,
   GlobalEvent,
   GlobalEventBody,
+  KnowledgeRecord,
   MachineInfo,
   SessionInfo,
   WidgetValue,
@@ -110,6 +111,19 @@ CREATE TABLE IF NOT EXISTS widgets (
   data       TEXT NOT NULL,
   PRIMARY KEY (machine_id, widget_id)
 );
+CREATE TABLE IF NOT EXISTS knowledge_items (
+  id         TEXT PRIMARY KEY,
+  hlc        TEXT NOT NULL,
+  rseq       INTEGER NOT NULL UNIQUE,
+  from_machine TEXT NOT NULL,
+  data       TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS knowledge_cursors (
+  machine_id TEXT PRIMARY KEY,
+  store_id   TEXT,
+  pulled_hlc TEXT,
+  pushed_rseq INTEGER NOT NULL DEFAULT 0
+);
 `;
 
 export interface DeviceRow extends DeviceInfo {
@@ -123,6 +137,12 @@ export interface PairingCodeRow {
   setup: boolean;
   expiresAt?: number;
   usedAt?: string;
+}
+
+export interface KnowledgeCursor {
+  storeId?: string;
+  pulledHlc?: string;
+  pushedRseq: number;
 }
 
 export interface MachineRow {
@@ -463,6 +483,65 @@ export class HubStore {
 
   setNodeCursor(machineId: string, seq: number): void {
     this.#setCursor.run(machineId, seq);
+  }
+
+  // --- knowledge replica (knowledge.md §9.4) ---------------------------------------------------
+
+  /**
+   * Keep `rec` if it is newer (by HLC) than the copy the hub has. Each accepted change gets the next
+   * `rseq`, the hub's own arrival order, which is what nodes are fed from: an item that reaches the hub
+   * late with an old clock still goes out to everyone.
+   */
+  putKnowledge(rec: KnowledgeRecord, fromMachine: string): boolean {
+    return this.tx(() => {
+      const cur = this.#db.prepare('SELECT hlc FROM knowledge_items WHERE id = ?').get(rec.id) as { hlc: string } | undefined;
+      if (cur && cur.hlc >= rec.hlc) return false;
+      const next = ((this.#db.prepare('SELECT MAX(rseq) AS n FROM knowledge_items').get() as { n: number | null }).n ?? 0) + 1;
+      this.#db
+        .prepare(
+          `INSERT INTO knowledge_items (id, hlc, rseq, from_machine, data) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(id) DO UPDATE SET hlc = excluded.hlc, rseq = excluded.rseq, from_machine = excluded.from_machine, data = excluded.data`,
+        )
+        .run(rec.id, rec.hlc, next, fromMachine, JSON.stringify(rec));
+      return true;
+    });
+  }
+
+  /** Changes after `rseq`, in arrival order. */
+  knowledgeAfter(rseq: number, limit: number): { rseq: number; fromMachine: string; record: KnowledgeRecord }[] {
+    const rows = this.#db
+      .prepare('SELECT rseq, from_machine, data FROM knowledge_items WHERE rseq > ? ORDER BY rseq LIMIT ?')
+      .all(rseq, limit) as { rseq: number; from_machine: string; data: string }[];
+    return rows.map((r) => ({ rseq: Number(r.rseq), fromMachine: r.from_machine, record: JSON.parse(r.data) as KnowledgeRecord }));
+  }
+
+  getKnowledge(id: string): KnowledgeRecord | undefined {
+    const r = this.#db.prepare('SELECT data FROM knowledge_items WHERE id = ?').get(id) as { data: string } | undefined;
+    return r ? (JSON.parse(r.data) as KnowledgeRecord) : undefined;
+  }
+
+  countKnowledge(): number {
+    return (this.#db.prepare('SELECT COUNT(*) AS n FROM knowledge_items').get() as { n: number }).n;
+  }
+
+  /** Per machine: its knowledge store's id, the newest HLC pulled from it, the last hub `rseq` pushed to it. */
+  knowledgeCursor(machineId: string): KnowledgeCursor {
+    const r = this.#db.prepare('SELECT store_id, pulled_hlc, pushed_rseq FROM knowledge_cursors WHERE machine_id = ?').get(machineId) as
+      | Row
+      | undefined;
+    const c: KnowledgeCursor = { pushedRseq: r ? Number(r.pushed_rseq) : 0 };
+    if (typeof r?.store_id === 'string') c.storeId = r.store_id;
+    if (typeof r?.pulled_hlc === 'string') c.pulledHlc = r.pulled_hlc;
+    return c;
+  }
+
+  setKnowledgeCursor(machineId: string, c: KnowledgeCursor): void {
+    this.#db
+      .prepare(
+        `INSERT INTO knowledge_cursors (machine_id, store_id, pulled_hlc, pushed_rseq) VALUES (?, ?, ?, ?)
+         ON CONFLICT(machine_id) DO UPDATE SET store_id = excluded.store_id, pulled_hlc = excluded.pulled_hlc, pushed_rseq = excluded.pushed_rseq`,
+      )
+      .run(machineId, c.storeId ?? null, c.pulledHlc ?? null, c.pushedRseq);
   }
 
   // --- per-login usage (one row per machine that reported the login) ----------------------------

@@ -12,6 +12,7 @@ import type {
   InstallPlan,
   KnowledgeInboxCard,
   KnowledgeItemInfo,
+  KnowledgeRecord,
   KnowledgeScope,
   KnowledgeScopeLevel,
   KnowledgeSettings,
@@ -314,6 +315,17 @@ export interface Methods {
     params: MachineTarget & { settings: Partial<KnowledgeSettings> };
     result: { settings: KnowledgeSettings };
   };
+  /**
+   * Replication (knowledge.md §9.4), called by the hub over the node link. `pull` returns the items
+   * changed after `since` (exclusive, by HLC), oldest first, tombstones included. `storeId` names the
+   * node's knowledge database; a new one means it was replaced and the hub syncs everything again.
+   */
+  'knowledge.sync.pull': {
+    params: MachineTarget & { since?: string; limit?: number };
+    result: { items: KnowledgeRecord[]; more: boolean; storeId: string };
+  };
+  /** Merge items from other machines: last writer by HLC wins. `applied` counts the ones that were newer. */
+  'knowledge.sync.push': { params: MachineTarget & { items: KnowledgeRecord[] }; result: { applied: number } };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */

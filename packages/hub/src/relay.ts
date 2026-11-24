@@ -25,6 +25,7 @@ import {
 } from '@bizzi/protocol';
 import type { Auth } from './auth.ts';
 import type { HubBus } from './bus.ts';
+import { KnowledgeSync } from './knowledge-sync.ts';
 import { publicDevice, type DeviceRow, type HubStore } from './store.ts';
 
 /** What the relay needs from a hub-side node link. */
@@ -66,6 +67,8 @@ export class Relay {
   readonly logger: Logger;
   readonly version: string;
   readonly machine: MachineInfo;
+  /** Knowledge replication between the linked nodes (knowledge.md §9.4). */
+  readonly knowledge: KnowledgeSync;
   publicUrl?: string;
   readonly #links = new Map<string, LinkHandle>();
   readonly #clients = new Set<ClientHandle>();
@@ -77,6 +80,7 @@ export class Relay {
     this.auth = o.auth;
     this.logger = o.logger;
     this.version = o.version;
+    this.knowledge = new KnowledgeSync({ store: o.store, logger: o.logger });
     if (o.publicUrl) this.publicUrl = o.publicUrl.replace(/\/+$/, '');
     let hubId = this.store.getMeta('hubId');
     if (!hubId) {
@@ -156,6 +160,7 @@ export class Relay {
   detachLink(link: LinkHandle): void {
     if (this.#links.get(link.machineId) !== link) return;
     this.#links.delete(link.machineId);
+    this.knowledge.detach(link);
     if (!this.store.isOpen) return;
     const now = new Date().toISOString();
     const row = this.store.getMachine(link.machineId);
@@ -241,6 +246,9 @@ export class Relay {
         // A node's local-mode preferences; the hub's own are the ones its devices share.
         body = undefined;
         break;
+      case 'knowledge.changed':
+        afterCommit = () => this.knowledge.nodeChanged(link);
+        break;
       case 'widget.removed': {
         if (typeof ev.data?.widgetId !== 'string') {
           body = undefined;
@@ -286,6 +294,7 @@ export class Relay {
       for (const s of sessions) if (s.machineId === link.machineId) this.store.putSession(s);
     });
     for (const s of sessions) if (s.machineId === link.machineId) link.watch(sessionChannel(s.id));
+    if (this.#links.get(link.machineId) === link) this.knowledge.attach(link);
   }
 
   // --- devices ----------------------------------------------------------------------------------

@@ -224,4 +224,33 @@ describe('knowledge extension', () => {
     await new Promise((r) => setTimeout(r, 120));
     assert.equal(changedIds(h).filter((ids) => ids.includes(own.id)).length, 1);
   });
+  it('sync.pull pages changes by HLC; sync.push merges newer records and skips bad ones', async () => {
+    const { ext, h, store } = await setup();
+    const ids: string[] = [];
+    for (const title of ['One', 'Two', 'Three']) {
+      ids.push((await h.call(ext, 'knowledge.add', { type: 'rule', title, body: 'b', scope: { level: 'global' } })).item.id);
+    }
+    const p1 = await h.call(ext, 'knowledge.sync.pull', { limit: 2 });
+    assert.deepEqual(p1.items.map((i: { id: string }) => i.id), ids.slice(0, 2));
+    assert.equal(p1.more, true);
+    assert.equal(p1.storeId, store().storeId);
+    const p2 = await h.call(ext, 'knowledge.sync.pull', { since: p1.items[1].hlc, limit: 2 });
+    assert.deepEqual([p2.items.map((i: { id: string }) => i.id), p2.more], [[ids[2]], false]);
+
+    // A record from another machine: newer than ours wins, older (or the same) doesn't.
+    const mine = store().require(ids[0]!);
+    const remote = { ...mine, title: 'One (edited elsewhere)', hlc: `${'9'.repeat(15)}-000000-m_OTHER`, source: { machineId: 'm_OTHER', via: 'ui' } };
+    const stale = { ...store().require(ids[1]!), title: 'stale', hlc: `${'0'.repeat(15)}-000000-m_OTHER` };
+    const before = changedIds(h).length;
+    const res = await h.call(ext, 'knowledge.sync.push', { items: [remote, stale, { id: 'k_BAD' }] });
+    assert.equal(res.applied, 1);
+    assert.equal(store().require(ids[0]!).title, 'One (edited elsewhere)');
+    assert.equal(store().require(ids[1]!).title, 'Two');
+    assert.deepEqual(changedIds(h).slice(before), [[ids[0]]]);
+    // A local write after the merge sorts after it, so the hub's HLC cursor never skips it.
+    const { item: later } = await h.call(ext, 'knowledge.add', { type: 'rule', title: 'Later', body: 'b', scope: { level: 'global' } });
+    const p3 = await h.call(ext, 'knowledge.sync.pull', { since: remote.hlc });
+    assert.deepEqual(p3.items.map((i: { id: string }) => i.id), [later.id]);
+    await assert.rejects(h.call(ext, 'knowledge.sync.push', { items: 'nope' }), isCode('bad_request'));
+  });
 });

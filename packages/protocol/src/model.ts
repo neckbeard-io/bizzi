@@ -421,6 +421,39 @@ export interface KnowledgeInboxCard {
   items: KnowledgeItemInfo[];
 }
 
+/**
+ * A knowledge item as it replicates between nodes through the hub (knowledge.md §9.4): the whole
+ * stored item, including its clock. Last writer by `hlc` wins; forgetting is a `deleted` tombstone.
+ */
+export interface KnowledgeRecord {
+  id: string;
+  type: 'rule' | 'memory';
+  scope: KnowledgeScope & { teamId?: string };
+  appliesTo?: AgentKind[];
+  kind?: string;
+  title: string;
+  body: string;
+  tags: string[];
+  source: {
+    agent?: AgentKind;
+    sessionId?: string;
+    machineId: string;
+    via: 'ui' | 'tool' | 'harvest' | 'extract';
+    userRequested?: boolean;
+    projectId?: string;
+    workspaceId?: string;
+    ref?: string;
+  };
+  status: 'active' | 'suggested' | 'superseded' | 'deleted';
+  supersedes?: string[];
+  noticePending?: boolean;
+  contentHash: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Hybrid logical clock of the last change: `<15-digit ms>-<6-digit counter>-<machine id>`. */
+  hlc: string;
+}
+
 // ---- hub: devices and pairing
 
 export type DeviceKind = 'device' | 'node';

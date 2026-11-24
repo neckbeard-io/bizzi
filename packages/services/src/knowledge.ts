@@ -1,5 +1,6 @@
 // Knowledge extension (docs/knowledge.md): the `knowledge.*` methods on top of @bizzi/knowledge,
-// `knowledge.changed` events, and Claude auto-memory harvest when a Claude session ends.
+// `knowledge.changed` events, Claude auto-memory harvest when a Claude session ends, and the
+// `knowledge.sync.*` pair the hub calls to replicate the store between machines (§9.4).
 //
 // The KnowledgeStore is shared with the session-start injection hook (apps/cli/src/knowledge.ts):
 // pass the same instance, or a function that opens it lazily for a machine id.
@@ -15,6 +16,7 @@ import {
   type ChannelEvent,
   type KnowledgeInboxCard,
   type KnowledgeItemInfo,
+  type KnowledgeRecord,
   type KnowledgeScope as WireScope,
   type KnowledgeSettings as WireSettings,
   type SessionInfo,
@@ -34,6 +36,7 @@ import {
   listInbox,
   loadSettings,
   normalizeScope,
+  parseRemoteItem,
   rejectItems,
   saveSettings,
   updateKnowledge,
@@ -414,6 +417,30 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
         }
         const next = saveSettings(st, { policy, ...(defaultAgentScope ? { defaultAgentScope } : {}) });
         return { settings: toWireSettings(next) };
+      }),
+
+      'knowledge.sync.pull': w((p, _ctx, st) => {
+        const since = optString(p, 'since');
+        const limit = optInt(p, 'limit', 1, 5000) ?? 500;
+        const page = st.changesSince(since, limit + 1);
+        const items: KnowledgeRecord[] = page.slice(0, limit);
+        return { items, more: page.length > limit, storeId: st.storeId };
+      }),
+
+      'knowledge.sync.push': w((p, ctx, st) => {
+        if (!Array.isArray(p.items)) throw new BizziError('bad_request', 'items must be an array');
+        const parsed: KnowledgeItem[] = [];
+        for (const raw of p.items) {
+          try {
+            parsed.push(parseRemoteItem(raw));
+          } catch (err) {
+            // One bad record mustn't stall replication of the rest.
+            ctx.logger.log('warn', 'skipping invalid replicated knowledge record', { id: (raw as { id?: unknown })?.id, err: String(err) });
+          }
+        }
+        const applied = st.transaction(() => parsed.filter((item) => st.applyRemote(item)));
+        if (applied.length > 0) changed(ctx, applied);
+        return { applied: applied.length };
       }),
     },
 

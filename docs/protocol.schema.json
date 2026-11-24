@@ -503,6 +503,24 @@
         "$ref": "#/$defs/result:knowledge.settings.set"
       }
     },
+    "knowledge.sync.pull": {
+      "description": "Replication (knowledge.md §9.4), called by the hub over the node link. `pull` returns the items changed after `since` (exclusive, by HLC), oldest first, tombstones included. `storeId` names the node's knowledge database; a new one means it was replaced and the hub syncs everything again.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.sync.pull"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.sync.pull"
+      }
+    },
+    "knowledge.sync.push": {
+      "description": "Merge items from other machines: last writer by HLC wins. `applied` counts the ones that were newer.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.sync.push"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.sync.push"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -2145,6 +2163,142 @@
         "strict"
       ]
     },
+    "KnowledgeRecord": {
+      "description": "A knowledge item as it replicates between nodes through the hub (knowledge.md §9.4): the whole stored item, including its clock. Last writer by `hlc` wins; forgetting is a `deleted` tombstone.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "rule",
+            "memory"
+          ]
+        },
+        "scope": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/KnowledgeScope"
+            },
+            {
+              "type": "object",
+              "properties": {
+                "teamId": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "appliesTo": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentKind"
+          }
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "machineId": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string",
+              "enum": [
+                "ui",
+                "tool",
+                "harvest",
+                "extract"
+              ]
+            },
+            "userRequested": {
+              "type": "boolean"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "machineId",
+            "via"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "active",
+            "suggested",
+            "superseded",
+            "deleted"
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "noticePending": {
+          "type": "boolean"
+        },
+        "contentHash": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "hlc": {
+          "description": "Hybrid logical clock of the last change: `<15-digit ms>-<6-digit counter>-<machine id>`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "type",
+        "scope",
+        "title",
+        "body",
+        "tags",
+        "source",
+        "status",
+        "contentHash",
+        "createdAt",
+        "updatedAt",
+        "hlc"
+      ]
+    },
     "KnowledgeScope": {
       "type": "object",
       "properties": {
@@ -2361,6 +2515,8 @@
         "knowledge.reject",
         "knowledge.settings.get",
         "knowledge.settings.set",
+        "knowledge.sync.pull",
+        "knowledge.sync.push",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -3700,6 +3856,44 @@
             },
             "params": {
               "$ref": "#/$defs/params:knowledge.settings.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.sync.pull"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.sync.pull"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.sync.push"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.sync.push"
             }
           }
         },
@@ -5685,6 +5879,45 @@
         }
       ]
     },
+    "params:knowledge.sync.pull": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "since": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "number"
+            }
+          }
+        }
+      ]
+    },
+    "params:knowledge.sync.push": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/KnowledgeRecord"
+              }
+            }
+          },
+          "required": [
+            "items"
+          ]
+        }
+      ]
+    },
     "params:knowledge.update": {
       "allOf": [
         {
@@ -6644,6 +6877,39 @@
       },
       "required": [
         "settings"
+      ]
+    },
+    "result:knowledge.sync.pull": {
+      "type": "object",
+      "properties": {
+        "items": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/KnowledgeRecord"
+          }
+        },
+        "more": {
+          "type": "boolean"
+        },
+        "storeId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "items",
+        "more",
+        "storeId"
+      ]
+    },
+    "result:knowledge.sync.push": {
+      "type": "object",
+      "properties": {
+        "applied": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "applied"
       ]
     },
     "result:knowledge.update": {

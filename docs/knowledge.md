@@ -63,7 +63,7 @@ interface KnowledgeItem {
 }
 ```
 
-Append-only replication with tombstones ([topology.md](topology.md) §5.1): every node has the items for the projects it hosts plus global and its machine items, so everything works offline.
+Replicated through the hub with tombstones for forgets ([topology.md](topology.md) §5.1, §9.4 below): every node has a full copy and resolves visibility locally, so everything works offline.
 
 ## 3. Control across agents: one pipeline, whichever agent
 
@@ -229,13 +229,20 @@ Built: `renderMachineCard` in `@bizzi/knowledge` puts it first in the launch-mod
 - **Routing preferences** live on the user, not on a session: "production investigations → the machine tagged `prod-access`", "UI work and screenshots → `gui`", "long test runs → `always-on`". They're used by one-pane mode ([spec.md](spec.md) §11.2) and, later, by cross-machine helpers (spec §12.4).
 - The machine card (§9.2) tells an agent what its machine is for, so an agent on the mac mini asked for a prod investigation can say "that belongs on the laptop" instead of trying.
 
-### 9.4 Replication (not built yet; needed for any of this to work across machines)
+### 9.4 Replication (built 2026-11-11)
 
-Today every node has its own knowledge store, so a global rule written on the laptop never reaches the mac mini.
+Every node has its own knowledge store; the hub replicates it, so a global rule written on the laptop reaches the mac mini.
 
-- Through the hub, append-only with HLC ordering and tombstones (the fields exist already): `global` and `tag` items go to every node; `machine` items go to their machine; project/workspace items to the nodes hosting that project.
-- The hub keeps a copy so any client (phone included) can edit any scope; edits to an offline machine's rules apply when it reconnects.
-- A node works offline from its local copy; local edits queue in the outbox.
+- **The hub drives it over each node link**, as the client it already is there:
+  - `knowledge.sync.pull { since, limit }` returns the node's items changed after the HLC `since`, oldest first, tombstones included, plus the store's `storeId`.
+  - `knowledge.sync.push { items }` merges items from other machines; last writer by HLC wins (`applyRemote`), and the node recomputes the content hash rather than trusting it. Invalid records are skipped and logged, so one bad record can't stall the rest.
+- **The hub keeps a copy** (`knowledge_items` in `hub.db`): each item at its newest clock, plus `rseq`, the hub's own arrival order. Nodes are fed by `rseq`, not HLC, so an item that reaches the hub late with an old clock still goes out to everyone. Per machine, the hub stores the newest HLC it pulled, the last `rseq` it pushed and the store id.
+- **When it runs:** pull and push when a node links; a pull on every `knowledge.changed` the node emits; a push to every other linked node when a pull brought something new. Work is serialized per link. A version is never pushed back to the machine it came from.
+- **Offline:** a node works from its local copy, and its store is its outbox. Edits made while it's offline are pulled when it reconnects. Edits made elsewhere wait in the hub's copy until it reconnects.
+- **Replaced store:** a new `storeId` (fresh data dir, restored backup) makes the hub pull everything from the node and push everything to it, the node's own old items included.
+- **Every node gets every item.** This is single-user (spec decision 1), and visibility already scopes items at read time: a `machine` rule for the mac mini sits unused in the laptop's store. In exchange, the knowledge page on any machine shows and edits every scope, including a machine that's offline.
+- Not replicated: the acceptance policy and other store settings, and harvest bookkeeping. Both stay per node.
+- An older node without `knowledge.sync.*` answers `unsupported`; the hub leaves it alone.
 
 ### 9.5 Delivery
 

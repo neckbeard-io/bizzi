@@ -1,7 +1,7 @@
 // SQLite-backed knowledge store (node:sqlite). Append-friendly: items are never physically
 // removed; forgetting writes a tombstone (status 'deleted') with a fresh HLC so it replicates.
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { SQLInputValue } from 'node:sqlite';
 import { BizziError, newId } from '@bizzi/protocol';
@@ -206,6 +206,8 @@ type Row = Record<string, unknown>;
 export class KnowledgeStore {
   readonly path: string;
   readonly machineId: string;
+  /** Random id of this database, made when it's created; replication notices a replaced store by it. */
+  readonly storeId: string;
   readonly ftsAvailable: boolean;
   readonly #db: DatabaseSync;
   readonly #clock: HybridLogicalClock;
@@ -238,6 +240,8 @@ export class KnowledgeStore {
     this.#db
       .prepare('INSERT INTO meta(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
       .run('schema_version', String(SCHEMA_VERSION));
+    this.#db.prepare('INSERT OR IGNORE INTO meta(key, value) VALUES (?, ?)').run('store_id', randomUUID());
+    this.storeId = String((this.#db.prepare("SELECT value FROM meta WHERE key = 'store_id'").get() as Row).value);
     this.#syncClock();
   }
 
@@ -486,14 +490,18 @@ export class KnowledgeStore {
     return rows.map(rowToItem);
   }
 
-  /** Merge an item from another node: last writer (by HLC) wins. Returns true if applied. */
+  /**
+   * Merge an item from another node: last writer (by HLC) wins. Returns true if applied. The content
+   * hash is recomputed here (it drives dedupe) rather than trusted from the sender.
+   */
   applyRemote(item: KnowledgeItem): boolean {
     validateNew(item);
     return this.transaction(() => {
       this.#clock.update(item.hlc);
       const cur = this.get(item.id);
       if (cur && compareHlc(cur.hlc, item.hlc) >= 0) return false;
-      this.#write({ ...item, scope: normalizeScope(item.scope) }, cur ? 'update' : 'insert');
+      const next = { ...item, scope: normalizeScope(item.scope), contentHash: contentHash(item.type, item.title, item.body) };
+      this.#write(next, cur ? 'update' : 'insert');
       return true;
     });
   }
