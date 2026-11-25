@@ -104,7 +104,7 @@ test('bizzi-agents MCP: Claude asks Codex to review in a worktree, waits, reads 
   const { session: parent, workspace, client } = await parentWithClient(t, h, { permissionMode: 'acceptEdits' });
 
   const tools = (await client.listTools()).tools.map((x) => x.name).sort();
-  assert.deepEqual(tools, ['session_interrupt', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list']);
+  assert.deepEqual(tools, ['machines_list', 'session_interrupt', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list']);
 
   const started = await call(client, 'session_start', {
     agent: 'codex',

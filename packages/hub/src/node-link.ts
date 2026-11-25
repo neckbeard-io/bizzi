@@ -1,20 +1,25 @@
 // Hub side of the node link (/ws/node). After NodeHelloMsg / NodeWelcomeMsg the hub acts as a client of
 // the node: it subscribes the node's `global` channel and every session channel from the last seq it
 // stored, stores and fans out what arrives, and forwards client requests with `h:`-prefixed ids.
+// The node may also send requests (`n:` ids, HUB_FEATURE_NODE_REQUESTS): Relay.handleNode answers them.
 
 import {
   BizziError,
   GLOBAL_CHANNEL,
+  HUB_FEATURE_NODE_REQUESTS,
   HUB_REQUEST_PREFIX,
   PROTOCOL_VERSION,
   isEvent,
+  isRequest,
   isResponse,
+  type ErrorObject,
   type ChannelEvent,
   type GlobalEvent,
   type Logger,
   type MachineInfo,
   type NodeHelloMsg,
   type NodeWelcomeMsg,
+  type RequestMsg,
   type ResponseMsg,
   type SessionInfo,
   type WorkspaceInfo,
@@ -107,7 +112,7 @@ export class NodeLink implements LinkHandle {
     if (this.#attached) this.#relay.detachLink(this);
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, opts: { timeoutMs?: number } = {}): Promise<unknown> {
     if (this.#closed || this.#ws.readyState !== WebSocket.OPEN) {
       return Promise.reject(new BizziError('machine_offline', `machine ${this.machineId} is offline`));
     }
@@ -116,7 +121,7 @@ export class NodeLink implements LinkHandle {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
         reject(new BizziError('machine_offline', `machine ${this.machineId} did not answer ${method} in time`));
-      }, this.#o.requestTimeoutMs);
+      }, opts.timeoutMs ?? this.#o.requestTimeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       this.#ws.send(JSON.stringify({ id, method, params }));
     });
@@ -155,6 +160,7 @@ export class NodeLink implements LinkHandle {
     if (!this.#attached) return this.#hello(msg as Partial<NodeHelloMsg>);
     if (isEvent(msg)) return this.#onEvent(msg);
     if (isResponse(msg)) return this.#onResponse(msg);
+    if (isRequest(msg)) return void this.#onNodeRequest(msg);
     this.#log.log('debug', 'ignoring unexpected frame from node');
   }
 
@@ -177,7 +183,7 @@ export class NodeLink implements LinkHandle {
     this.#device = device;
     this.#machine = machine;
     this.#log = this.#log.child({ machineId: machine.id });
-    const welcome: NodeWelcomeMsg = { type: 'node.welcome', hubVersion: this.#relay.version };
+    const welcome: NodeWelcomeMsg = { type: 'node.welcome', hubVersion: this.#relay.version, features: [HUB_FEATURE_NODE_REQUESTS] };
     this.#ws.send(JSON.stringify(welcome));
     this.#attached = true;
     this.#relay.attachLink(this, machine);
@@ -211,6 +217,22 @@ export class NodeLink implements LinkHandle {
       this.#log.log('error', 'failed to ingest event; dropping link', { ch: ev.ch, seq: ev.seq, err });
       this.close(1011, 'ingest failed');
     }
+  }
+
+  /** A request from the node (spec §5.4): authenticated as this link's machine; answered on the same socket. */
+  async #onNodeRequest(msg: RequestMsg): Promise<void> {
+    let reply: { id: string; result: unknown } | { id: string; error: ErrorObject };
+    try {
+      reply = { id: msg.id, result: (await this.#relay.handleNode(this, msg.method, msg.params)) ?? {} };
+    } catch (err) {
+      if (!(err instanceof BizziError)) this.#log.log('error', 'unhandled error serving node request', { method: msg.method, err });
+      reply = {
+        id: msg.id,
+        error: err instanceof BizziError ? err.toObject() : { code: 'internal', message: err instanceof Error ? err.message : String(err) },
+      };
+    }
+    if (this.#closed || this.#ws.readyState !== WebSocket.OPEN) return;
+    this.#ws.send(JSON.stringify(reply));
   }
 
   #onResponse(msg: ResponseMsg): void {

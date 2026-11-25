@@ -13,8 +13,9 @@ export const MCP_SERVER_VERSION = '0.0.1';
 
 export const SERVER_INSTRUCTIONS = [
   'bizzi-agents lets you start helper sessions: full coding-agent sessions (Claude, Codex, OpenCode, agy) on this ' +
-    'machine that the user can watch, steer and stop. Use one to get a second opinion (e.g. ask Codex to review your ' +
-    'change), or to run independent work in parallel, ideally in its own worktree.',
+    'machine, or on another of the user\'s machines, that the user can watch, steer and stop. Use one to get a second ' +
+    'opinion (e.g. ask Codex to review your change), to run independent work in parallel, ideally in its own worktree, ' +
+    'or to use another machine (machines_list shows them: a Mac for Xcode builds and screenshots, a server for long runs).',
   'Typical flow: session_start with a self-contained prompt (the helper does not see your conversation) → ' +
     'session_wait until "done" → session_read for a structured summary (final message, changed files, tool counts, ' +
     'stop reason). Ask session_read for detail "diff" (one file) or "full" only when the summary is not enough.',
@@ -25,9 +26,9 @@ export const SERVER_INSTRUCTIONS = [
 /** Short note appended to the system prompt of sessions that get these tools. */
 export const TOOLS_NOTE =
   'You can start helper sessions with the bizzi-agents MCP tools (session_start, session_wait, session_read, ' +
-  'session_send, session_stop, sessions_list): any installed agent on this machine, optionally in a git worktree ' +
-  '(`worktree: "<branch>"`). Give helpers self-contained prompts, read their structured results instead of asking for ' +
-  'transcripts, and stop them when done.';
+  'session_send, session_stop, sessions_list, machines_list): any installed agent on this machine, optionally in a git ' +
+  'worktree (`worktree: "<branch>"`), or on another online machine (`machine: "<name>"`). Give helpers self-contained ' +
+  'prompts, read their structured results instead of asking for transcripts, and stop them when done.';
 
 function text(t: string, structured?: Record<string, unknown>): CallToolResult {
   return { content: [{ type: 'text', text: t }], ...(structured ? { structuredContent: structured } : {}) };
@@ -38,11 +39,12 @@ function errorResult(err: unknown): CallToolResult {
   return { content: [{ type: 'text', text: msg }], isError: true };
 }
 
-function helperSummary(s: SessionInfo): Record<string, unknown> {
+function helperSummary(s: SessionInfo, self?: string): Record<string, unknown> {
   return {
     sessionId: s.id,
     agent: s.agent,
     status: s.status,
+    ...(self !== undefined && s.machineId !== self ? { machineId: s.machineId } : {}),
     ...(s.title ? { title: s.title } : {}),
     workspaceId: s.workspaceId,
     ...(s.scope ? { scope: s.scope } : {}),
@@ -69,15 +71,20 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
     {
       title: 'Start a helper session',
       description:
-        'Start a helper session with any agent installed on this machine and send it `prompt`. Returns its sessionId ' +
-        'right away; use session_wait / session_read for the result. The helper starts fresh: put everything it needs ' +
-        'in the prompt. `worktree: "<branch>"` runs it in a git worktree of the workspace (created if needed) so its ' +
-        'edits stay separate. `scope: "child"` (default) stops it when you stop; "detached" outlives you. Its ' +
-        "permission mode is never looser than yours.",
+        'Start a helper session with any agent installed on this machine (or on `machine`) and send it `prompt`. Returns ' +
+        'its sessionId right away; use session_wait / session_read for the result. The helper starts fresh: put ' +
+        'everything it needs in the prompt. `worktree: "<branch>"` runs it in a git worktree of the workspace (created ' +
+        'if needed) so its edits stay separate. `scope: "child"` (default) stops it when you stop; "detached" outlives ' +
+        'you. Its permission mode is never looser than yours. On another machine it works on that machine\'s copy of ' +
+        'the files (commit and push anything it should see first); an offline machine fails right away.',
       inputSchema: {
         agent: agentSchema.describe('claude, codex, opencode, agy (terminal) or shell.'),
         prompt: z.string().min(1).describe('The task, self-contained.'),
-        workspace: z.string().optional().describe('Workspace id or path of a workspace registered on this machine. Default: yours.'),
+        machine: z.string().optional().describe('Machine name or id (see machines_list). Default: this machine.'),
+        workspace: z
+          .string()
+          .optional()
+          .describe('Workspace id or path registered on the target machine. Default: yours, or on another machine the one linked to yours (same repository).'),
         worktree: z.string().optional().describe('Branch name: run in a worktree of the workspace on this branch.'),
         model: z.string().optional(),
         permissionMode: z.string().optional().describe('Agent permission mode; clamped to be no looser than yours.'),
@@ -99,6 +106,7 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
         const r = await orch.startHelper(callerId, {
           agent: args.agent,
           prompt: args.prompt,
+          ...(args.machine ? { machine: args.machine } : {}),
           ...(args.workspace ? { workspace: args.workspace } : {}),
           ...(args.worktree ? { worktree: args.worktree } : {}),
           ...(args.model ? { model: args.model } : {}),
@@ -243,10 +251,35 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
     },
     async () => {
       try {
-        const helpers = orch.helpers(callerId).map(helperSummary);
+        const helpers = (await orch.listHelpers(callerId)).map((h) => helperSummary(h, node.machine.id));
         if (helpers.length === 0) return text('No helpers.', { helpers: [] });
         const lines = helpers.map((h) => `${String(h.sessionId)} ${String(h.agent)} ${String(h.status)}${h.title ? ` — ${String(h.title)}` : ''}`);
         return text(lines.join('\n'), { helpers });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'machines_list',
+    {
+      title: 'List machines',
+      description:
+        "The user's machines a helper can run on (session_start `machine`): online state, OS, GUI, tags, description " +
+        'and registered workspaces. Without a hub link only this machine is listed.',
+      inputSchema: {},
+    },
+    async () => {
+      try {
+        const r = await orch.machines();
+        const lines = r.machines.map((m) => {
+          const facts = [m.online ? 'online' : `offline${m.lastSeenAt ? ` since ${m.lastSeenAt}` : ''}`, m.os, m.headful ? 'GUI' : 'headless', ...m.tags.map((t) => `#${t}`)];
+          const ws = m.workspaces.length ? `\n  workspaces: ${m.workspaces.map((w) => `${w.name} (${w.path})`).join(', ')}` : '';
+          return `${m.name}${m.self ? ' (this machine)' : ''} [${m.id}]: ${facts.join(', ')}${m.description ? ` — ${m.description}` : ''}${ws}`;
+        });
+        if (!r.connected) lines.push('(not connected to a hub: other machines are unavailable)');
+        return text(lines.join('\n'), { ...r });
       } catch (err) {
         return errorResult(err);
       }

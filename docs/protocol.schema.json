@@ -539,6 +539,83 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
+    "session.forkTo": {
+      "description": "Fork a session onto another machine: push the workspace state (git branch plus uncommitted changes, or a shadow-git snapshot of a plain directory) to `toMachineId` and start a new session there seeded with a brief from this session's timeline. Served by the session's node; needs its hub link. Without a target, a git workspace lands in the target's workspace linked to this one (same project or `origin`) as a worktree on `branch` (default `fork/<source branch>-<id>`).",
+      "params": {
+        "$ref": "#/$defs/params:session.forkTo"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.forkTo"
+      }
+    },
+    "helper.start": {
+      "description": "Node-to-node, through the hub (`caller` stamped by the hub): start a helper whose parent runs on the caller's machine. Same guardrails as a local helper, applied with this machine's settings.",
+      "params": {
+        "$ref": "#/$defs/params:helper.start"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.start"
+      }
+    },
+    "helper.send": {
+      "description": "The other helper tools for a cross-machine helper; only its parent (`parentId` on `caller`) may use them.",
+      "params": {
+        "$ref": "#/$defs/params:helper.send"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.send"
+      }
+    },
+    "helper.interrupt": {
+      "params": {
+        "$ref": "#/$defs/params:helper.interrupt"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.interrupt"
+      }
+    },
+    "helper.stop": {
+      "params": {
+        "$ref": "#/$defs/params:helper.stop"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.stop"
+      }
+    },
+    "helper.wait": {
+      "params": {
+        "$ref": "#/$defs/params:helper.wait"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.wait"
+      }
+    },
+    "helper.read": {
+      "params": {
+        "$ref": "#/$defs/params:helper.read"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.read"
+      }
+    },
+    "fork.prepare": {
+      "description": "Fork step 1 on the target: resolve where the fork lands and what the source may leave out of the bundle (`heads`: commits the target repository already has).",
+      "params": {
+        "$ref": "#/$defs/params:fork.prepare"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fork.prepare"
+      }
+    },
+    "fork.receive": {
+      "description": "Fork step 2 on the target: apply the bundle, create the workspace or worktree, start the session with `brief`.",
+      "params": {
+        "$ref": "#/$defs/params:fork.receive"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fork.receive"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -1666,6 +1743,119 @@
     "EventMsg": {
       "$ref": "#/$defs/ChannelEvent"
     },
+    "ForkSessionSpec": {
+      "description": "The session a fork starts on the target machine.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "forkedFrom": {
+          "description": "The source session id (`forkedFrom`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "forkedFrom"
+      ]
+    },
+    "ForkSource": {
+      "description": "What `fork.prepare` and `fork.receive` are told about the source workspace.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "git",
+            "dir"
+          ]
+        },
+        "name": {
+          "description": "Source workspace name (default names on the target).",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "gitRemote": {
+          "description": "Normalized `origin` URL (linked-workspace match) and the raw one (set as `origin` on a fresh clone).",
+          "type": "string"
+        },
+        "gitRemoteUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ]
+    },
+    "ForkTarget": {
+      "description": "Where a fork lands on the target machine: an existing workspace there, or a new directory.",
+      "type": "object",
+      "properties": {
+        "toWorkspaceId": {
+          "description": "A git workspace on the target: the fork gets a worktree of it on a new branch.",
+          "type": "string"
+        },
+        "toPath": {
+          "description": "A new (absent or empty) directory on the target; required for plain-directory workspaces.",
+          "type": "string"
+        }
+      }
+    },
+    "ForkTransfer": {
+      "description": "How the workspace state travelled for a fork to another machine. `git`: the source branch plus any uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "git",
+            "snapshot"
+          ]
+        },
+        "commit": {
+          "description": "The commit the new session starts from.",
+          "type": "string"
+        },
+        "branch": {
+          "description": "git: the branch created on the target machine.",
+          "type": "string"
+        },
+        "sourceBranch": {
+          "description": "git: the source workspace's branch (absent when detached).",
+          "type": "string"
+        },
+        "uncommitted": {
+          "description": "The snapshot commit includes changes that weren't committed in the source workspace.",
+          "type": "boolean"
+        },
+        "bytes": {
+          "description": "Size of the bundle sent through the hub (0 when the target already had every object).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "commit",
+        "uncommitted",
+        "bytes"
+      ]
+    },
     "FsEntry": {
       "type": "object",
       "properties": {
@@ -1931,6 +2121,306 @@
         "widget.removed",
         "device.updated",
         "prefs.updated"
+      ]
+    },
+    "HelperChangedFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "created",
+            "modified",
+            "deleted"
+          ]
+        },
+        "diffRef": {
+          "description": "Pass to session_read `{ detail: 'diff', path }` for the diff.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "change",
+        "diffRef"
+      ]
+    },
+    "HelperParent": {
+      "description": "What the target machine needs to know about a parent on another machine (`helper.start`).",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "depth": {
+          "description": "The parent's own depth (0 for a session you started).",
+          "type": "number"
+        },
+        "projectId": {
+          "description": "The parent workspace's project and normalized `origin` URL: the helper's default workspace is the linked one.",
+          "type": "string"
+        },
+        "gitRemote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "depth"
+      ]
+    },
+    "HelperReadResult": {
+      "description": "`session_read`: a structured summary of what a helper did since a cursor (spec §12.1, usage.md §2).",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "cursor": {
+          "description": "Pass as `since` next time to read only what's new.",
+          "type": "number"
+        },
+        "turns": {
+          "type": "number"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "finalMessage": {
+          "type": "string"
+        },
+        "changedFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HelperChangedFile"
+          }
+        },
+        "tools": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "number"
+            },
+            "byKind": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "failed": {
+              "type": "number"
+            },
+            "denied": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "total",
+            "byKind",
+            "failed",
+            "denied"
+          ]
+        },
+        "waitingOn": {
+          "type": "object",
+          "properties": {
+            "approvals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "budget": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "approvals",
+            "questions"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/HelperSpent"
+        },
+        "transcript": {
+          "description": "detail 'full': the transcript in order (oldest entries dropped first to fit).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "diff": {
+          "description": "detail 'diff'.",
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "state",
+        "cursor",
+        "turns",
+        "changedFiles",
+        "tools",
+        "usage",
+        "truncated"
+      ]
+    },
+    "HelperSpent": {
+      "description": "Spend of a helper and every helper below it (usage.md §2): usd counts metered billing only.",
+      "type": "object",
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "tokens": {
+          "type": "number"
+        },
+        "turns": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "usd",
+        "tokens",
+        "turns"
+      ]
+    },
+    "HelperStartRequest": {
+      "description": "The `session_start` arguments, as sent to the target machine.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace id or path on the target machine. Default: the one linked to the parent's workspace.",
+          "type": "string"
+        },
+        "worktree": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "child",
+            "detached"
+          ]
+        },
+        "budget": {
+          "description": "Already capped by the parent's machine at what the parent's budgets have left.",
+          "$ref": "#/$defs/SessionBudget"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "prompt"
+      ]
+    },
+    "HelperStartResult": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "queued": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "session",
+        "workspace",
+        "queued",
+        "notes"
+      ]
+    },
+    "HelperWaitResult": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "reached": {
+          "description": "The `until` condition was met (false: timed out).",
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "usage": {
+          "description": "Cross-machine waits: the helper tree's spend, so the parent's machine can count it toward budgets.",
+          "$ref": "#/$defs/HelperSpent"
+        }
+      },
+      "required": [
+        "sessionId",
+        "state",
+        "reached",
+        "reason"
+      ]
+    },
+    "HelperWaitUntil": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "waiting",
+        "done",
+        "ended"
       ]
     },
     "InputBlock": {
@@ -2553,6 +3043,15 @@
         "knowledge.sync.push",
         "route.suggest",
         "route.score",
+        "session.forkTo",
+        "helper.start",
+        "helper.send",
+        "helper.interrupt",
+        "helper.stop",
+        "helper.wait",
+        "helper.read",
+        "fork.prepare",
+        "fork.receive",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -2561,6 +3060,18 @@
         "theme.delete",
         "prefs.get",
         "prefs.set"
+      ]
+    },
+    "NodeCaller": {
+      "description": "Who sent a node-to-node request; stamped by the hub, never trusted from the sender.",
+      "type": "object",
+      "properties": {
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "machineId"
       ]
     },
     "NodeHelloMsg": {
@@ -2605,6 +3116,13 @@
         },
         "hubVersion": {
           "type": "string"
+        },
+        "features": {
+          "description": "Optional link features this hub supports (e.g. HUB_FEATURE_NODE_REQUESTS). Absent on older hubs.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -3983,6 +4501,177 @@
               "type": "string"
             },
             "method": {
+              "const": "session.forkTo"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.forkTo"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.start"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.start"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.send"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.send"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.interrupt"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.interrupt"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.stop"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.wait"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.wait"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.read"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.read"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fork.prepare"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fork.prepare"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fork.receive"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fork.receive"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "pairing.create"
             },
             "params": {
@@ -4921,8 +5610,16 @@
         "forkedFrom": {
           "type": "string"
         },
+        "forkedFromMachineId": {
+          "description": "Fork to another machine (topology.md §6): the machine `forkedFrom` runs on, when not this one.",
+          "type": "string"
+        },
         "spawnedBy": {
-          "description": "Agent-to-agent (spec §12.1): the parent session that started this helper. Same machine for now.",
+          "description": "Agent-to-agent (spec §12.1): the parent session that started this helper.",
+          "type": "string"
+        },
+        "spawnedByMachineId": {
+          "description": "Cross-machine helper (spec §12.4): the machine the parent (`spawnedBy`) runs on, when not this one.",
           "type": "string"
         },
         "scope": {
@@ -5730,6 +6427,78 @@
     "params:devices.list": {
       "$ref": "#/$defs/Empty"
     },
+    "params:fork.prepare": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "source": {
+              "$ref": "#/$defs/ForkSource"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            }
+          },
+          "required": [
+            "source",
+            "agent"
+          ]
+        }
+      ]
+    },
+    "params:fork.receive": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "source": {
+              "$ref": "#/$defs/ForkSource"
+            },
+            "transfer": {
+              "$ref": "#/$defs/ForkTransfer"
+            },
+            "bundleBase64": {
+              "description": "The git bundle (base64), absent when the target already has `transfer.commit`.",
+              "type": "string"
+            },
+            "bundleRef": {
+              "description": "The ref inside the bundle that points at `transfer.commit`.",
+              "type": "string"
+            },
+            "session": {
+              "$ref": "#/$defs/ForkSessionSpec"
+            },
+            "brief": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "transfer",
+            "session",
+            "brief"
+          ]
+        }
+      ]
+    },
     "params:fs.browse": {
       "allOf": [
         {
@@ -5863,6 +6632,186 @@
       "required": [
         "protocol",
         "client"
+      ]
+    },
+    "params:helper.interrupt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.read": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "since": {
+              "type": "number"
+            },
+            "maxTokens": {
+              "type": "number"
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full",
+                "diff"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.send": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "input": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InputBlock"
+              }
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId",
+            "input"
+          ]
+        }
+      ]
+    },
+    "params:helper.start": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "parent": {
+              "$ref": "#/$defs/HelperParent"
+            },
+            "request": {
+              "$ref": "#/$defs/HelperStartRequest"
+            }
+          },
+          "required": [
+            "parent",
+            "request"
+          ]
+        }
+      ]
+    },
+    "params:helper.stop": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.wait": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "until": {
+              "$ref": "#/$defs/HelperWaitUntil"
+            },
+            "timeoutMs": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
       ]
     },
     "params:knowledge.accept": {
@@ -6396,6 +7345,42 @@
         "sessionId"
       ]
     },
+    "params:session.forkTo": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "toMachineId": {
+              "type": "string"
+            },
+            "agent": {
+              "description": "Default: the source session's agent.",
+              "$ref": "#/$defs/AgentKind"
+            },
+            "title": {
+              "type": "string"
+            },
+            "prompt": {
+              "description": "Appended to the brief as the next instruction.",
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "toMachineId"
+          ]
+        }
+      ]
+    },
     "params:session.get": {
       "type": "object",
       "properties": {
@@ -6863,6 +7848,41 @@
         "devices"
       ]
     },
+    "result:fork.prepare": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "heads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "heads"
+      ]
+    },
+    "result:fork.receive": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "session",
+        "workspace"
+      ]
+    },
     "result:fs.browse": {
       "type": "object",
       "properties": {
@@ -7021,6 +8041,32 @@
         "serverVersion",
         "machine"
       ]
+    },
+    "result:helper.interrupt": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:helper.read": {
+      "$ref": "#/$defs/HelperReadResult"
+    },
+    "result:helper.send": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turnId"
+      ]
+    },
+    "result:helper.start": {
+      "$ref": "#/$defs/HelperStartResult"
+    },
+    "result:helper.stop": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:helper.wait": {
+      "$ref": "#/$defs/HelperWaitResult"
     },
     "result:knowledge.accept": {
       "$ref": "#/$defs/Empty"
@@ -7287,6 +8333,25 @@
       },
       "required": [
         "session"
+      ]
+    },
+    "result:session.forkTo": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "transfer": {
+          "$ref": "#/$defs/ForkTransfer"
+        }
+      },
+      "required": [
+        "session",
+        "workspace",
+        "transfer"
       ]
     },
     "result:session.get": {

@@ -29,6 +29,31 @@ export function runGit(cwd: string, args: string[], maxBuffer = 64 * 1024 * 1024
   });
 }
 
+/** runGit with extra environment (GIT_INDEX_FILE, GIT_DIR…) and optional stdin. Same error rules. */
+export function runGitWith(
+  cwd: string,
+  args: string[],
+  opts: { env?: Record<string, string>; input?: string; maxBuffer?: number } = {},
+): Promise<GitResult> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'git',
+      ['-c', 'core.quotepath=off', '-c', 'color.ui=false', ...args],
+      { cwd, env: { ...process.env, ...GIT_ENV, ...opts.env }, maxBuffer: opts.maxBuffer ?? 64 * 1024 * 1024, encoding: 'utf8' },
+      (err, stdout, stderr) => {
+        if (err && typeof (err as NodeJS.ErrnoException).code === 'string') {
+          reject(err);
+          return;
+        }
+        const code = err ? (typeof err.code === 'number' ? err.code : 1) : 0;
+        resolve({ code, stdout, stderr });
+      },
+    );
+    child.stdin?.on('error', () => {});
+    child.stdin?.end(opts.input ?? '');
+  });
+}
+
 export async function isInsideGitRepo(dir: string): Promise<boolean> {
   try {
     const r = await runGit(dir, ['rev-parse', '--is-inside-work-tree']);
@@ -116,4 +141,31 @@ export function parseBranchLine(line: string): Omit<ParsedStatus, 'files'> {
     out.behind ??= 0;
   }
   return out;
+}
+
+// --- remotes (project identity, spec §4) ------------------------------------------------------------
+
+/** The `origin` URL of the repository at `cwd`, or undefined (no repo, no origin). */
+export async function originUrl(cwd: string): Promise<string | undefined> {
+  const r = await runGit(cwd, ['remote', 'get-url', 'origin']).catch(() => undefined);
+  const url = r && r.code === 0 ? r.stdout.trim() : '';
+  return url || undefined;
+}
+
+/**
+ * A git remote URL reduced to `host/path` so the same repository matches however it was cloned:
+ * `git@github.com:Acme/App.git`, `https://user@github.com/acme/app` and `ssh://git@github.com/acme/app.git`
+ * all become `github.com/acme/app`. Local paths are kept as given (minus a trailing `.git` and slashes).
+ */
+export function normalizeRemoteUrl(url: string): string {
+  let u = url.trim();
+  const hasScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(u);
+  const scp = hasScheme ? null : /^(?:[^@/\s]+@)?([^:/\s]+):(?!\/)(.+)$/.exec(u);
+  if (scp) u = `${scp[1]}/${scp[2]}`;
+  else if (hasScheme) u = u.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').replace(/^[^@/]+@/, '');
+  else return u.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  u = u.replace(/\/+$/, '').replace(/\.git$/i, '').replace(/\/+$/, '');
+  const slash = u.indexOf('/');
+  const host = (slash < 0 ? u : u.slice(0, slash)).replace(/:\d+$/, '');
+  return (slash < 0 ? host : host + u.slice(slash)).toLowerCase();
 }

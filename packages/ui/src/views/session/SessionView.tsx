@@ -4,7 +4,7 @@ import { selectSessionPrompt } from '@bizzi/client';
 import type { SessionStatus } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
-import { useMachine, useMachineOnline } from '../../app/machine.ts';
+import { useIsHub, useMachine, useMachineOnline } from '../../app/machine.ts';
 import { Icon } from '../../components/icons.tsx';
 import { PageHeader } from '../../components/layout.tsx';
 import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
@@ -12,6 +12,7 @@ import { STATUS_LABEL, machinePresence } from '../../lib/format.ts';
 import { statusSourceLabel } from '../../lib/states.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
+import { ForkToMachine } from './ForkToMachine.tsx';
 import { HelperTree } from './HelperTree.tsx';
 import { PlanPanel } from './PlanPanel.tsx';
 import { SessionControls } from './SessionControls.tsx';
@@ -51,6 +52,8 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const split = useMediaQuery('(min-width: 1100px)');
   const [openError, setOpenError] = useState<unknown>(null);
   const [showControls, setShowControls] = useState(false);
+  const [showForkTo, setShowForkTo] = useState(false);
+  const isHub = useIsHub();
   const [sideTab, setSideTab] = useState<SideTab>(props.tab === 'chat' ? 'plan' : props.tab);
   const stop = useAction(() => store.stop(sessionId));
   const fork = useAction(async () => {
@@ -156,6 +159,9 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             <StatusBadge status={status} prompt={prompt} title={statusTitle(status, statusReason, statusSource)} />
             {!terminal ? <IconButton icon="settings" label="Session settings" onClick={() => setShowControls((v) => !v)} className={cx(showControls && 'bg-panel-2 text-fg')} /> : null}
             {canFork ? <IconButton icon="fork" label="Fork: new session continuing this conversation" disabled={!online || fork.busy} onClick={() => void fork.run()} /> : null}
+            {isHub && !terminal ? (
+              <IconButton icon="machine" label="Fork to another machine" disabled={!online} onClick={() => setShowForkTo((v) => !v)} className={cx(showForkTo && 'bg-panel-2 text-fg')} />
+            ) : null}
             <IconButton
               icon="trash"
               label="Delete session"
@@ -191,6 +197,11 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
               End session
             </Button>
           ) : null}
+        </div>
+      ) : null}
+      {showForkTo && isHub && !terminal ? (
+        <div className="shrink-0 border-b border-border bg-panel px-3 py-2 md:px-5">
+          <ForkToMachine session={session} onDone={() => setShowForkTo(false)} />
         </div>
       ) : null}
       {!online ? (
