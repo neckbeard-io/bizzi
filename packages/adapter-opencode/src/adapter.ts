@@ -159,12 +159,18 @@ export class OpenCodeAdapter implements AgentAdapter {
   readonly agent = 'opencode' as const;
   readonly options: OpenCodeAdapterOptions;
   readonly server: OpenCodeServer;
+  /**
+   * One server serves every session (updates.md §3): the private one is bizzi's to restart onto a
+   * new version (`recycle`); a `serverUrl` server is someone else's.
+   */
+  readonly sharedProcess: 'owned' | 'external';
   #mcp = new McpRegistry();
   #sessions = new Set<OpenCodeSession>();
   #idleTimer: NodeJS.Timeout | undefined;
 
   constructor(options: OpenCodeAdapterOptions = {}) {
     this.options = options;
+    this.sharedProcess = options.serverUrl ? 'external' : 'owned';
     this.server = new OpenCodeServer({
       binary: options.binary ?? 'opencode',
       hostname: options.hostname ?? '127.0.0.1',
@@ -337,6 +343,20 @@ export class OpenCodeAdapter implements AgentAdapter {
       if (!this.#sessions.size) void this.server.stop();
     }, ms);
     this.#idleTimer.unref();
+  }
+
+  /**
+   * Stop the private server so the next session start spawns the installed `opencode` (updates.md
+   * §3, §5). The core calls it once it has stopped every session on the server; sessions resume
+   * from OpenCode's database on the new one.
+   */
+  async recycle(): Promise<void> {
+    if (this.options.serverUrl) throw new BizziError('unsupported', 'attached to an OpenCode server bizzi did not start; restart it there');
+    if (this.#sessions.size) throw new BizziError('conflict', `${this.#sessions.size} OpenCode session(s) still run on the server`);
+    clearTimeout(this.#idleTimer);
+    const was = this.server.version;
+    await this.server.stop();
+    this.options.logger?.log('info', 'opencode server stopped for a restart onto the installed version', { version: was });
   }
 
   /** Stop every session and the private server. */

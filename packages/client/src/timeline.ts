@@ -136,6 +136,8 @@ export interface RestartItem extends ItemBase {
   toVersion?: string;
   reason?: string;
   error?: string;
+  /** `failed`: the new version didn't start and the session resumed on this previous version. */
+  fallbackVersion?: string;
 }
 
 /** The agent compacted its context (usage.md §1.2). */
@@ -619,9 +621,11 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (ev.data.fromVersion !== undefined) item.fromVersion = ev.data.fromVersion;
       if (ev.data.toVersion !== undefined) item.toVersion = ev.data.toVersion;
       if (ev.data.error !== undefined) item.error = ev.data.error;
+      if (ev.data.fallbackVersion !== undefined) item.fallbackVersion = ev.data.fallbackVersion;
       d.put(item);
       tl.restartItemId = null;
       if (ev.data.ok && ev.data.toVersion !== undefined) tl.agentVersion = ev.data.toVersion;
+      else if (ev.data.fallbackVersion !== undefined) tl.agentVersion = ev.data.fallbackVersion;
       return;
     }
     default: {

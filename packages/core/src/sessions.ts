@@ -121,6 +121,8 @@ export interface RestartOutcome {
   fromVersion?: string;
   toVersion?: string;
   error?: string;
+  /** The new version failed to start and the session resumed on this (previous) version instead. */
+  fallbackVersion?: string;
 }
 
 /** The agent process behind a session, as far as the core knows (updates.md §2). */
@@ -145,6 +147,28 @@ const RESTART_WAIT_MS = 60_000;
 interface ResumeOpts {
   resumeRef?: string;
   fork?: boolean;
+}
+
+/** How #ensureStarted runs the adapter. */
+interface StartOpts {
+  /** Part of a restart: a failed start is left to the caller, a changed agentSessionRef isn't adopted. */
+  restart?: boolean;
+  /** Restart fallback: run this (previous) executable, which ran `version` (AgentAdapter.acceptsExecutable). */
+  executable?: string;
+  version?: string;
+}
+
+/** What an agent process ran before a restart (updates.md §5). */
+interface Before {
+  ref: string;
+  version?: string;
+  path?: string;
+}
+
+type FromTo = { fromVersion?: string; toVersion?: string };
+
+function fromTo(from: string | undefined, to: string | undefined): FromTo {
+  return { ...(from ? { fromVersion: from } : {}), ...(to ? { toVersion: to } : {}) };
 }
 
 type QuestionAsked = SessionEventMap['question.asked'];
@@ -201,6 +225,8 @@ export class Sessions {
   readonly #d: SessionsDeps;
   readonly #log: Logger;
   readonly #byId = new Map<string, Runtime>();
+  /** Shared agent servers being replaced (updates.md §3); starts on them wait for it. */
+  readonly #recycling = new Map<AgentAdapter, Promise<void>>();
   #draining = false;
   #closed = false;
   /** True while load() replays persisted sessions (cascades wait until every session is loaded). */
@@ -235,8 +261,19 @@ export class Sessions {
       for (const questionId of row.state.pendingQuestions ?? []) rt.pendingQuestions.set(questionId, { questionId, text: '' });
       rt.info.lastSeq = this.#d.bus.lastSeq(sessionChannel(rt.info.id));
       this.#byId.set(rt.info.id, rt);
-      // No agent process survives a node restart; the next start records the version it runs.
-      if (rt.info.agentVersion !== undefined || rt.state.agentPath !== undefined) {
+      const caps = this.#caps(rt);
+      const ref = rt.info.agentSessionRef ?? (caps.fork ? rt.state.forkOf : undefined);
+      const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && ref);
+      // No agent process survives a node restart; the next start records the version it runs. A
+      // structured agent that was running resumes through the restart sequence on its next start
+      // (updates.md §7). Terminal sessions reattach to their PTY supervisor (or start a new process
+      // under a new ref when it's gone), so they keep the plain path.
+      const ran = rt.info.agentVersion !== undefined || rt.state.agentPath !== undefined;
+      const structured = rt.info.mode === 'structured';
+      if (ran && structured && resumable && rt.info.agentSessionRef && !TERMINAL_STATUSES.includes(rt.info.status)) {
+        rt.state.nodeRestarted = rt.info.agentVersion ? { fromVersion: rt.info.agentVersion } : {};
+      }
+      if (ran) {
         delete rt.info.agentVersion;
         rt.state.agentPath = undefined;
         this.#persist(rt);
@@ -247,9 +284,6 @@ export class Sessions {
       }
 
       this.#closeOpenTurn(rt, 'interrupted', 'node restarted');
-      const caps = this.#caps(rt);
-      const ref = rt.info.agentSessionRef ?? (caps.fork ? rt.state.forkOf : undefined);
-      const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && ref);
       const status: SessionStatus = resumable ? 'idle' : 'ended';
       if (rt.state.queued) {
         // Queued helpers were never started; the queue itself doesn't survive a restart.
@@ -360,7 +394,10 @@ export class Sessions {
     return out;
   }
 
-  /** Why the agent process can't be restarted right now (updates.md §4), or undefined at a safe point. */
+  /**
+   * Why the agent process can't be restarted right now (updates.md §4), or undefined at a safe
+   * point. On a shared server every session on it must be at one.
+   */
   unsafeReason(id: string): string | undefined {
     return this.#unsafe(this.#get(id));
   }
@@ -375,10 +412,19 @@ export class Sessions {
   }
 
   /**
+   * Sessions whose agent processes restart together with this one: itself, plus every other
+   * running session on the same shared server (`AgentAdapter.sharedProcess: 'owned'`, updates.md §3).
+   */
+  restartGroup(id: string): string[] {
+    return this.#group(this.#get(id)).map((m) => m.info.id);
+  }
+
+  /**
    * Replace the agent process with the installed version and resume the same conversation
-   * (updates.md §5). The bizzi session, its event log and seq carry on. Throws BizziError only when
-   * the session can't be restarted now (not resumable, not at a safe point); a failed precheck,
-   * spawn or resume is returned as the outcome and recorded on the session channel.
+   * (updates.md §5). The bizzi session, its event log and seq carry on. On a shared server every
+   * session on it restarts together (the outcome returned is this session's). Throws BizziError
+   * only when the session can't be restarted now (not resumable, not at a safe point); a failed
+   * precheck, spawn or resume is returned as the outcome and recorded on the session channel.
    */
   async restartAgent(id: string, opts: { reason?: string } = {}): Promise<RestartOutcome> {
     const rt = this.#get(id);
@@ -386,15 +432,22 @@ export class Sessions {
     if (blocker) throw new BizziError('unsupported', `cannot restart: ${blocker}`);
     const unsafe = this.#unsafe(rt);
     if (unsafe) throw new BizziError('conflict', `cannot restart now: ${unsafe}`);
-    let release!: () => void;
-    rt.restarting = new Promise<void>((r) => {
-      release = r;
+    const group = this.#group(rt);
+    const releases = group.map((m) => {
+      let release!: () => void;
+      m.restarting = new Promise<void>((r) => {
+        release = r;
+      });
+      return () => {
+        m.restarting = undefined;
+        release();
+      };
     });
     try {
-      return await this.#restart(rt, opts.reason);
+      const outcomes = await this.#restart(group, opts.reason);
+      return outcomes.get(rt) ?? { ok: false, aborted: true, error: 'the session stopped' };
     } finally {
-      rt.restarting = undefined;
-      release();
+      for (const release of releases) release();
     }
   }
 
@@ -817,14 +870,24 @@ export class Sessions {
     return this.#draining;
   }
 
-  /** Resolves true when no turn is in flight, false on timeout. */
+  /**
+   * Resolves true once every session is at a safe point (updates.md §7): no turn in flight, no
+   * agent starting or restarting. False on timeout.
+   */
   async waitForTurns(timeoutMs: number): Promise<boolean> {
     const deadline = Date.now() + timeoutMs;
-    while (this.activeTurns() > 0) {
+    while (this.#unsettled() > 0) {
       if (Date.now() >= deadline) return false;
       await new Promise((r) => setTimeout(r, Math.min(100, Math.max(1, deadline - Date.now()))));
     }
     return true;
+  }
+
+  /** Sessions not at a safe point for a node restart: a turn in flight, an agent starting or restarting. */
+  #unsettled(): number {
+    let n = 0;
+    for (const rt of this.#byId.values()) if (rt.state.currentTurnId || rt.reservedTurn || rt.starting || rt.restarting) n++;
+    return n;
   }
 
   /** Stop every adapter session. Session status is left as-is so a restart can resume them. */
@@ -909,9 +972,10 @@ export class Sessions {
 
   /**
    * Start the adapter session unless it's running. With `restart`, a start failure is left to the
-   * caller to record, and a changed agentSessionRef isn't adopted (the restart verifies it).
+   * caller to record, and a changed agentSessionRef isn't adopted (the restart verifies it). The
+   * first resume after a node restart goes through the restart sequence itself (updates.md §7).
    */
-  #ensureStarted(rt: Runtime, resume: ResumeOpts, restart = false): Promise<AdapterSession> {
+  #ensureStarted(rt: Runtime, resume: ResumeOpts, o: StartOpts = {}): Promise<AdapterSession> {
     if (rt.handle) return Promise.resolve(rt.handle);
     if (rt.starting) return rt.starting;
     const adapter = rt.adapter;
@@ -921,11 +985,36 @@ export class Sessions {
     const gen = ++rt.generation;
     const sessionId = rt.info.id;
     const logger = this.#d.logger.child({ sessionId, agent: rt.info.agent });
+    const restart = Boolean(o.restart);
+    const oldRef = resume.resumeRef;
+    const afterNode = !restart && !resume.fork && oldRef && oldRef === rt.info.agentSessionRef ? rt.state.nodeRestarted : undefined;
 
-    // What is about to be spawned (updates.md §2): the last probe's version and real path.
+    // What is about to be spawned (updates.md §2): the last probe's version and real path, or the
+    // previous executable on a restart fallback.
     let spawned: AgentListing | undefined;
+    let announced = false;
+    /** Close an open node-restart divider when the start is abandoned. */
+    const abandon = (error: string) => {
+      if (!announced || rt.deleted || this.#closed || !this.#d.store.isOpen) return;
+      announced = false;
+      this.#append(rt, { type: 'session.restarted', data: { ...fromTo(afterNode?.fromVersion, probedVersion(spawned)), ok: false, error } });
+    };
     const start = async (): Promise<AdapterSession> => {
-      spawned = this.#d.registry.lastKnown(rt.info.agent);
+      // A shared server being replaced: start on the new one, not the old (updates.md §3).
+      const recycling = restart ? undefined : this.#recycling.get(adapter);
+      if (recycling) await recycling;
+      spawned = o.executable
+        ? { agent: rt.info.agent, installed: true, auth: 'unknown', ...(o.version ? { version: o.version } : {}), realPath: o.executable }
+        : this.#d.registry.lastKnown(rt.info.agent);
+      if (afterNode) {
+        // The divider names the version it resumes on, so ask the registry if nothing probed yet.
+        spawned ??= (await this.#d.registry.list().catch(() => [])).find((a) => a.agent === rt.info.agent);
+        if (gen === rt.generation && !this.#gone(rt)) {
+          const data = { ...fromTo(afterNode.fromVersion, probedVersion(spawned)), reason: 'bizzi restarted' };
+          this.#append(rt, { type: 'session.restarting', data });
+          announced = true;
+        }
+      }
       const ws = this.#d.workspaces.get(rt.info.workspaceId);
       const extra = this.#d.prepareStart ? await this.#d.prepareStart({ ...rt.info }, ws) : {};
       const agentEnv = this.#d.agentEnv ? await this.#d.agentEnv(rt.info.agent) : {};
@@ -941,6 +1030,7 @@ export class Sessions {
       if (rt.state.command) opts.command = [...rt.state.command];
       if (rt.state.cols) opts.cols = rt.state.cols;
       if (rt.state.rows) opts.rows = rt.state.rows;
+      if (o.executable) opts.executable = o.executable;
       return adapter.start(opts, (body) => this.#onAdapterEvent(rt, gen, body), { logger });
     };
 
@@ -949,10 +1039,12 @@ export class Sessions {
         if (rt.starting === p) rt.starting = undefined;
         if (gen !== rt.generation || this.#closed || rt.deleted) {
           void handle.stop().catch(() => {});
+          abandon('the session stopped during the resume');
           throw new BizziError('conflict', 'session was stopped while starting');
         }
         rt.handle = handle;
         this.#recordAgent(rt, handle, spawned);
+        if (afterNode && oldRef) return this.#verifyNodeResume(rt, handle, oldRef, afterNode, spawned);
         const ref = safeRef(handle);
         if (ref && ref !== rt.info.agentSessionRef && !restart) this.#append(rt, { type: 'session.info', data: { agentSessionRef: ref } });
         return handle;
@@ -961,6 +1053,10 @@ export class Sessions {
         if (rt.starting === p) rt.starting = undefined;
         logger.log('warn', 'adapter start failed', { err });
         if (gen === rt.generation && !this.#closed && !restart) {
+          if (afterNode) {
+            rt.state.nodeRestarted = undefined;
+            abandon(errorMessage(err));
+          }
           this.#append(rt, { type: 'error', data: { message: `failed to start ${rt.info.agent}: ${errorMessage(err)}`, fatal: true } });
           this.#append(rt, { type: 'session.status', data: { status: 'failed', reason: errorMessage(err) } });
         }
@@ -972,14 +1068,41 @@ export class Sessions {
   }
 
   /**
+   * The first start after a node restart resumed `oldRef` (updates.md §7 through §5 steps 5–6):
+   * the agent must continue the same conversation; then the divider closes with the version it
+   * runs now. On a mismatch the new process is stopped, the old ref kept and the session failed.
+   */
+  #verifyNodeResume(rt: Runtime, handle: AdapterSession, oldRef: string, mark: { fromVersion?: string }, spawned: AgentListing | undefined): AdapterSession {
+    rt.state.nodeRestarted = undefined;
+    this.#persist(rt);
+    const v = fromTo(mark.fromVersion, rt.info.agentVersion ?? probedVersion(spawned));
+    const ref = safeRef(handle) ?? rt.info.agentSessionRef;
+    if (ref !== oldRef) {
+      rt.handle = undefined;
+      rt.generation++;
+      void withTimeout(handle.stop(), STOP_TIMEOUT_MS).catch((err: unknown) => this.#log.log('warn', 'adapter stop failed', { sessionId: rt.info.id, err }));
+      const error = `the agent resumed a different conversation (${ref ?? 'none'} instead of ${oldRef})`;
+      this.#restartFailed(rt, oldRef, v, error);
+      throw new BizziError('agent_unavailable', `resume after the node restart failed: ${error}`);
+    }
+    this.#append(rt, { type: 'session.restarted', data: { ...v, ok: true } });
+    this.#log.log('info', 'agent resumed after a node restart', { sessionId: rt.info.id, agent: rt.info.agent, ...v });
+    return handle;
+  }
+
+  /**
    * Record the version and real executable path of the process just spawned (updates.md §2). Before
    * the first probe the registry is asked in the background; the path is kept only if it exists.
+   * A version the session reports itself (a shared server's own) wins over the probe's; the probe's
+   * path is then kept only when both versions agree.
    */
   #recordAgent(rt: Runtime, handle: AdapterSession, spawned: AgentListing | undefined): void {
+    const reported = safeAgentVersion(handle);
     const apply = (l: AgentListing | undefined) => {
       if (rt.handle !== handle || rt.deleted || this.#closed || !this.#d.store.isOpen) return;
-      const version = l?.installed ? l.version : undefined;
-      const candidate = l?.installed ? (l.realPath ?? l.path) : undefined;
+      const probed = probedVersion(l);
+      const version = reported ?? probed;
+      const candidate = l?.installed && (!reported || reported === probed) ? (l.realPath ?? l.path) : undefined;
       const path = candidate && existsSync(candidate) ? candidate : undefined;
       if (rt.state.agentPath !== path) {
         rt.state.agentPath = path;
@@ -1001,8 +1124,19 @@ export class Sessions {
     );
   }
 
-  /** Why the agent process can't be replaced right now (updates.md §4 safe points). */
+  /** Why the agent process can't be replaced right now (updates.md §4 safe points), group-wide. */
   #unsafe(rt: Runtime): string | undefined {
+    const own = this.#unsafeOne(rt);
+    if (own) return own;
+    for (const m of this.#group(rt)) {
+      if (m === rt) continue;
+      const why = this.#unsafeOne(m);
+      if (why) return `${sessionLabel(m)} on the same ${m.info.agent} server: ${why}`;
+    }
+    return undefined;
+  }
+
+  #unsafeOne(rt: Runtime): string | undefined {
     if (rt.deleted || rt.stopping) return 'the session is stopping';
     if (TERMINAL_STATUSES.includes(rt.info.status)) return `the session has ${rt.info.status}`;
     if (rt.restarting) return 'a restart is already in progress';
@@ -1019,9 +1153,34 @@ export class Sessions {
   }
 
   #restartBlocker(rt: Runtime): string | undefined {
+    const own = this.#restartBlockerOne(rt);
+    if (own) return own;
+    for (const m of this.#group(rt)) {
+      if (m === rt) continue;
+      const why = this.#restartBlockerOne(m);
+      if (why) return `${sessionLabel(m)} on the same ${m.info.agent} server: ${why}`;
+    }
+    return undefined;
+  }
+
+  #restartBlockerOne(rt: Runtime): string | undefined {
     if (!this.#caps(rt).resume) return `${rt.info.agent} ${rt.info.mode} sessions cannot be resumed, so a restart would lose the conversation`;
     if (!rt.info.agentSessionRef) return 'the session has no agent conversation to resume yet';
+    if (rt.adapter?.sharedProcess === 'external') {
+      return `${rt.info.agent} sessions here run on a server bizzi did not start; restart that server instead`;
+    }
     return undefined;
+  }
+
+  /** This session plus every other running session on the same shared server (updates.md §3). */
+  #group(rt: Runtime): Runtime[] {
+    const adapter = rt.adapter;
+    if (adapter?.sharedProcess !== 'owned') return [rt];
+    const out = [rt];
+    for (const m of this.#byId.values()) {
+      if (m !== rt && m.adapter === adapter && (m.handle || m.starting) && !m.deleted) out.push(m);
+    }
+    return out;
   }
 
   /** Wait (bounded) for an agent restart; a send queued behind a failed restart is refused. */
@@ -1045,44 +1204,102 @@ export class Sessions {
     return rt.deleted || rt.stopping || this.#closed || !this.#d.store.isOpen || rt.info.status === 'ended';
   }
 
-  /** updates.md §5 steps 1–6. The caller holds `rt.restarting`. */
-  async #restart(rt: Runtime, reason: string | undefined): Promise<RestartOutcome> {
-    const agent = rt.info.agent;
-    const oldRef = rt.info.agentSessionRef!;
-    const fromVersion = rt.info.agentVersion;
-    const versions = (to: string | undefined) => ({ ...(fromVersion ? { fromVersion } : {}), ...(to ? { toVersion: to } : {}) });
+  /**
+   * updates.md §5 steps 1–6 for every session in `group` (one, or all sessions on a shared server).
+   * The caller holds `restarting` on each.
+   */
+  async #restart(group: Runtime[], reason: string | undefined): Promise<Map<Runtime, RestartOutcome>> {
+    const lead = group[0]!;
+    const agent = lead.info.agent;
+    const adapter = lead.adapter;
+    const out = new Map<Runtime, RestartOutcome>();
+    // What each process ran before; the previous executable is the fallback (§5).
+    const before = new Map<Runtime, Before>();
+    for (const m of group) {
+      const b: Before = { ref: m.info.agentSessionRef! };
+      if (m.info.agentVersion) b.version = m.info.agentVersion;
+      if (m.state.agentPath) b.path = m.state.agentPath;
+      before.set(m, b);
+    }
+    const versions = (m: Runtime, to: string | undefined) => fromTo(before.get(m)!.version, to);
 
     // 1. Precheck the installed binary: it runs (`--version`) and its login still works. A broken
-    //    update must not take the session down, so the old process keeps running.
+    //    update must not take the sessions down, so the old processes keep running.
     let probe: AgentListing | undefined;
     try {
       probe = (await this.#d.registry.list(true)).find((a) => a.agent === agent);
     } catch (err) {
-      this.#log.log('warn', 'probe before restart failed', { sessionId: rt.info.id, err });
+      this.#log.log('warn', 'probe before restart failed', { sessionId: lead.info.id, err });
     }
-    if (this.#gone(rt)) return { ok: false, aborted: true, ...versions(probe?.version), error: 'the session stopped' };
+    const live: Runtime[] = [];
+    for (const m of group) {
+      if (this.#gone(m)) out.set(m, { ok: false, aborted: true, ...versions(m, probe?.version), error: 'the session stopped' });
+      else live.push(m);
+    }
+    if (live.length === 0) return out;
     const problem = precheckProblem(probe);
     if (problem) {
-      rt.restartFailedFor = installKey(probe);
       const error = `not restarting on ${probe?.version ? `${agent} ${probe.version}` : 'the installed version'}: ${problem}`;
-      this.#log.log('warn', 'restart precheck failed', { sessionId: rt.info.id, agent, problem });
-      this.#append(rt, {
-        type: 'error',
-        data: { message: `${error}. The session keeps running${fromVersion ? ` on ${fromVersion}` : ''}.`, code: 'restart_precheck' },
-      });
-      return { ok: false, precheck: true, ...versions(probe?.version), error };
+      this.#log.log('warn', 'restart precheck failed', { sessionId: lead.info.id, agent, problem, sessions: live.length });
+      for (const m of live) {
+        m.restartFailedFor = installKey(probe);
+        const from = before.get(m)!.version;
+        this.#append(m, {
+          type: 'error',
+          data: { message: `${error}. The session keeps running${from ? ` on ${from}` : ''}.`, code: 'restart_precheck' },
+        });
+        out.set(m, { ok: false, precheck: true, ...versions(m, probe?.version), error });
+      }
+      return out;
     }
-    const toVersion = probe!.version;
+    const installed = probe!;
+    const toVersion = installed.version;
 
-    // 2. Announce, 3. stop the old process gracefully.
-    this.#append(rt, { type: 'session.restarting', data: { ...versions(toVersion), ...(reason ? { reason } : {}) } });
-    await this.#stopHandle(rt);
+    // 2. Announce, 3. stop the old processes gracefully. A shared server is replaced once every
+    //    session on it has stopped; new sessions on it wait for that instead of landing on the old one.
+    for (const m of live) {
+      this.#append(m, { type: 'session.restarting', data: { ...versions(m, toVersion), ...(reason ? { reason } : {}) } });
+    }
+    let recycleError: string | undefined;
+    const recycle = (async () => {
+      await Promise.all(live.map((m) => this.#stopHandle(m)));
+      if (adapter?.sharedProcess === 'owned' && adapter.recycle) {
+        try {
+          await adapter.recycle();
+        } catch (err) {
+          recycleError = `could not replace the shared ${agent} server: ${errorMessage(err)}`;
+          this.#log.log('warn', 'shared agent server recycle failed', { agent, err });
+        }
+      }
+    })();
+    if (adapter?.sharedProcess === 'owned') this.#recycling.set(adapter, recycle);
+    try {
+      await recycle;
+    } finally {
+      if (adapter && this.#recycling.get(adapter) === recycle) this.#recycling.delete(adapter);
+    }
+
+    // 4.–6. per session.
+    await Promise.all(
+      live.map(async (m) => {
+        out.set(m, await this.#resumeOnto(m, before.get(m)!, installed, versions(m, toVersion), recycleError));
+      }),
+    );
+    return out;
+  }
+
+  /**
+   * updates.md §5 steps 4–6 for one session whose old process was stopped: spawn the installed
+   * version and resume, fall back to the previous version on a failed spawn, verify, announce.
+   */
+  async #resumeOnto(rt: Runtime, prev: Before, probe: AgentListing, v: FromTo, recycleError: string | undefined): Promise<RestartOutcome> {
+    const agent = rt.info.agent;
     const aborted = (): RestartOutcome => {
       const error = 'the session stopped during the restart';
       if (!rt.deleted && !this.#closed && this.#d.store.isOpen) {
-        this.#append(rt, { type: 'session.restarted', data: { ...versions(toVersion), ok: false, error } });
+        this.#append(rt, { type: 'session.restarted', data: { ...v, ok: false, error } });
       }
-      return { ok: false, aborted: true, ...versions(toVersion), error };
+      return { ok: false, aborted: true, ...v, error };
     };
     if (this.#gone(rt)) return aborted();
 
@@ -1090,33 +1307,82 @@ export class Sessions {
     //    instructions; model, effort and permission mode come from the session info.
     let handle: AdapterSession;
     try {
-      handle = await this.#ensureStarted(rt, { resumeRef: oldRef }, true);
+      handle = await this.#ensureStarted(rt, { resumeRef: prev.ref }, { restart: true });
     } catch (err) {
       if (this.#gone(rt)) return aborted();
-      // TODO(updates.md §5): fall back to the previous version while it's still on disk. Needs an
-      // adapter hook to choose the executable.
-      return this.#restartFailed(rt, oldRef, versions(toVersion), `could not start ${agent}${toVersion ? ` ${toVersion}` : ''}: ${errorMessage(err)}`);
+      const error = `could not start ${agent}${v.toVersion ? ` ${v.toVersion}` : ''}: ${errorMessage(err)}`;
+      return this.#fallBack(rt, prev, probe, v, error, aborted);
     }
     if (this.#gone(rt)) return aborted();
 
     // 5. Verify the resume: the agent must continue the same conversation. TODO: deeper checks
     //    (e.g. the resumed conversation's message count) need an adapter hook.
     const ref = safeRef(handle) ?? rt.info.agentSessionRef;
-    if (ref !== oldRef) {
+    if (ref !== prev.ref) {
       await this.#stopHandle(rt);
-      return this.#restartFailed(rt, oldRef, versions(toVersion), `the agent resumed a different conversation (${ref ?? 'none'} instead of ${oldRef})`);
+      return this.#restartFailed(rt, prev.ref, v, `the agent resumed a different conversation (${ref ?? 'none'} instead of ${prev.ref})`);
     }
 
     // 6. Done. Context usage is re-read by the adapter on its next report (usage.md §1).
+    if (recycleError) {
+      // Resumed, but on whatever the shared server runs now; report the version it says it runs.
+      rt.restartFailedFor = installKey(probe);
+      const running = rt.info.agentVersion;
+      const data = { ...v, ok: false, error: recycleError, ...(running ? { fallbackVersion: running } : {}) };
+      this.#append(rt, { type: 'session.restarted', data });
+      return data;
+    }
     rt.restartFailedFor = undefined;
-    const outcome = versions(rt.info.agentVersion ?? toVersion);
+    const outcome = fromTo(v.fromVersion, rt.info.agentVersion ?? v.toVersion);
     this.#append(rt, { type: 'session.restarted', data: { ...outcome, ok: true } });
     this.#log.log('info', 'agent restarted', { sessionId: rt.info.id, agent, ...outcome });
     return { ok: true, ...outcome };
   }
 
+  /**
+   * The installed version failed to start: resume on the previous executable while it's still on
+   * disk (updates.md §5; Claude native and Codex script keep version dirs), and alert. Only for
+   * adapters that take an explicit executable; otherwise, or if that fails too, the restart fails.
+   */
+  async #fallBack(rt: Runtime, prev: Before, probe: AgentListing, v: FromTo, error: string, aborted: () => RestartOutcome): Promise<RestartOutcome> {
+    const installed = probe.realPath ?? probe.path;
+    if (!rt.adapter?.acceptsExecutable || !prev.path || !prev.version || prev.path === installed || !existsSync(prev.path)) {
+      return this.#restartFailed(rt, prev.ref, v, error);
+    }
+    this.#log.log('warn', 'new agent version failed to start; falling back to the previous one', {
+      sessionId: rt.info.id,
+      agent: rt.info.agent,
+      from: prev.version,
+      path: prev.path,
+      error,
+    });
+    let handle: AdapterSession;
+    try {
+      handle = await this.#ensureStarted(rt, { resumeRef: prev.ref }, { restart: true, executable: prev.path, version: prev.version });
+    } catch (err) {
+      if (this.#gone(rt)) return aborted();
+      return this.#restartFailed(rt, prev.ref, v, `${error}; falling back to ${prev.version} failed too: ${errorMessage(err)}`);
+    }
+    if (this.#gone(rt)) return aborted();
+    const ref = safeRef(handle) ?? rt.info.agentSessionRef;
+    if (ref !== prev.ref) {
+      await this.#stopHandle(rt);
+      return this.#restartFailed(rt, prev.ref, v, `${error}; the fallback onto ${prev.version} resumed a different conversation`);
+    }
+    // No automatic retry on the install that failed; `session.restart` tries it again.
+    rt.restartFailedFor = installKey(probe);
+    const running = rt.info.agentVersion ?? prev.version;
+    this.#append(rt, { type: 'session.restarted', data: { ...v, ok: false, error, fallbackVersion: running } });
+    this.#append(rt, {
+      type: 'error',
+      data: { message: `${error}. The session resumed on ${running} instead and stays on it until the new version starts.`, code: 'restart_fallback' },
+    });
+    this.#log.log('info', 'agent resumed on the previous version', { sessionId: rt.info.id, agent: rt.info.agent, version: running });
+    return { ok: false, ...v, error, fallbackVersion: running };
+  }
+
   /** A failed spawn or resume: mark the session failed, keep (and show) the old ref, never retry automatically. */
-  #restartFailed(rt: Runtime, oldRef: string, versions: { fromVersion?: string; toVersion?: string }, error: string): RestartOutcome {
+  #restartFailed(rt: Runtime, oldRef: string, versions: FromTo, error: string): RestartOutcome {
     rt.restartFailedFor = installKey(this.#d.registry.lastProbe(rt.info.agent));
     this.#log.log('warn', 'agent restart failed', { sessionId: rt.info.id, agent: rt.info.agent, error });
     if (rt.info.agentSessionRef !== oldRef) this.#append(rt, { type: 'session.info', data: { agentSessionRef: oldRef } });
@@ -1464,6 +1730,7 @@ export class Sessions {
     if (rt.state.budgetBlocked) state.budgetBlocked = rt.state.budgetBlocked;
     if (rt.state.queued) state.queued = true;
     if (rt.state.agentPath) state.agentPath = rt.state.agentPath;
+    if (rt.state.nodeRestarted) state.nodeRestarted = rt.state.nodeRestarted;
     this.#d.store.putSession({ info: rt.info, state });
   }
 }
@@ -1510,6 +1777,25 @@ function safeCaps(adapter: AgentAdapter, mode: SessionMode): AgentCapabilities {
     return adapter.capabilities(mode);
   } catch {
     return NO_CAPABILITIES;
+  }
+}
+
+/** How another session is named in a message ("session \"title\"" or its id). */
+function sessionLabel(rt: { info: SessionInfo }): string {
+  return rt.info.title ? `session "${rt.info.title}"` : `session ${rt.info.id}`;
+}
+
+/** The version a probe reports for an installed agent. */
+function probedVersion(l: AgentListing | undefined): string | undefined {
+  return l?.installed ? l.version : undefined;
+}
+
+function safeAgentVersion(h: AdapterSession): string | undefined {
+  try {
+    const v = h.agentVersion?.();
+    return typeof v === 'string' && v ? v : undefined;
+  } catch {
+    return undefined;
   }
 }
 

@@ -83,6 +83,8 @@ export const CODEX_STRUCTURED_CAPABILITIES: AgentCapabilities = {
 
 export class CodexAdapter implements AgentAdapter {
   readonly agent = 'codex' as const;
+  /** StartSessionOptions.executable is honoured (restart fallback onto the previous version, updates.md §5). */
+  readonly acceptsExecutable = true;
   readonly #opts: CodexAdapterOptions;
   #resolvedPath: string | undefined;
   readonly #sessions = new Set<CodexSession>();
@@ -182,9 +184,10 @@ export class CodexAdapter implements AgentAdapter {
     if (opts.mode !== 'structured') {
       throw new BizziError('unsupported', `the codex adapter only supports structured mode (got '${opts.mode}')`);
     }
-    const path = await this.#codexPath();
+    const path = opts.executable ?? (await this.#codexPath());
     if (!path) throw new BizziError('agent_unavailable', 'codex executable not found');
     const logger = ctx.logger.child({ agent: 'codex', sessionId: opts.sessionId });
+    if (opts.executable) logger.log('info', 'starting a pinned codex executable', { path });
     const session = await CodexSession.start(
       {
         spawn: {

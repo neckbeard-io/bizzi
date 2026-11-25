@@ -162,7 +162,7 @@ export class FakeOpenCode {
     const m = req.method ?? 'GET';
     let mm: RegExpExecArray | null;
 
-    if (m === 'GET' && p === '/api/info') return json(res, 200, { version: '2.0.25', pid: process.pid, urls: [this.url], paths: { tmp: '/tmp' } });
+    if (m === 'GET' && p === '/api/info') return json(res, 200, { version: process.env.FAKE_OPENCODE_VERSION ?? '2.0.25', pid: process.pid, urls: [this.url], paths: { tmp: '/tmp' } });
     if (m === 'GET' && p === '/api/event') return this.#sse(req, res);
     if (m === 'GET' && p === '/api/session/active') {
       const data: Record<string, unknown> = {};
