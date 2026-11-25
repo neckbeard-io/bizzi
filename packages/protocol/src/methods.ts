@@ -1,4 +1,5 @@
 import type { AgentCapabilities } from './capabilities.ts';
+import type { NodeCaller } from './hub.ts';
 import type {
   AccountUsage,
   AgentKind,
@@ -10,6 +11,16 @@ import type {
   ApprovalDecision,
   DeviceInfo,
   DeviceKind,
+  ForkSessionSpec,
+  ForkSource,
+  ForkTarget,
+  ForkTransfer,
+  HelperParent,
+  HelperReadResult,
+  HelperStartRequest,
+  HelperStartResult,
+  HelperWaitResult,
+  HelperWaitUntil,
   InputBlock,
   InstallAction,
   InstallPlan,
@@ -429,6 +440,83 @@ export interface Methods {
   'container.status': { params: { workspaceId: string }; result: { container: ContainerStatus } };
   /** Stop the container now. Refuses while sessions are live unless `force` (which ends their agents). */
   'container.stop': { params: { workspaceId: string; force?: boolean }; result: { container: ContainerStatus } };
+
+  // ---- cross-machine work (spec §12.4, topology.md §6; node → hub requests, hub.ts)
+  /**
+   * Fork a session onto another machine: push the workspace state (git branch plus uncommitted changes,
+   * or a shadow-git snapshot of a plain directory) to `toMachineId` and start a new session there seeded
+   * with a brief from this session's timeline. Served by the session's node; needs its hub link. Without
+   * a target, a git workspace lands in the target's workspace linked to this one (same project or
+   * `origin`) as a worktree on `branch` (default `fork/<source branch>-<id>`).
+   */
+  'session.forkTo': {
+    params: ForkTarget & {
+      sessionId: string;
+      toMachineId: string;
+      /** Default: the source session's agent. */
+      agent?: AgentKind;
+      title?: string;
+      /** Appended to the brief as the next instruction. */
+      prompt?: string;
+      branch?: string;
+    };
+    result: { session: SessionInfo; workspace: WorkspaceInfo; transfer: ForkTransfer };
+  };
+  /**
+   * Node-to-node, through the hub (`caller` stamped by the hub): start a helper whose parent runs on the
+   * caller's machine. Same guardrails as a local helper, applied with this machine's settings.
+   */
+  'helper.start': {
+    params: MachineTarget & { caller?: NodeCaller; parent: HelperParent; request: HelperStartRequest };
+    result: HelperStartResult;
+  };
+  /** The other helper tools for a cross-machine helper; only its parent (`parentId` on `caller`) may use them. */
+  'helper.send': {
+    params: MachineTarget & { caller?: NodeCaller; sessionId: string; parentId: string; input: InputBlock[] };
+    result: { turnId: string };
+  };
+  'helper.interrupt': { params: MachineTarget & { caller?: NodeCaller; sessionId: string; parentId: string }; result: Empty };
+  'helper.stop': { params: MachineTarget & { caller?: NodeCaller; sessionId: string; parentId: string }; result: Empty };
+  'helper.wait': {
+    params: MachineTarget & { caller?: NodeCaller; sessionId: string; parentId: string; until?: HelperWaitUntil; timeoutMs?: number };
+    result: HelperWaitResult;
+  };
+  'helper.read': {
+    params: MachineTarget & {
+      caller?: NodeCaller;
+      sessionId: string;
+      parentId: string;
+      since?: number;
+      maxTokens?: number;
+      detail?: 'summary' | 'full' | 'diff';
+      path?: string;
+    };
+    result: HelperReadResult;
+  };
+  /**
+   * Fork step 1 on the target: resolve where the fork lands and what the source may leave out of the
+   * bundle (`heads`: commits the target repository already has).
+   */
+  'fork.prepare': {
+    params: MachineTarget & ForkTarget & { caller?: NodeCaller; source: ForkSource; agent: AgentKind };
+    result: { workspaceId?: string; path?: string; heads: string[] };
+  };
+  /** Fork step 2 on the target: apply the bundle, create the workspace or worktree, start the session with `brief`. */
+  'fork.receive': {
+    params: MachineTarget &
+      ForkTarget & {
+        caller?: NodeCaller;
+        source: ForkSource;
+        transfer: ForkTransfer;
+        /** The git bundle (base64), absent when the target already has `transfer.commit`. */
+        bundleBase64?: string;
+        /** The ref inside the bundle that points at `transfer.commit`. */
+        bundleRef?: string;
+        session: ForkSessionSpec;
+        brief: string;
+      };
+    result: { session: SessionInfo; workspace: WorkspaceInfo };
+  };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */

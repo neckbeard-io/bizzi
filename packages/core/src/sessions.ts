@@ -77,6 +77,14 @@ export interface HelperOptions {
   queuedReason?: string;
   /** The parent may answer some of this helper's approvals and questions (spec §12.5). */
   parentAnswersApprovals?: boolean;
+  /** The parent runs on another machine (spec §12.4): `spawnedBy` is its id there. */
+  remoteParent?: { machineId: string; agent: AgentKind; permissionMode?: string };
+}
+
+/** Fork bookkeeping for `create` (a fork from another machine, topology.md §6). */
+export interface CreateExtras {
+  forkedFrom?: string;
+  forkedFromMachineId?: string;
 }
 
 /** Who answers an approval or question: you (approval.respond / question.respond) or the helper's parent. */
@@ -371,6 +379,50 @@ export class Sessions {
   }
 
   /**
+   * What the budgets over this session still allow (its own, every ancestor's, the tree cap), field by
+   * field; undefined when no cap applies. A helper on another machine gets at most this (spec §12.4).
+   */
+  remainingBudget(id: string): SessionBudget | undefined {
+    const rt = this.#get(id);
+    const chain = this.#ancestry(rt);
+    const out: SessionBudget = {};
+    const min = (k: keyof SessionBudget, v: number) => {
+      const left = Math.max(0, v);
+      out[k] = out[k] === undefined ? left : Math.min(out[k]!, left);
+    };
+    for (const a of chain) {
+      if (!a.info.budget) continue;
+      const spent = this.#treeSpent(a);
+      if (a.info.budget.usd !== undefined) min('usd', a.info.budget.usd - spent.usd);
+      if (a.info.budget.tokens !== undefined) min('tokens', a.info.budget.tokens - spent.tokens);
+      if (a.info.budget.turns !== undefined) min('turns', a.info.budget.turns - spent.turns);
+    }
+    const root = chain[chain.length - 1]!;
+    let cap: number | undefined;
+    try {
+      cap = this.#d.treeBudgetUsd?.(root.info.workspaceId);
+    } catch {
+      cap = undefined;
+    }
+    if (cap !== undefined) min('usd', cap - this.#treeSpent(root).usd);
+    return Object.keys(out).length > 0 ? out : undefined;
+  }
+
+  /**
+   * Record the last known spend of `helperId`, a helper of `parentId` running on another machine
+   * (spec §12.4). It counts in the parent's tree from now on (budgets are checked at turn boundaries).
+   */
+  recordRemoteSpent(parentId: string, helperId: string, spent: Spent): void {
+    const rt = this.#byId.get(parentId);
+    if (!rt || rt.deleted) return;
+    const clean: Spent = { usd: nonNegative(spent.usd), tokens: nonNegative(spent.tokens), turns: nonNegative(spent.turns) };
+    const prev = rt.state.remoteSpent?.[helperId];
+    if (prev && prev.usd === clean.usd && prev.tokens === clean.tokens && prev.turns === clean.turns) return;
+    rt.state.remoteSpent = { ...rt.state.remoteSpent, [helperId]: clean };
+    this.#persist(rt);
+  }
+
+  /**
    * Record that the user has seen the session through `seq` (spec §4 `seen_through`). Never moves
    * backwards and never past the last event. Emits `session.updated` when it moves.
    */
@@ -475,7 +527,7 @@ export class Sessions {
 
   // --- lifecycle --------------------------------------------------------------------------------------
 
-  async create(p: MethodParams<'session.create'>, helper?: HelperOptions): Promise<SessionInfo> {
+  async create(p: MethodParams<'session.create'>, helper?: HelperOptions, extras?: CreateExtras): Promise<SessionInfo> {
     this.#assertAccepting();
     const ws = this.#d.workspaces.get(p.workspaceId);
     if (!AGENT_KINDS.includes(p.agent)) throw new BizziError('bad_request', `unknown agent ${String(p.agent)}`);
@@ -499,13 +551,17 @@ export class Sessions {
     const budget = parseBudget(p.budget);
     if (budget) info.budget = budget;
     if (helper) {
-      if (!this.#byId.has(helper.spawnedBy)) throw new BizziError('not_found', `session ${helper.spawnedBy} not found`);
+      if (!helper.remoteParent && !this.#byId.has(helper.spawnedBy)) throw new BizziError('not_found', `session ${helper.spawnedBy} not found`);
       info.spawnedBy = helper.spawnedBy;
+      if (helper.remoteParent) info.spawnedByMachineId = helper.remoteParent.machineId;
       info.scope = helper.scope;
       info.depth = helper.depth;
       if (helper.parentAnswersApprovals) info.parentAnswersApprovals = true;
     }
+    if (extras?.forkedFrom) info.forkedFrom = extras.forkedFrom;
+    if (extras?.forkedFromMachineId) info.forkedFromMachineId = extras.forkedFromMachineId;
     const rt = newRuntime(info, {}, adapter);
+    if (helper?.remoteParent) rt.state.remoteParent = { ...helper.remoteParent };
     if (p.cols) rt.state.cols = p.cols;
     if (p.rows) rt.state.rows = p.rows;
     if (p.command) rt.state.command = [...p.command];
@@ -765,11 +821,13 @@ export class Sessions {
   /** A helper's permission mode stays within its parent's (spec §12.2); refuses a looser one. */
   #assertWithinParent(rt: Runtime, requested: string): void {
     const parentId = rt.info.spawnedBy;
-    const parent = parentId ? this.#byId.get(parentId) : undefined;
+    const local = parentId ? this.#byId.get(parentId)?.info : undefined;
+    // A parent on another machine: what it told us when the helper started (spec §12.4).
+    const parent = local ? { agent: local.agent, permissionMode: local.permissionMode } : rt.state.remoteParent;
     if (!parent) return;
     const clamp = clampPermission({
-      parentAgent: parent.info.agent,
-      parentMode: parent.info.permissionMode,
+      parentAgent: parent.agent,
+      parentMode: parent.permissionMode,
       agent: rt.info.agent,
       requested,
       available: this.#caps(rt).permissionModes ?? [],
@@ -777,8 +835,8 @@ export class Sessions {
     if (clamp.permissionMode === undefined || clamp.permissionMode === requested) return;
     throw new BizziError(
       'conflict',
-      `permission mode ${requested} is looser than the parent session's (${parent.info.permissionMode ?? 'default'}); at most ${clamp.permissionMode} is allowed`,
-      { parentMode: parent.info.permissionMode, allowed: clamp.permissionMode },
+      `permission mode ${requested} is looser than the parent session's (${parent.permissionMode ?? 'default'}); at most ${clamp.permissionMode} is allowed`,
+      { parentMode: parent.permissionMode, allowed: clamp.permissionMode },
     );
   }
 
@@ -1756,6 +1814,8 @@ export class Sessions {
       if (seen.has(r.info.id)) return;
       seen.add(r.info.id);
       all.push(r.state.spent ?? zeroSpent());
+      // Helpers on other machines, as last reported (spec §12.4).
+      for (const remote of Object.values(r.state.remoteSpent ?? {})) all.push(remote);
       for (const c of children.get(r.info.id) ?? []) walk(c);
     };
     walk(rt);
@@ -1811,6 +1871,8 @@ export class Sessions {
     if (rt.state.queued) state.queued = true;
     if (rt.state.agentPath) state.agentPath = rt.state.agentPath;
     if (rt.state.nodeRestarted) state.nodeRestarted = rt.state.nodeRestarted;
+    if (rt.state.remoteParent) state.remoteParent = rt.state.remoteParent;
+    if (rt.state.remoteSpent) state.remoteSpent = rt.state.remoteSpent;
     this.#d.store.putSession({ info: rt.info, state });
   }
 }
@@ -1921,4 +1983,8 @@ function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
       },
     );
   });
+}
+
+function nonNegative(n: unknown): number {
+  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? n : 0;
 }

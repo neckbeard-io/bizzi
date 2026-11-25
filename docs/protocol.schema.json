@@ -521,6 +521,24 @@
         "$ref": "#/$defs/result:knowledge.sync.push"
       }
     },
+    "knowledge.promote.preview": {
+      "description": "What \"Add to AGENTS.md…\" would append to the workspace's root AGENTS.md: the picked items under a `## heading` section, as a unified diff. Reads only. Items already tagged `promoted`, inactive or outside the workspace's scope are listed in `skipped`.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.promote.preview"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.promote.preview"
+      }
+    },
+    "knowledge.promote": {
+      "description": "Append the picked items to the workspace's AGENTS.md (creating it if missing) and tag them `promoted`. With the preview's `baseHash`, fails with `conflict` if the file changed since. Never commits.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.promote"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.promote"
+      }
+    },
     "route.suggest": {
       "description": "Where should this prompt run? On a hub: across every online machine. On a node: its own workspaces. Explicit `@machine`, `#workspace` and `/agent` tokens win; otherwise the configured logprob classifier scores the targets. Read-only: nothing is started.",
       "params": {
@@ -537,6 +555,94 @@
       },
       "result": {
         "$ref": "#/$defs/result:route.score"
+      }
+    },
+    "route.record": {
+      "description": "Record a routed prompt (the labelled eval set). Returns it with its id and time.",
+      "params": {
+        "$ref": "#/$defs/params:route.record"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.record"
+      }
+    },
+    "route.decisions": {
+      "description": "Recorded decisions, newest first; `overridden` filters; `before` (an id) pages. `total` counts the filter's matches.",
+      "params": {
+        "$ref": "#/$defs/params:route.decisions"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.decisions"
+      }
+    },
+    "route.rules.get": {
+      "description": "Routing rules (knowledge.md §9.3), tried in order; the first that matches applies. `set` replaces the list.",
+      "params": {
+        "$ref": "#/$defs/params:route.rules.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.rules.get"
+      }
+    },
+    "route.rules.set": {
+      "params": {
+        "$ref": "#/$defs/params:route.rules.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.rules.set"
+      }
+    },
+    "pipelines.list": {
+      "description": "Newest first; `workspaceId` narrows to pipelines started there.",
+      "params": {
+        "$ref": "#/$defs/params:pipelines.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipelines.list"
+      }
+    },
+    "pipeline.start": {
+      "description": "Validate the definition and start stage 1 (or wait at its gate). `title` defaults to the task's first line.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.start"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.start"
+      }
+    },
+    "pipeline.get": {
+      "params": {
+        "$ref": "#/$defs/params:pipeline.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.get"
+      }
+    },
+    "pipeline.gate": {
+      "description": "Answer the pending gate: approve starts the stage (`message` becomes `{{gate.message}}`), reject cancels the run.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.gate"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.gate"
+      }
+    },
+    "pipeline.cancel": {
+      "description": "Stop the running stage's session and end the run as cancelled.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.cancel"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.cancel"
+      }
+    },
+    "pipeline.delete": {
+      "description": "Forget a run that isn't running or waiting; its sessions and worktree are kept.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.delete"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.delete"
       }
     },
     "container.create": {
@@ -563,6 +669,83 @@
       },
       "result": {
         "$ref": "#/$defs/result:container.stop"
+      }
+    },
+    "session.forkTo": {
+      "description": "Fork a session onto another machine: push the workspace state (git branch plus uncommitted changes, or a shadow-git snapshot of a plain directory) to `toMachineId` and start a new session there seeded with a brief from this session's timeline. Served by the session's node; needs its hub link. Without a target, a git workspace lands in the target's workspace linked to this one (same project or `origin`) as a worktree on `branch` (default `fork/<source branch>-<id>`).",
+      "params": {
+        "$ref": "#/$defs/params:session.forkTo"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.forkTo"
+      }
+    },
+    "helper.start": {
+      "description": "Node-to-node, through the hub (`caller` stamped by the hub): start a helper whose parent runs on the caller's machine. Same guardrails as a local helper, applied with this machine's settings.",
+      "params": {
+        "$ref": "#/$defs/params:helper.start"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.start"
+      }
+    },
+    "helper.send": {
+      "description": "The other helper tools for a cross-machine helper; only its parent (`parentId` on `caller`) may use them.",
+      "params": {
+        "$ref": "#/$defs/params:helper.send"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.send"
+      }
+    },
+    "helper.interrupt": {
+      "params": {
+        "$ref": "#/$defs/params:helper.interrupt"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.interrupt"
+      }
+    },
+    "helper.stop": {
+      "params": {
+        "$ref": "#/$defs/params:helper.stop"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.stop"
+      }
+    },
+    "helper.wait": {
+      "params": {
+        "$ref": "#/$defs/params:helper.wait"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.wait"
+      }
+    },
+    "helper.read": {
+      "params": {
+        "$ref": "#/$defs/params:helper.read"
+      },
+      "result": {
+        "$ref": "#/$defs/result:helper.read"
+      }
+    },
+    "fork.prepare": {
+      "description": "Fork step 1 on the target: resolve where the fork lands and what the source may leave out of the bundle (`heads`: commits the target repository already has).",
+      "params": {
+        "$ref": "#/$defs/params:fork.prepare"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fork.prepare"
+      }
+    },
+    "fork.receive": {
+      "description": "Fork step 2 on the target: apply the bundle, create the workspace or worktree, start the session with `brief`.",
+      "params": {
+        "$ref": "#/$defs/params:fork.receive"
+      },
+      "result": {
+        "$ref": "#/$defs/result:fork.receive"
       }
     },
     "pairing.create": {
@@ -630,6 +813,41 @@
       },
       "result": {
         "$ref": "#/$defs/result:prefs.set"
+      }
+    },
+    "push.config": {
+      "description": "The hub's VAPID public key (base64url), the `applicationServerKey` for `pushManager.subscribe`.",
+      "params": {
+        "$ref": "#/$defs/params:push.config"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.config"
+      }
+    },
+    "push.register": {
+      "description": "Register (or move to this device) a browser push subscription; replaces any row with the same endpoint.",
+      "params": {
+        "$ref": "#/$defs/params:push.register"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.register"
+      }
+    },
+    "push.unregister": {
+      "params": {
+        "$ref": "#/$defs/params:push.unregister"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.unregister"
+      }
+    },
+    "push.test": {
+      "description": "Send a test notification to this device's subscriptions.",
+      "params": {
+        "$ref": "#/$defs/params:push.test"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.test"
       }
     }
   },
@@ -716,6 +934,7 @@
         }
       },
       "approval.resolved": {
+        "description": "`by`: who resolved it. Adapters set it for resolutions that didn't come from approval.respond ('bizzi', 'agent', …); the core stamps 'user' (approval.respond) or 'parent' (the helper's parent session through the bizzi-agents tools, spec §12.5) with `bySessionId`.",
         "data": {
           "$ref": "#/$defs/session:approval.resolved"
         }
@@ -727,6 +946,7 @@
         }
       },
       "question.resolved": {
+        "description": "`by` / `bySessionId`: as for approval.resolved.",
         "data": {
           "$ref": "#/$defs/session:question.resolved"
         }
@@ -760,6 +980,7 @@
         }
       },
       "session.restarted": {
+        "description": "`ok: false` with `fallbackVersion`: the new version failed to start and the session resumed on the previous version (`fallbackVersion`) instead; it keeps running and stays stale.",
         "data": {
           "$ref": "#/$defs/session:session.restarted"
         }
@@ -875,6 +1096,17 @@
         "description": "User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them.",
         "data": {
           "$ref": "#/$defs/global:prefs.updated"
+        }
+      },
+      "pipeline.updated": {
+        "description": "A pipeline run was started or changed (stage started or finished, gate opened or answered).",
+        "data": {
+          "$ref": "#/$defs/global:pipeline.updated"
+        }
+      },
+      "pipeline.removed": {
+        "data": {
+          "$ref": "#/$defs/global:pipeline.removed"
         }
       }
     }
@@ -1137,7 +1369,8 @@
         "codex",
         "opencode",
         "agy",
-        "shell"
+        "shell",
+        "api"
       ]
     },
     "AgentListing": {
@@ -1792,6 +2025,119 @@
     "EventMsg": {
       "$ref": "#/$defs/ChannelEvent"
     },
+    "ForkSessionSpec": {
+      "description": "The session a fork starts on the target machine.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "forkedFrom": {
+          "description": "The source session id (`forkedFrom`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "forkedFrom"
+      ]
+    },
+    "ForkSource": {
+      "description": "What `fork.prepare` and `fork.receive` are told about the source workspace.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "git",
+            "dir"
+          ]
+        },
+        "name": {
+          "description": "Source workspace name (default names on the target).",
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "gitRemote": {
+          "description": "Normalized `origin` URL (linked-workspace match) and the raw one (set as `origin` on a fresh clone).",
+          "type": "string"
+        },
+        "gitRemoteUrl": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "name"
+      ]
+    },
+    "ForkTarget": {
+      "description": "Where a fork lands on the target machine: an existing workspace there, or a new directory.",
+      "type": "object",
+      "properties": {
+        "toWorkspaceId": {
+          "description": "A git workspace on the target: the fork gets a worktree of it on a new branch.",
+          "type": "string"
+        },
+        "toPath": {
+          "description": "A new (absent or empty) directory on the target; required for plain-directory workspaces.",
+          "type": "string"
+        }
+      }
+    },
+    "ForkTransfer": {
+      "description": "How the workspace state travelled for a fork to another machine. `git`: the source branch plus any uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.",
+      "type": "object",
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": [
+            "git",
+            "snapshot"
+          ]
+        },
+        "commit": {
+          "description": "The commit the new session starts from.",
+          "type": "string"
+        },
+        "branch": {
+          "description": "git: the branch created on the target machine.",
+          "type": "string"
+        },
+        "sourceBranch": {
+          "description": "git: the source workspace's branch (absent when detached).",
+          "type": "string"
+        },
+        "uncommitted": {
+          "description": "The snapshot commit includes changes that weren't committed in the source workspace.",
+          "type": "boolean"
+        },
+        "bytes": {
+          "description": "Size of the bundle sent through the hub (0 when the target already had every object).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind",
+        "commit",
+        "uncommitted",
+        "bytes"
+      ]
+    },
     "FsEntry": {
       "type": "object",
       "properties": {
@@ -2038,6 +2384,36 @@
               "$ref": "#/$defs/global:prefs.updated"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "pipeline.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:pipeline.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "pipeline.removed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:pipeline.removed"
+            }
+          }
         }
       ]
     },
@@ -2056,7 +2432,382 @@
         "widget.updated",
         "widget.removed",
         "device.updated",
-        "prefs.updated"
+        "prefs.updated",
+        "pipeline.updated",
+        "pipeline.removed"
+      ]
+    },
+    "HelperChangedFile": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "change": {
+          "type": "string",
+          "enum": [
+            "created",
+            "modified",
+            "deleted"
+          ]
+        },
+        "diffRef": {
+          "description": "Pass to session_read `{ detail: 'diff', path }` for the diff.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "change",
+        "diffRef"
+      ]
+    },
+    "HelperParent": {
+      "description": "What the target machine needs to know about a parent on another machine (`helper.start`).",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "depth": {
+          "description": "The parent's own depth (0 for a session you started).",
+          "type": "number"
+        },
+        "projectId": {
+          "description": "The parent workspace's project and normalized `origin` URL: the helper's default workspace is the linked one.",
+          "type": "string"
+        },
+        "gitRemote": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "depth"
+      ]
+    },
+    "HelperPendingItem": {
+      "description": "A pending approval or question of a helper, as its parent sees it.",
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": [
+            "approval",
+            "question"
+          ]
+        },
+        "id": {
+          "description": "approvalId / questionId: pass to session_answer.",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ApprovalKind"
+        },
+        "title": {
+          "description": "Approval title, or the question's text.",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "input": {
+          "description": "Approvals: the tool input as JSON (truncated).",
+          "type": "string"
+        },
+        "options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/QuestionItem"
+          }
+        },
+        "parentMay": {
+          "description": "What the parent may do: approvals 'allow' / 'deny'; questions 'answer' / 'cancel'.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "note": {
+          "description": "Why the parent may not allow it (allowing stays with the user).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "id",
+        "title",
+        "parentMay"
+      ]
+    },
+    "HelperReadResult": {
+      "description": "`session_read`: a structured summary of what a helper did since a cursor (spec §12.1, usage.md §2).",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "cursor": {
+          "description": "Pass as `since` next time to read only what's new.",
+          "type": "number"
+        },
+        "turns": {
+          "type": "number"
+        },
+        "stopReason": {
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "finalMessage": {
+          "type": "string"
+        },
+        "changedFiles": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HelperChangedFile"
+          }
+        },
+        "tools": {
+          "type": "object",
+          "properties": {
+            "total": {
+              "type": "number"
+            },
+            "byKind": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              }
+            },
+            "failed": {
+              "type": "number"
+            },
+            "denied": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "total",
+            "byKind",
+            "failed",
+            "denied"
+          ]
+        },
+        "waitingOn": {
+          "type": "object",
+          "properties": {
+            "approvals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "budget": {
+              "type": "string"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/HelperPendingItem"
+              }
+            }
+          },
+          "required": [
+            "approvals",
+            "questions"
+          ]
+        },
+        "usage": {
+          "$ref": "#/$defs/HelperSpent"
+        },
+        "transcript": {
+          "description": "detail 'full': the transcript in order (oldest entries dropped first to fit).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "diff": {
+          "description": "detail 'diff'.",
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "state",
+        "cursor",
+        "turns",
+        "changedFiles",
+        "tools",
+        "usage",
+        "truncated"
+      ]
+    },
+    "HelperSpent": {
+      "description": "Spend of a helper and every helper below it (usage.md §2): usd counts metered billing only.",
+      "type": "object",
+      "properties": {
+        "usd": {
+          "type": "number"
+        },
+        "tokens": {
+          "type": "number"
+        },
+        "turns": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "usd",
+        "tokens",
+        "turns"
+      ]
+    },
+    "HelperStartRequest": {
+      "description": "The `session_start` arguments, as sent to the target machine.",
+      "type": "object",
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "workspace": {
+          "description": "Workspace id or path on the target machine. Default: the one linked to the parent's workspace.",
+          "type": "string"
+        },
+        "worktree": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "scope": {
+          "type": "string",
+          "enum": [
+            "child",
+            "detached"
+          ]
+        },
+        "budget": {
+          "description": "Already capped by the parent's machine at what the parent's budgets have left.",
+          "$ref": "#/$defs/SessionBudget"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "prompt"
+      ]
+    },
+    "HelperStartResult": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "queued": {
+          "type": "boolean"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "session",
+        "workspace",
+        "queued",
+        "notes"
+      ]
+    },
+    "HelperWaitResult": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "reached": {
+          "description": "The `until` condition was met (false: timed out).",
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "usage": {
+          "description": "Cross-machine waits: the helper tree's spend, so the parent's machine can count it toward budgets.",
+          "$ref": "#/$defs/HelperSpent"
+        },
+        "pending": {
+          "description": "With parentAnswersApprovals: what the helper waits on and what the parent may answer (session_answer).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HelperPendingItem"
+          }
+        }
+      },
+      "required": [
+        "sessionId",
+        "state",
+        "reached",
+        "reason"
+      ]
+    },
+    "HelperWaitUntil": {
+      "type": "string",
+      "enum": [
+        "idle",
+        "waiting",
+        "done",
+        "ended"
       ]
     },
     "InputBlock": {
@@ -2305,6 +3056,78 @@
         "trusting",
         "balanced",
         "strict"
+      ]
+    },
+    "KnowledgePromotePreview": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Absolute path of the workspace's AGENTS.md on its machine.",
+          "type": "string"
+        },
+        "exists": {
+          "description": "False: writing creates the file.",
+          "type": "boolean"
+        },
+        "baseHash": {
+          "description": "Pass back to `knowledge.promote` so it fails if the file changed in between.",
+          "type": "string"
+        },
+        "heading": {
+          "type": "string"
+        },
+        "ids": {
+          "description": "Items that would be written, in order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "not_found",
+                  "inactive",
+                  "already_promoted",
+                  "not_visible"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "reason"
+            ]
+          }
+        },
+        "diff": {
+          "description": "Unified diff of the change (always an append at the end of the file).",
+          "type": "string"
+        },
+        "warnings": {
+          "description": "E.g. the workspace has a CLAUDE.md, so Claude Code won't read AGENTS.md.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "exists",
+        "baseHash",
+        "heading",
+        "ids",
+        "skipped",
+        "diff",
+        "warnings"
       ]
     },
     "KnowledgeRecord": {
@@ -2677,11 +3500,32 @@
         "knowledge.settings.set",
         "knowledge.sync.pull",
         "knowledge.sync.push",
+        "knowledge.promote.preview",
+        "knowledge.promote",
         "route.suggest",
         "route.score",
+        "route.record",
+        "route.decisions",
+        "route.rules.get",
+        "route.rules.set",
+        "pipelines.list",
+        "pipeline.start",
+        "pipeline.get",
+        "pipeline.gate",
+        "pipeline.cancel",
+        "pipeline.delete",
         "container.create",
         "container.status",
         "container.stop",
+        "session.forkTo",
+        "helper.start",
+        "helper.send",
+        "helper.interrupt",
+        "helper.stop",
+        "helper.wait",
+        "helper.read",
+        "fork.prepare",
+        "fork.receive",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -2689,7 +3533,23 @@
         "theme.save",
         "theme.delete",
         "prefs.get",
-        "prefs.set"
+        "prefs.set",
+        "push.config",
+        "push.register",
+        "push.unregister",
+        "push.test"
+      ]
+    },
+    "NodeCaller": {
+      "description": "Who sent a node-to-node request; stamped by the hub, never trusted from the sender.",
+      "type": "object",
+      "properties": {
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "machineId"
       ]
     },
     "NodeHelloMsg": {
@@ -2734,6 +3594,13 @@
         },
         "hubVersion": {
           "type": "string"
+        },
+        "features": {
+          "description": "Optional link features this hub supports (e.g. HUB_FEATURE_NODE_REQUESTS). Absent on older hubs.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -2836,6 +3703,231 @@
         "nodeUrl"
       ]
     },
+    "PipelineInfo": {
+      "description": "A pipeline run (docs/pipelines.md): stages run one after another on one machine.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "`pl_…`",
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "description": "Where it was started; `where: 'workspace'` stages run here.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "task": {
+          "description": "What `{{task}}` expands to.",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/PipelineSpec"
+        },
+        "status": {
+          "$ref": "#/$defs/PipelineStatus"
+        },
+        "current": {
+          "description": "Index of the stage running, waiting at its gate, or that ended the run.",
+          "type": "number"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineStageRun"
+          }
+        },
+        "gate": {
+          "description": "Set while `status` is `waiting`: the stage about to start and why (its gate, or the run's budget).",
+          "type": "object",
+          "properties": {
+            "stage": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "gate",
+                "budget"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "since": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "stage",
+            "reason",
+            "message",
+            "since"
+          ]
+        },
+        "worktreeId": {
+          "description": "The pipeline's worktree workspace, once created.",
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "workspaceId",
+        "title",
+        "task",
+        "spec",
+        "status",
+        "current",
+        "stages",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PipelineSpec": {
+      "type": "object",
+      "properties": {
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineStageSpec"
+          }
+        },
+        "branch": {
+          "description": "Branch of the pipeline's worktree (default `pipeline/<title>-<id>`); only used when a stage runs `where: 'worktree'`.",
+          "type": "string"
+        },
+        "budgetUsd": {
+          "description": "Metered spend cap for the whole run, checked before each stage; reaching it gates the next stage with reason `budget`.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "stages"
+      ]
+    },
+    "PipelineStageRun": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/PipelineStageStatus"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "endedAt": {
+          "type": "string"
+        },
+        "summary": {
+          "description": "First line(s) of the stage's final message, at most 300 characters.",
+          "type": "string"
+        },
+        "changedFiles": {
+          "description": "Files the stage changed (from its `file.changed` events).",
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "agent",
+        "status"
+      ]
+    },
+    "PipelineStageSpec": {
+      "description": "One stage of a pipeline definition: an agent, a prompt template and where it runs.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Short unique name within the pipeline: lowercase letters, digits, `-` and `_` (`plan`, `implement`, `review`).",
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Prompt template. Placeholders: `{{task}}`, `{{gate.message}}`, `{{previous.name}}`, `{{previous.result}}`, `{{previous.diff}}`, `{{previous.files}}`, and `{{stages.<name>.result|diff|files}}` for any earlier stage.",
+          "type": "string"
+        },
+        "where": {
+          "description": "workspace (default): the pipeline's workspace · worktree: the pipeline's own worktree, shared by every stage that picks it.",
+          "type": "string",
+          "enum": [
+            "workspace",
+            "worktree"
+          ]
+        },
+        "gate": {
+          "description": "Stop for your approval before this stage starts (an inbox item); approving can add a note (`{{gate.message}}`).",
+          "type": "boolean"
+        },
+        "budget": {
+          "description": "Cap for this stage's session (usage.md §2).",
+          "$ref": "#/$defs/SessionBudget"
+        }
+      },
+      "required": [
+        "name",
+        "agent",
+        "prompt"
+      ]
+    },
+    "PipelineStageStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "PipelineStatus": {
+      "type": "string",
+      "enum": [
+        "running",
+        "waiting",
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    },
     "PlanItem": {
       "type": "object",
       "properties": {
@@ -2857,6 +3949,32 @@
       "required": [
         "text",
         "status"
+      ]
+    },
+    "PushActionRequest": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecisionKind"
+        }
+      },
+      "required": [
+        "token",
+        "decision"
+      ]
+    },
+    "PushActionResponse": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "required": [
+        "ok"
       ]
     },
     "QuestionAnswers": {
@@ -4074,6 +5192,44 @@
               "type": "string"
             },
             "method": {
+              "const": "knowledge.promote.preview"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.promote.preview"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.promote"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.promote"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "route.suggest"
             },
             "params": {
@@ -4097,6 +5253,196 @@
             },
             "params": {
               "$ref": "#/$defs/params:route.score"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.record"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.record"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.decisions"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.decisions"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.rules.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.rules.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.rules.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.rules.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipelines.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipelines.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.start"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.start"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.gate"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.gate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.cancel"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.cancel"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.delete"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.delete"
             }
           }
         },
@@ -4154,6 +5500,177 @@
             },
             "params": {
               "$ref": "#/$defs/params:container.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.forkTo"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.forkTo"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.start"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.start"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.send"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.send"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.interrupt"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.interrupt"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.stop"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.wait"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.wait"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "helper.read"
+            },
+            "params": {
+              "$ref": "#/$defs/params:helper.read"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fork.prepare"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fork.prepare"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "fork.receive"
+            },
+            "params": {
+              "$ref": "#/$defs/params:fork.receive"
             }
           }
         },
@@ -4308,6 +5825,82 @@
               "$ref": "#/$defs/params:prefs.set"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.config"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.config"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.register"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.register"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.unregister"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.unregister"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.test"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.test"
+            }
+          }
         }
       ]
     },
@@ -4383,17 +5976,148 @@
         "probability"
       ]
     },
-    "RouteSuggestion": {
+    "RouteDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RouteDecisionInput"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "at": {
+              "description": "ISO time recorded.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at"
+          ]
+        }
+      ]
+    },
+    "RouteDecisionInput": {
+      "description": "One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set for comparing classifiers (spec §11.2 \"Choosing\"): `text` → `chosen`, with what was offered and by whom.",
       "type": "object",
       "properties": {
+        "text": {
+          "description": "The prompt as typed, routing tokens included.",
+          "type": "string"
+        },
         "source": {
-          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.",
           "type": "string",
           "enum": [
             "explicit",
             "single",
             "classifier",
-            "none"
+            "none",
+            "rule"
+          ]
+        },
+        "candidates": {
+          "description": "What the suggestion offered, best first (may be empty).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteCandidate"
+          }
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "classifier": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "model"
+          ]
+        },
+        "rule": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "chosen": {
+          "type": "object",
+          "properties": {
+            "machineId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            }
+          },
+          "required": [
+            "machineId",
+            "workspaceId",
+            "label"
+          ]
+        },
+        "via": {
+          "description": "suggested: sent to the top candidate · picked: another offered candidate · other: a target that wasn't offered.",
+          "type": "string",
+          "enum": [
+            "suggested",
+            "picked",
+            "other"
+          ]
+        },
+        "overridden": {
+          "description": "`chosen` isn't the top candidate (false when nothing was offered).",
+          "type": "boolean"
+        },
+        "sessionId": {
+          "description": "The session started for it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "source",
+        "candidates",
+        "confidence",
+        "chosen",
+        "via",
+        "overridden"
+      ]
+    },
+    "RouteSuggestion": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`) · rule: a routing rule (`route.rules.get`) left one target, or a few to pick from when no classifier can choose. Whenever `confident` is false the client asks.",
+          "type": "string",
+          "enum": [
+            "explicit",
+            "single",
+            "classifier",
+            "none",
+            "rule"
           ]
         },
         "candidates": {
@@ -4450,6 +6174,22 @@
         "note": {
           "description": "Why nothing was decided: no classifier, its error, several matches, or a token problem (\"vps is offline\", \"no workspace matches @mac-mini and #bizzi\").",
           "type": "string"
+        },
+        "rule": {
+          "description": "The routing rule that narrowed the targets (step 3), whatever then chose among them.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
         }
       },
       "required": [
@@ -4459,6 +6199,38 @@
         "confident",
         "text",
         "offered"
+      ]
+    },
+    "RoutingRule": {
+      "description": "A routing preference (knowledge.md §9.3), e.g. \"production, prod logs → machines tagged prod-access\". Matches when any of `match` appears in the prompt as a whole word or phrase, case-insensitive; a trailing `*` matches a word prefix (`prod*`). Exactly one of `tag`, `machineId`, `workspaceId` says where it goes.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "match": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tag": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "agent": {
+          "description": "Agent to use when the prompt names none with `/agent`.",
+          "$ref": "#/$defs/AgentKind"
+        }
+      },
+      "required": [
+        "id",
+        "match"
       ]
     },
     "SecretInfo": {
@@ -5107,8 +6879,16 @@
         "forkedFrom": {
           "type": "string"
         },
+        "forkedFromMachineId": {
+          "description": "Fork to another machine (topology.md §6): the machine `forkedFrom` runs on, when not this one.",
+          "type": "string"
+        },
         "spawnedBy": {
-          "description": "Agent-to-agent (spec §12.1): the parent session that started this helper. Same machine for now.",
+          "description": "Agent-to-agent (spec §12.1): the parent session that started this helper.",
+          "type": "string"
+        },
+        "spawnedByMachineId": {
+          "description": "Cross-machine helper (spec §12.4): the machine the parent (`spawnedBy`) runs on, when not this one.",
           "type": "string"
         },
         "scope": {
@@ -5142,6 +6922,10 @@
         "seenThrough": {
           "description": "Highest seq viewed on any device (spec §4); \"done, not yet seen\" = idle with lastSeq > seenThrough.",
           "type": "number"
+        },
+        "parentAnswersApprovals": {
+          "description": "Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals.",
+          "type": "boolean"
         },
         "createdAt": {
           "type": "string"
@@ -5338,6 +7122,106 @@
           "$ref": "#/$defs/DensityPref"
         }
       }
+    },
+    "WebPushPayload": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "tag": {
+          "description": "Notifications with the same tag replace each other (one per session, or per login for usage).",
+          "type": "string"
+        },
+        "url": {
+          "description": "Absolute click-through URL (`<ui>/#/s/<sessionId>`), or relative to the service worker scope.",
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "urgent": {
+          "type": "boolean"
+        },
+        "approval": {
+          "description": "Present when the notification is about exactly one pending approval.",
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "approvalId": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ApprovalDecisionKind"
+              }
+            },
+            "token": {
+              "type": "string"
+            },
+            "actionUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "approvalId",
+            "options",
+            "token",
+            "actionUrl"
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "title",
+        "body",
+        "tag",
+        "url"
+      ]
+    },
+    "WebPushSubscription": {
+      "description": "A browser push subscription, as `PushSubscription.toJSON()` returns it (keys base64url).",
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "expirationTime": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "keys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string"
+            },
+            "auth": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "p256dh",
+            "auth"
+          ]
+        }
+      },
+      "required": [
+        "endpoint",
+        "keys"
+      ]
     },
     "WidgetValue": {
       "description": "A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code.",
@@ -5654,6 +7538,32 @@
       },
       "required": [
         "machine"
+      ]
+    },
+    "global:pipeline.removed": {
+      "type": "object",
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipelineId",
+        "machineId"
+      ]
+    },
+    "global:pipeline.updated": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
       ]
     },
     "global:prefs.updated": {
@@ -6090,6 +8000,78 @@
     "params:devices.list": {
       "$ref": "#/$defs/Empty"
     },
+    "params:fork.prepare": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "source": {
+              "$ref": "#/$defs/ForkSource"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            }
+          },
+          "required": [
+            "source",
+            "agent"
+          ]
+        }
+      ]
+    },
+    "params:fork.receive": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "source": {
+              "$ref": "#/$defs/ForkSource"
+            },
+            "transfer": {
+              "$ref": "#/$defs/ForkTransfer"
+            },
+            "bundleBase64": {
+              "description": "The git bundle (base64), absent when the target already has `transfer.commit`.",
+              "type": "string"
+            },
+            "bundleRef": {
+              "description": "The ref inside the bundle that points at `transfer.commit`.",
+              "type": "string"
+            },
+            "session": {
+              "$ref": "#/$defs/ForkSessionSpec"
+            },
+            "brief": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "transfer",
+            "session",
+            "brief"
+          ]
+        }
+      ]
+    },
     "params:fs.browse": {
       "allOf": [
         {
@@ -6223,6 +8205,186 @@
       "required": [
         "protocol",
         "client"
+      ]
+    },
+    "params:helper.interrupt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.read": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "since": {
+              "type": "number"
+            },
+            "maxTokens": {
+              "type": "number"
+            },
+            "detail": {
+              "type": "string",
+              "enum": [
+                "summary",
+                "full",
+                "diff"
+              ]
+            },
+            "path": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.send": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "input": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/InputBlock"
+              }
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId",
+            "input"
+          ]
+        }
+      ]
+    },
+    "params:helper.start": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "parent": {
+              "$ref": "#/$defs/HelperParent"
+            },
+            "request": {
+              "$ref": "#/$defs/HelperStartRequest"
+            }
+          },
+          "required": [
+            "parent",
+            "request"
+          ]
+        }
+      ]
+    },
+    "params:helper.stop": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
+      ]
+    },
+    "params:helper.wait": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "caller": {
+              "$ref": "#/$defs/NodeCaller"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "parentId": {
+              "type": "string"
+            },
+            "until": {
+              "$ref": "#/$defs/HelperWaitUntil"
+            },
+            "timeoutMs": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "sessionId",
+            "parentId"
+          ]
+        }
       ]
     },
     "params:knowledge.accept": {
@@ -6359,6 +8521,65 @@
               "type": "number"
             }
           }
+        }
+      ]
+    },
+    "params:knowledge.promote": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "heading": {
+              "type": "string"
+            },
+            "baseHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "ids"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.promote.preview": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "heading": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "ids"
+          ]
         }
       ]
     },
@@ -6596,6 +8817,126 @@
         "kind"
       ]
     },
+    "params:pipeline.cancel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.delete": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.gate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "reject"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId",
+            "decision"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.get": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.start": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/PipelineSpec"
+        },
+        "task": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "spec",
+        "task"
+      ]
+    },
+    "params:pipelines.list": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            }
+          }
+        }
+      ]
+    },
     "params:prefs.get": {
       "$ref": "#/$defs/Empty"
     },
@@ -6619,6 +8960,37 @@
         "prefs"
       ]
     },
+    "params:push.config": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:push.register": {
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "$ref": "#/$defs/WebPushSubscription"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription"
+      ]
+    },
+    "params:push.test": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:push.unregister": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "endpoint"
+      ]
+    },
     "params:question.respond": {
       "type": "object",
       "properties": {
@@ -6638,6 +9010,48 @@
       "required": [
         "sessionId",
         "questionId"
+      ]
+    },
+    "params:route.decisions": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number"
+        },
+        "before": {
+          "type": "string"
+        },
+        "overridden": {
+          "type": "boolean"
+        }
+      }
+    },
+    "params:route.record": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/RouteDecisionInput"
+        }
+      },
+      "required": [
+        "decision"
+      ]
+    },
+    "params:route.rules.get": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:route.rules.set": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
       ]
     },
     "params:route.score": {
@@ -6754,6 +9168,42 @@
       },
       "required": [
         "sessionId"
+      ]
+    },
+    "params:session.forkTo": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/ForkTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "toMachineId": {
+              "type": "string"
+            },
+            "agent": {
+              "description": "Default: the source session's agent.",
+              "$ref": "#/$defs/AgentKind"
+            },
+            "title": {
+              "type": "string"
+            },
+            "prompt": {
+              "description": "Appended to the brief as the next instruction.",
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "toMachineId"
+          ]
+        }
       ]
     },
     "params:session.get": {
@@ -7262,6 +9712,41 @@
         "devices"
       ]
     },
+    "result:fork.prepare": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "heads": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "heads"
+      ]
+    },
+    "result:fork.receive": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "session",
+        "workspace"
+      ]
+    },
     "result:fs.browse": {
       "type": "object",
       "properties": {
@@ -7421,6 +9906,32 @@
         "machine"
       ]
     },
+    "result:helper.interrupt": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:helper.read": {
+      "$ref": "#/$defs/HelperReadResult"
+    },
+    "result:helper.send": {
+      "type": "object",
+      "properties": {
+        "turnId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "turnId"
+      ]
+    },
+    "result:helper.start": {
+      "$ref": "#/$defs/HelperStartResult"
+    },
+    "result:helper.stop": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:helper.wait": {
+      "$ref": "#/$defs/HelperWaitResult"
+    },
     "result:knowledge.accept": {
       "$ref": "#/$defs/Empty"
     },
@@ -7464,6 +9975,39 @@
       },
       "required": [
         "items"
+      ]
+    },
+    "result:knowledge.promote": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "promoted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "created",
+        "promoted"
+      ]
+    },
+    "result:knowledge.promote.preview": {
+      "type": "object",
+      "properties": {
+        "preview": {
+          "$ref": "#/$defs/KnowledgePromotePreview"
+        }
+      },
+      "required": [
+        "preview"
       ]
     },
     "result:knowledge.reject": {
@@ -7601,6 +10145,67 @@
         "pairUrl"
       ]
     },
+    "result:pipeline.cancel": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.delete": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:pipeline.gate": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.get": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.start": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipelines.list": {
+      "type": "object",
+      "properties": {
+        "pipelines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineInfo"
+          }
+        }
+      },
+      "required": [
+        "pipelines"
+      ]
+    },
     "result:prefs.get": {
       "type": "object",
       "properties": {
@@ -7623,8 +10228,105 @@
         "prefs"
       ]
     },
+    "result:push.config": {
+      "type": "object",
+      "properties": {
+        "webPush": {
+          "type": "object",
+          "properties": {
+            "publicKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "publicKey"
+          ]
+        }
+      },
+      "required": [
+        "webPush"
+      ]
+    },
+    "result:push.register": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:push.test": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sent",
+        "failed"
+      ]
+    },
+    "result:push.unregister": {
+      "$ref": "#/$defs/Empty"
+    },
     "result:question.respond": {
       "$ref": "#/$defs/Empty"
+    },
+    "result:route.decisions": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteDecision"
+          }
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "decisions",
+        "total"
+      ]
+    },
+    "result:route.record": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/RouteDecision"
+        }
+      },
+      "required": [
+        "decision"
+      ]
+    },
+    "result:route.rules.get": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
+    },
+    "result:route.rules.set": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
     },
     "result:route.score": {
       "type": "object",
@@ -7686,6 +10388,25 @@
       },
       "required": [
         "session"
+      ]
+    },
+    "result:session.forkTo": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "transfer": {
+          "$ref": "#/$defs/ForkTransfer"
+        }
+      },
+      "required": [
+        "session",
+        "workspace",
+        "transfer"
       ]
     },
     "result:session.get": {
@@ -7940,6 +10661,9 @@
         },
         "by": {
           "type": "string"
+        },
+        "bySessionId": {
+          "type": "string"
         }
       },
       "required": [
@@ -8146,6 +10870,12 @@
         },
         "cancelled": {
           "type": "boolean"
+        },
+        "by": {
+          "type": "string"
+        },
+        "bySessionId": {
+          "type": "string"
         }
       },
       "required": [
@@ -8242,6 +10972,9 @@
           "type": "boolean"
         },
         "error": {
+          "type": "string"
+        },
+        "fallbackVersion": {
           "type": "string"
         }
       },

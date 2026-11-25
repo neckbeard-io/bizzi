@@ -7,6 +7,8 @@ import {
   type AccountUsage,
   BizziError,
   GLOBAL_CHANNEL,
+  NODE_HUB_METHODS,
+  NODE_RELAYED_METHODS,
   NO_CAPABILITIES,
   PROTOCOL_VERSION,
   newId,
@@ -33,7 +35,8 @@ import { publicDevice, type DeviceRow, type HubStore } from './store.ts';
 export interface LinkHandle {
   readonly machineId: string;
   readonly deviceId: string;
-  request(method: string, params: unknown): Promise<unknown>;
+  /** `timeoutMs` overrides the hub's request timeout (long waits, forks). */
+  request(method: string, params: unknown, opts?: { timeoutMs?: number }): Promise<unknown>;
   /** Subscribe a session channel over the link if not already subscribed. */
   watch(ch: string): void;
   /** Forget a channel (session removed). */
@@ -55,6 +58,14 @@ const HUB_ONLY = new Set(['pairing.create', 'devices.list', 'device.revoke', 'pu
 export interface WebPushHandler {
   handle(device: DeviceRow, method: string, params: Record<string, unknown>, ctx: { baseUrl?: string }): Promise<unknown>;
 }
+
+// ---- node → hub requests (spec §5.4, §12.4)
+const NODE_HUB = new Set<string>(NODE_HUB_METHODS);
+const NODE_RELAYED = new Set<string>(NODE_RELAYED_METHODS);
+/** Hub-side forwarding timeouts for node-to-node work that can take a while. */
+const RELAY_TIMEOUT_MS: Record<string, number> = { 'helper.start': 120_000, 'fork.prepare': 60_000, 'fork.receive': 300_000 };
+/** helper.wait: the wait itself plus this margin. */
+const WAIT_MARGIN_MS = 20_000;
 
 export interface RelayOptions {
   store: HubStore;
@@ -344,6 +355,7 @@ export class Relay {
     if (HUB_ONLY.has(method) && device.kind !== 'device') {
       throw new BizziError('unauthorized', `${method} is only available to paired devices`);
     }
+    if (NODE_RELAYED.has(method)) throw new BizziError('unauthorized', `${method} is node-to-node; it only comes from a linked node`);
     switch (method) {
       case 'hello':
         return this.helloResult();
@@ -460,7 +472,41 @@ export class Relay {
     const machineId = this.route(p);
     const link = this.#links.get(machineId);
     if (!link) throw new BizziError('machine_offline', `machine ${machineId} is offline`, { machineId, lastSeenAt: this.store.getMachine(machineId)?.lastSeenAt });
+    // A fork to another machine runs fork.prepare and fork.receive through here before it answers.
+    if (method === 'session.forkTo') return link.request(method, p, { timeoutMs: RELAY_TIMEOUT_MS['fork.receive']! + 60_000 });
     return link.request(method, p);
+  }
+
+  /**
+   * A request a node sent over its link (spec §5.4). Hub-index reads are answered as for a device; the
+   * node-to-node methods go to `params.machineId` with `caller` stamped from the link, never from params.
+   */
+  async handleNode(link: LinkHandle, method: string, params: unknown): Promise<unknown> {
+    if (!this.#links.has(link.machineId) || this.#links.get(link.machineId) !== link) {
+      throw new BizziError('machine_offline', 'this link was replaced');
+    }
+    const p = (params && typeof params === 'object' && !Array.isArray(params) ? params : {}) as Record<string, unknown>;
+    if (NODE_HUB.has(method)) {
+      const device = this.store.getDevice(link.deviceId);
+      if (!device || device.revoked) throw new BizziError('unauthorized', 'node device not found or revoked');
+      return this.handle(device, method, p);
+    }
+    if (!NODE_RELAYED.has(method)) throw new BizziError('unauthorized', `nodes cannot call ${method} on the hub`);
+    if (typeof p.machineId !== 'string' || !p.machineId) throw new BizziError('bad_request', 'machineId is required');
+    const target = p.machineId;
+    if (!this.store.getMachine(target)) throw new BizziError('not_found', `machine ${target} not found`);
+    const to = this.#links.get(target);
+    if (!to) {
+      throw new BizziError('machine_offline', `machine ${this.store.getMachine(target)?.info.name ?? target} is offline`, {
+        machineId: target,
+        lastSeenAt: this.store.getMachine(target)?.lastSeenAt,
+      });
+    }
+    const forwarded = { ...p, caller: { machineId: link.machineId } };
+    let timeoutMs = RELAY_TIMEOUT_MS[method];
+    if (method === 'helper.wait') timeoutMs = (typeof p.timeoutMs === 'number' && p.timeoutMs >= 0 ? Math.min(p.timeoutMs, 600_000) : 45_000) + WAIT_MARGIN_MS;
+    this.logger.log('debug', 'relaying node request', { method, from: link.machineId, to: target });
+    return to.request(method, forwarded, timeoutMs ? { timeoutMs } : {});
   }
 
   /** Every login merged across machines; offline machines' last snapshots still count (with their age). */

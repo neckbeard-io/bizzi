@@ -2,10 +2,14 @@
 // through node.dispatch and its subscriptions from the node's event log (replay, then live). The node's
 // log is the outbox: after any reconnect the hub re-subscribes from the last seq it stored.
 // Reconnects with jittered exponential backoff; the local server is unaffected by link state.
+// When the hub advertises node requests, the link also carries the node's own requests to the hub
+// (`n:` ids) through `node.hub` (spec §5.4); they fail with machine_offline when the socket drops.
 
-import type { BizziNode } from '@bizzi/core';
+import type { BizziNode, HubTransport } from '@bizzi/core';
 import {
   BizziError,
+  HUB_FEATURE_NODE_REQUESTS,
+  NODE_REQUEST_PREFIX,
   PROTOCOL_VERSION,
   type ChannelEvent,
   type ErrorObject,
@@ -212,6 +216,10 @@ class LinkClient implements HubLink {
       let welcomed = false;
       let alive = true;
       const subs = new Map<string, Sub>();
+      // Requests this node sent to the hub over this socket (spec §5.4).
+      const outgoing = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+      let n = 0;
+      let transport: HubTransport | undefined;
       let ping: NodeJS.Timeout | undefined;
       const helloTimer = setTimeout(() => ws.terminate(), 15_000);
 
@@ -252,9 +260,40 @@ class LinkClient implements HubLink {
           if (msg?.type === 'node.welcome') {
             welcomed = true;
             clearTimeout(helloTimer);
-            this.#log.log('info', 'hub link connected', { hubVersion: (msg as { hubVersion?: unknown }).hubVersion });
+            const features = (msg as { features?: unknown }).features;
+            const nodeRequests = Array.isArray(features) && features.includes(HUB_FEATURE_NODE_REQUESTS);
+            this.#log.log('info', 'hub link connected', { hubVersion: (msg as { hubVersion?: unknown }).hubVersion, nodeRequests });
+            if (nodeRequests) {
+              transport = {
+                request: (method, params, timeoutMs) => {
+                  if (ws.readyState !== WebSocket.OPEN) return Promise.reject(new BizziError('machine_offline', 'the hub link is down'));
+                  const id = `${NODE_REQUEST_PREFIX}${++n}`;
+                  return new Promise((resolve, reject) => {
+                    const timer = setTimeout(() => {
+                      outgoing.delete(id);
+                      reject(new BizziError('machine_offline', `the hub did not answer ${method} in time`));
+                    }, timeoutMs);
+                    outgoing.set(id, { resolve, reject, timer });
+                    send({ id, method, params });
+                  });
+                },
+              };
+              this.#node.hub?.attach(transport);
+            } else {
+              this.#node.hub?.markUnsupported();
+            }
             this.#setState('connected');
           }
+          return;
+        }
+        if (typeof msg?.id === 'string' && msg.id.startsWith(NODE_REQUEST_PREFIX) && typeof msg.method !== 'string') {
+          const p = outgoing.get(msg.id);
+          if (!p) return;
+          outgoing.delete(msg.id);
+          clearTimeout(p.timer);
+          const r = msg as { result?: unknown; error?: ErrorObject };
+          if (r.error) p.reject(new BizziError(r.error.code, r.error.message, r.error.data));
+          else p.resolve(r.result);
           return;
         }
         if (typeof msg?.id !== 'string' || typeof msg.method !== 'string') return;
@@ -269,6 +308,14 @@ class LinkClient implements HubLink {
           s.off();
         }
         subs.clear();
+        if (transport) this.#node.hub?.detach(transport);
+        else if (welcomed) this.#node.hub?.detach();
+        const lost = new BizziError('machine_offline', 'lost the hub link');
+        for (const p of outgoing.values()) {
+          clearTimeout(p.timer);
+          p.reject(lost);
+        }
+        outgoing.clear();
         if (this.#ws === ws) this.#ws = undefined;
         resolve({ welcomed, code, reason: reason.toString() });
       });

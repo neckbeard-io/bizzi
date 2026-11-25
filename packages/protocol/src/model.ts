@@ -139,8 +139,12 @@ export interface SessionInfo {
   permissionMode?: string;
   effort?: string;
   forkedFrom?: string;
-  /** Agent-to-agent (spec §12.1): the parent session that started this helper. Same machine for now. */
+  /** Fork to another machine (topology.md §6): the machine `forkedFrom` runs on, when not this one. */
+  forkedFromMachineId?: string;
+  /** Agent-to-agent (spec §12.1): the parent session that started this helper. */
   spawnedBy?: string;
+  /** Cross-machine helper (spec §12.4): the machine the parent (`spawnedBy`) runs on, when not this one. */
+  spawnedByMachineId?: string;
   /** Helpers only. child: stops with its parent · detached: outlives it. */
   scope?: 'child' | 'detached';
   /** 0 for sessions you start; parent depth + 1 for helpers (spec §12.2 depth limit). */
@@ -752,4 +756,159 @@ export interface ServeReady {
   token: string;
   machineId: string;
   pid: number;
+}
+
+// ---- cross-machine work (spec §12.4, topology.md §6)
+
+/** Spend of a helper and every helper below it (usage.md §2): usd counts metered billing only. */
+export interface HelperSpent {
+  usd: number;
+  tokens: number;
+  turns: number;
+}
+
+/** What the target machine needs to know about a parent on another machine (`helper.start`). */
+export interface HelperParent {
+  sessionId: string;
+  agent: AgentKind;
+  permissionMode?: string;
+  /** The parent's own depth (0 for a session you started). */
+  depth: number;
+  /** The parent workspace's project and normalized `origin` URL: the helper's default workspace is the linked one. */
+  projectId?: string;
+  gitRemote?: string;
+}
+
+/** The `session_start` arguments, as sent to the target machine. */
+export interface HelperStartRequest {
+  agent: AgentKind;
+  prompt: string;
+  /** Workspace id or path on the target machine. Default: the one linked to the parent's workspace. */
+  workspace?: string;
+  worktree?: string;
+  model?: string;
+  permissionMode?: string;
+  effort?: string;
+  scope?: 'child' | 'detached';
+  /** Already capped by the parent's machine at what the parent's budgets have left. */
+  budget?: SessionBudget;
+  title?: string;
+}
+
+export interface HelperStartResult {
+  session: SessionInfo;
+  workspace: WorkspaceInfo;
+  queued: boolean;
+  notes: string[];
+}
+
+export type HelperWaitUntil = 'idle' | 'waiting' | 'done' | 'ended';
+
+/** A pending approval or question of a helper, as its parent sees it. */
+export interface HelperPendingItem {
+  type: 'approval' | 'question';
+  /** approvalId / questionId: pass to session_answer. */
+  id: string;
+  kind?: ApprovalKind;
+  /** Approval title, or the question's text. */
+  title: string;
+  description?: string;
+  /** Approvals: the tool input as JSON (truncated). */
+  input?: string;
+  options?: string[];
+  questions?: QuestionItem[];
+  /** What the parent may do: approvals 'allow' / 'deny'; questions 'answer' / 'cancel'. */
+  parentMay: string[];
+  /** Why the parent may not allow it (allowing stays with the user). */
+  note?: string;
+}
+
+export interface HelperWaitResult {
+  sessionId: string;
+  state: SessionStatus;
+  /** The `until` condition was met (false: timed out). */
+  reached: boolean;
+  reason: string;
+  /** Cross-machine waits: the helper tree's spend, so the parent's machine can count it toward budgets. */
+  usage?: HelperSpent;
+  /** With parentAnswersApprovals: what the helper waits on and what the parent may answer (session_answer). */
+  pending?: HelperPendingItem[];
+}
+
+export interface HelperChangedFile {
+  path: string;
+  change: 'created' | 'modified' | 'deleted';
+  /** Pass to session_read `{ detail: 'diff', path }` for the diff. */
+  diffRef: string;
+}
+
+/** `session_read`: a structured summary of what a helper did since a cursor (spec §12.1, usage.md §2). */
+export interface HelperReadResult {
+  sessionId: string;
+  agent: AgentKind;
+  state: SessionStatus;
+  /** Pass as `since` next time to read only what's new. */
+  cursor: number;
+  turns: number;
+  stopReason?: string;
+  error?: string;
+  finalMessage?: string;
+  changedFiles: HelperChangedFile[];
+  tools: { total: number; byKind: Record<string, number>; failed: number; denied: number };
+  waitingOn?: { approvals: string[]; questions: string[]; budget?: string; items?: HelperPendingItem[] };
+  usage: HelperSpent;
+  /** detail 'full': the transcript in order (oldest entries dropped first to fit). */
+  transcript?: string[];
+  /** detail 'diff'. */
+  diff?: string;
+  truncated: boolean;
+}
+
+/**
+ * How the workspace state travelled for a fork to another machine. `git`: the source branch plus any
+ * uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out
+ * on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.
+ */
+export interface ForkTransfer {
+  kind: 'git' | 'snapshot';
+  /** The commit the new session starts from. */
+  commit: string;
+  /** git: the branch created on the target machine. */
+  branch?: string;
+  /** git: the source workspace's branch (absent when detached). */
+  sourceBranch?: string;
+  /** The snapshot commit includes changes that weren't committed in the source workspace. */
+  uncommitted: boolean;
+  /** Size of the bundle sent through the hub (0 when the target already had every object). */
+  bytes: number;
+}
+
+/** What `fork.prepare` and `fork.receive` are told about the source workspace. */
+export interface ForkSource {
+  kind: 'git' | 'dir';
+  /** Source workspace name (default names on the target). */
+  name: string;
+  projectId?: string;
+  /** Normalized `origin` URL (linked-workspace match) and the raw one (set as `origin` on a fresh clone). */
+  gitRemote?: string;
+  gitRemoteUrl?: string;
+}
+
+/** Where a fork lands on the target machine: an existing workspace there, or a new directory. */
+export interface ForkTarget {
+  /** A git workspace on the target: the fork gets a worktree of it on a new branch. */
+  toWorkspaceId?: string;
+  /** A new (absent or empty) directory on the target; required for plain-directory workspaces. */
+  toPath?: string;
+}
+
+/** The session a fork starts on the target machine. */
+export interface ForkSessionSpec {
+  agent: AgentKind;
+  model?: string;
+  permissionMode?: string;
+  effort?: string;
+  title?: string;
+  /** The source session id (`forkedFrom`). */
+  forkedFrom: string;
 }

@@ -22,6 +22,20 @@
 // events), minus `hello`. The node keeps its event log as the outbox: after a reconnect the hub
 // re-subscribes every channel with `since` = the last seq it stored, so nothing is lost or duplicated.
 // Request ids from the hub are prefixed `h:` so a node can tell them apart in logs.
+//
+// Node → hub requests (spec §5.4, §12.4; additive): a hub that lists HUB_FEATURE_NODE_REQUESTS in
+// `NodeWelcomeMsg.features` also accepts ordinary requests *from* the node on the same socket, ids
+// prefixed `n:` (NODE_REQUEST_PREFIX), answered with the usual `{ id, result }` / `{ id, error }`. The
+// request is authenticated as the linked node: the machine id from `node.hello`, nothing the node puts
+// in the params. Two groups are accepted, anything else is `unauthorized`:
+//   - NODE_HUB_METHODS: answered by the hub from its index (machines, workspaces, sessions of every
+//     machine), exactly as for a paired device.
+//   - NODE_RELAYED_METHODS: node-to-node work, forwarded to the machine named by `machineId` (required).
+//     The hub overwrites `caller` with `{ machineId: <the requesting node> }` (NodeCaller), so the target
+//     can check ownership. A target that isn't linked fails fast with `machine_offline` (data:
+//     `{ machineId, lastSeenAt }`); so does a request in flight when either link drops.
+// A node whose hub doesn't list the feature gets `unsupported` locally without sending anything; a node
+// that isn't linked gets `machine_offline`. Devices can't call NODE_RELAYED_METHODS (`unauthorized`).
 
 import type { ApprovalDecisionKind, DeviceKind, MachineInfo } from './model.ts';
 
@@ -94,6 +108,8 @@ export interface NodeHelloMsg {
 export interface NodeWelcomeMsg {
   type: 'node.welcome';
   hubVersion: string;
+  /** Optional link features this hub supports (e.g. HUB_FEATURE_NODE_REQUESTS). Absent on older hubs. */
+  features?: string[];
 }
 
 export type NodeLinkControlMsg = NodeHelloMsg | NodeWelcomeMsg;
@@ -136,3 +152,30 @@ export interface PushActionRequest {
 export interface PushActionResponse {
   ok: true;
 }
+// ---- node → hub requests (spec §5.4, §12.4)
+
+/** `NodeWelcomeMsg.features` entry: the hub accepts requests from the node (see the header comment). */
+export const HUB_FEATURE_NODE_REQUESTS = 'node.requests';
+
+/** Prefix a node puts on request ids it sends to the hub over its link. */
+export const NODE_REQUEST_PREFIX = 'n:';
+
+/** Who sent a node-to-node request; stamped by the hub, never trusted from the sender. */
+export interface NodeCaller {
+  machineId: string;
+}
+
+/** Hub-index reads a node may make (answered by the hub itself). */
+export const NODE_HUB_METHODS = ['machines.list', 'workspaces.list', 'sessions.list'] as const;
+
+/** Node-to-node methods the hub forwards to `params.machineId` with `caller` stamped. */
+export const NODE_RELAYED_METHODS = [
+  'helper.start',
+  'helper.send',
+  'helper.interrupt',
+  'helper.stop',
+  'helper.wait',
+  'helper.read',
+  'fork.prepare',
+  'fork.receive',
+] as const;

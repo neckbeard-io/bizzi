@@ -959,6 +959,13 @@ export class BizziStore {
     return session;
   }
 
+  /** Fork onto another machine through the hub (topology.md §6); the new session lives on `params.toMachineId`. */
+  async forkSessionTo(params: MethodParams<'session.forkTo'>): Promise<MethodResult<'session.forkTo'>> {
+    const res = await this.client.request('session.forkTo', params);
+    this.upsertSession(res.session);
+    return res;
+  }
+
   async deleteSession(sessionId: string): Promise<void> {
     await this.client.request('session.delete', { sessionId });
     this.dropSession(sessionId);

@@ -1,5 +1,6 @@
-// Agent-to-agent orchestration on one machine (spec §12): guardrail settings, permission clamping,
-// and the helper manager behind the bizzi-agents MCP tools (start / send / wait / read / stop).
+// Agent-to-agent orchestration (spec §12): guardrail settings, permission clamping, and the helper
+// manager behind the bizzi-agents MCP tools (start / send / wait / read / stop), on this machine and,
+// through the hub, on others (§12.4).
 //
 // The MCP transport lives in @bizzi/orchestration; everything that decides what a helper may do is here
 // so it applies however the request arrives.
@@ -7,6 +8,7 @@
 import { existsSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
+  AGENT_KINDS,
   BizziError,
   DEFAULT_ORCHESTRATION_SETTINGS,
   GLOBAL_CHANNEL,
@@ -16,8 +18,18 @@ import {
   type ApprovalKind,
   type ApprovalRequest,
   type ChannelEvent,
+  type HelperChangedFile,
+  type HelperParent,
+  type HelperPendingItem,
+  type HelperReadResult,
+  type HelperStartRequest,
+  type HelperStartResult,
+  type HelperWaitResult,
+  type HelperWaitUntil,
   type InputBlock,
   type Logger,
+  type MachineInfo,
+  type NodeCaller,
   type OrchestrationSettings,
   type QuestionAnswers,
   type QuestionItem,
@@ -28,8 +40,10 @@ import {
   type WorkspaceInfo,
 } from '@bizzi/protocol';
 import type { AdapterRegistry } from './agents.ts';
-import type { Spent } from './budget.ts';
+import { parseBudget, type Spent } from './budget.ts';
 import type { EventBus } from './bus.ts';
+import { normalizeRemoteUrl, originUrl } from './git.ts';
+import type { HubPort } from './hub-port.ts';
 import type { Sessions } from './sessions.ts';
 import type { Store } from './store.ts';
 import { gitDiff } from './tools.ts';
@@ -224,12 +238,17 @@ export function clampPermission(o: {
 
 // --- helpers ---------------------------------------------------------------------------------------
 
-export type WaitUntil = 'idle' | 'waiting' | 'done' | 'ended';
+export type WaitUntil = HelperWaitUntil;
 export const WAIT_UNTIL: readonly WaitUntil[] = ['idle', 'waiting', 'done', 'ended'];
 
 export interface StartHelperRequest {
   agent: AgentKind;
-  /** Workspace id or path of a registered workspace on this machine. Default: the parent's. */
+  /**
+   * Machine id or name to run the helper on (spec §12.4). Default (or this machine): here. Another
+   * machine needs the hub link; an offline one fails fast with `machine_offline`.
+   */
+  machine?: string;
+  /** Workspace id or path of a registered workspace on the target machine. Default: the parent's (or the linked one). */
   workspace?: string;
   /** Run in a worktree of the workspace's repo on this branch (created when missing). */
   worktree?: string;
@@ -243,43 +262,15 @@ export interface StartHelperRequest {
   title?: string;
 }
 
-export interface StartHelperResult {
-  session: SessionInfo;
-  workspace: WorkspaceInfo;
-  queued: boolean;
-  notes: string[];
-}
-
-export interface WaitResult {
-  sessionId: string;
-  state: SessionStatus;
-  /** The `until` condition was met (false: timed out). */
-  reached: boolean;
-  reason: string;
-  /** With parentAnswersApprovals: what the helper waits on and what the parent may answer (session_answer). */
-  pending?: PendingItem[];
-}
+export type StartHelperResult = HelperStartResult;
+export type WaitResult = HelperWaitResult;
+export type ChangedFile = HelperChangedFile;
+export type ReadResult = HelperReadResult;
 
 // ---- parent answers approvals (spec §12.5)
 
-/** A pending approval or question of a helper, as its parent sees it. */
-export interface PendingItem {
-  type: 'approval' | 'question';
-  /** approvalId / questionId: pass to session_answer. */
-  id: string;
-  kind?: ApprovalKind;
-  /** Approval title, or the question's text. */
-  title: string;
-  description?: string;
-  /** Approvals: the tool input as JSON (truncated). */
-  input?: string;
-  options?: string[];
-  questions?: QuestionItem[];
-  /** What the parent may do: approvals 'allow' / 'deny'; questions 'answer' / 'cancel'. */
-  parentMay: string[];
-  /** Why the parent may not allow it (allowing stays with the user). */
-  note?: string;
-}
+/** A pending approval or question of a helper, as its parent sees it (protocol: HelperPendingItem). */
+export type PendingItem = HelperPendingItem;
 
 export interface AnswerRequest {
   /** An approvalId or questionId from PendingItem.id. */
@@ -319,32 +310,18 @@ export interface ReadOptions {
   path?: string;
 }
 
-export interface ChangedFile {
-  path: string;
-  change: 'created' | 'modified' | 'deleted';
-  /** Pass to session_read `{ detail: 'diff', path }` for the diff. */
-  diffRef: string;
-}
-
-export interface ReadResult {
-  sessionId: string;
-  agent: AgentKind;
-  state: SessionStatus;
-  /** Pass as `since` next time to read only what's new. */
-  cursor: number;
-  turns: number;
-  stopReason?: string;
-  error?: string;
-  finalMessage?: string;
-  changedFiles: ChangedFile[];
-  tools: { total: number; byKind: Record<string, number>; failed: number; denied: number };
-  waitingOn?: { approvals: string[]; questions: string[]; budget?: string; items?: PendingItem[] };
-  usage: Spent;
-  /** detail 'full': the transcript in order (oldest entries dropped first to fit). */
-  transcript?: string[];
-  /** detail 'diff'. */
-  diff?: string;
-  truncated: boolean;
+/** A machine a helper could run on, as the `machines_list` tool shows it. */
+export interface HelperMachine {
+  id: string;
+  name: string;
+  online: boolean;
+  self: boolean;
+  os: MachineInfo['os'];
+  headful: boolean;
+  tags: string[];
+  description?: string;
+  lastSeenAt?: string;
+  workspaces: { id: string; name: string; path: string; kind: WorkspaceInfo['kind']; branch?: string }[];
 }
 
 export const DEFAULT_READ_TOKENS = 4000;
@@ -354,10 +331,36 @@ export const MAX_WAIT_MS = 600_000;
 
 const TERMINAL: readonly SessionStatus[] = ['ended', 'failed'];
 
+/** Extra time a cross-machine call gets on top of the work it asks for (hub + two links). */
+const REMOTE_MARGIN_MS = 30_000;
+const REMOTE_START_TIMEOUT_MS = 120_000;
+const REMOTE_HELPERS_KEY = 'orchestration.remoteHelpers';
+
 interface Queued {
   sessionId: string;
   parentId: string;
   prompt: string;
+}
+
+/** A helper this node's session started on another machine (spec §12.4), persisted in node meta. */
+interface RemoteHelper {
+  helperId: string;
+  machineId: string;
+  parentId: string;
+  scope: 'child' | 'detached';
+  /** Last known state of the helper (start result, waits, reads, the hub index). */
+  info: SessionInfo;
+  /** A child helper whose parent ended while the hub was unreachable: stopped on the next link. */
+  stopPending?: boolean;
+}
+
+/** The parent as the guardrails see it: a local session, or one on another machine. */
+interface ParentFacts {
+  id: string;
+  agent: AgentKind;
+  permissionMode: string | undefined;
+  depth: number;
+  remote?: { machineId: string };
 }
 
 export interface OrchestratorDeps {
@@ -367,11 +370,18 @@ export interface OrchestratorDeps {
   settings: OrchestrationSettingsStore;
   bus: EventBus;
   logger: Logger;
+  /** Node meta storage (cross-machine helper records). Optional for tests that build an Orchestrator by hand. */
+  store?: Store;
+  /** This machine (its id and name); kept current by machine.set. */
+  machine?: MachineInfo;
+  /** Node → hub requests for cross-machine helpers (spec §12.4). */
+  hub?: HubPort;
 }
 
 /**
- * Helper sessions started by other sessions (spec §12.1). Every call names the calling session; a
- * session may only drive its own helpers.
+ * Helper sessions started by other sessions (spec §12.1, §12.4). Every call names the calling session; a
+ * session may only drive its own helpers. Helpers on other machines go through the hub: this node keeps
+ * a record of each one, and the target machine checks that requests come from the parent's machine.
  */
 export class Orchestrator {
   readonly settings: OrchestrationSettingsStore;
@@ -382,41 +392,67 @@ export class Orchestrator {
   readonly #off: () => void;
   /** Items session_wait already reported, per helper: `done` doesn't return early for them twice. */
   readonly #reported = new Map<string, Set<string>>();
+  readonly #offHub: () => void;
+  readonly #remote = new Map<string, RemoteHelper>();
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps;
     this.settings = deps.settings;
     this.#log = deps.logger.child({ component: 'orchestration' });
+    this.#loadRemote();
     this.#off = deps.bus.on(GLOBAL_CHANNEL, (ev) => {
       if (this.#queue.length > 0 && (ev.type === 'session.updated' || ev.type === 'session.removed')) setImmediate(() => this.#pump());
       if (ev.type === 'session.removed') this.#reported.delete(ev.data.sessionId);
       else if (ev.type === 'session.updated' && TERMINAL.includes(ev.data.session.status)) this.#reported.delete(ev.data.session.id);
+      if (this.#remote.size === 0) return;
+      if (ev.type === 'session.updated' && TERMINAL.includes(ev.data.session.status)) this.#parentGone(ev.data.session.id, false);
+      else if (ev.type === 'session.removed') this.#parentGone(ev.data.sessionId, true);
     });
+    this.#offHub = deps.hub?.onChange((state) => {
+      if (state === 'connected') void this.#flushPendingStops();
+    }) ?? (() => {});
   }
 
   close(): void {
     this.#off();
+    this.#offHub();
     this.#queue.length = 0;
     this.#reported.clear();
   }
 
-  /** Helpers started by `parentId`. */
+  /** Helpers started by `parentId` on this machine. */
   helpers(parentId: string): SessionInfo[] {
     this.#d.sessions.get(parentId);
     return this.#d.sessions.list(undefined, { spawnedBy: parentId });
   }
 
-  /** Throws unless `helperId` is a helper started by `parentId`. */
-  assertHelper(parentId: string, helperId: string): SessionInfo {
-    if (typeof helperId !== 'string' || !helperId) throw new BizziError('bad_request', 'sessionId is required');
-    let s: SessionInfo;
-    try {
-      s = this.#d.sessions.get(helperId).session;
-    } catch {
-      throw new BizziError('not_found', `no helper ${helperId}`);
+  /**
+   * Every helper `parentId` started, on this machine and others. Remote ones come from the hub's index
+   * when linked (and refresh the records), else from the last known state.
+   */
+  async listHelpers(parentId: string): Promise<SessionInfo[]> {
+    const local = this.helpers(parentId);
+    const mine = [...this.#remote.values()].filter((r) => r.parentId === parentId);
+    if (mine.length === 0) return local;
+    const hub = this.#d.hub;
+    if (hub?.connected) {
+      try {
+        const { sessions } = await hub.request<{ sessions: SessionInfo[] }>('sessions.list', { spawnedBy: parentId });
+        for (const s of sessions) {
+          const r = this.#remote.get(s.id);
+          if (r && r.parentId === parentId && s.machineId === r.machineId) r.info = { ...s };
+        }
+        this.#saveRemote();
+      } catch (err) {
+        this.#log.log('debug', 'could not refresh remote helpers', { parentId, err });
+      }
     }
-    if (s.spawnedBy !== parentId) throw new BizziError('not_found', `no helper ${helperId} (only helpers this session started can be used)`);
-    return s;
+    return [...local, ...mine.map((r) => ({ ...r.info }))];
+  }
+
+  /** Throws unless `helperId` is a helper started by `parentId` on this machine. */
+  assertHelper(parentId: string, helperId: string): SessionInfo {
+    return this.#assertLocal(parentId, helperId, undefined);
   }
 
   async startHelper(parentId: string, req: StartHelperRequest): Promise<StartHelperResult> {
@@ -424,6 +460,11 @@ export class Orchestrator {
     const parent = sessions.get(parentId).session;
     if (TERMINAL.includes(parent.status)) throw new BizziError('conflict', 'the calling session has ended');
     if (typeof req.prompt !== 'string' || !req.prompt.trim()) throw new BizziError('bad_request', 'prompt is required');
+    if (req.machine !== undefined && req.machine !== null && req.machine !== '') {
+      if (typeof req.machine !== 'string') throw new BizziError('bad_request', 'machine must be a machine id or name');
+      const target = await this.#resolveMachine(req.machine);
+      if (target) return this.#startRemote(parent, req, target);
+    }
     const settings = this.settings.effective(parent.workspaceId);
     const depth = (parent.depth ?? 0) + 1;
     if (depth > settings.maxDepth) {
@@ -433,13 +474,178 @@ export class Orchestrator {
     }
     const over = sessions.overBudget(parentId);
     if (over) throw new BizziError('conflict', `${over}; no new helpers until the budget is raised`, { budget: true });
+    const workspace = this.#resolveWorkspace(parent, req.workspace);
+    return this.#launch(
+      { id: parentId, agent: parent.agent, permissionMode: parent.permissionMode, depth: parent.depth ?? 0 },
+      settings,
+      workspace,
+      req,
+    );
+  }
+
+  async send(parentId: string, helperId: string, input: InputBlock[]): Promise<{ turnId: string }> {
+    const remote = this.#remoteFor(parentId, helperId);
+    if (remote) return this.#hubCall<{ turnId: string }>(remote, 'helper.send', { input });
+    this.assertHelper(parentId, helperId);
+    return this.#d.sessions.send(helperId, input);
+  }
+
+  async interrupt(parentId: string, helperId: string): Promise<void> {
+    const remote = this.#remoteFor(parentId, helperId);
+    if (remote) {
+      await this.#hubCall(remote, 'helper.interrupt', {});
+      return;
+    }
+    this.assertHelper(parentId, helperId);
+    await this.#d.sessions.interrupt(helperId);
+  }
+
+  async stop(parentId: string, helperId: string): Promise<void> {
+    const remote = this.#remoteFor(parentId, helperId);
+    if (remote) {
+      await this.#hubCall(remote, 'helper.stop', {});
+      remote.info = { ...remote.info, status: 'ended' };
+      remote.stopPending = undefined;
+      this.#saveRemote();
+      return;
+    }
+    this.assertHelper(parentId, helperId);
+    this.#dequeue(helperId);
+    await this.#d.sessions.stop(helperId);
+  }
+
+  /** Wait until the helper reaches `until` or `timeoutMs` passes. Returns the state and a one-line reason. */
+  async wait(parentId: string, helperId: string, until: WaitUntil, timeoutMs = DEFAULT_WAIT_MS, signal?: AbortSignal): Promise<WaitResult> {
+    if (!WAIT_UNTIL.includes(until)) throw new BizziError('bad_request', `until must be one of ${WAIT_UNTIL.join(', ')}`);
+    const ms = Math.max(0, Math.min(timeoutMs, MAX_WAIT_MS));
+    const remote = this.#remoteFor(parentId, helperId);
+    if (remote) return this.#remoteWait(remote, until, ms, signal);
+    this.assertHelper(parentId, helperId);
+    return this.#waitFor(helperId, until, ms, signal, parentId);
+  }
+
+  /** Structured summary of what the helper did since `since` (usage.md §2): never the raw transcript by default. */
+  async read(parentId: string, helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
+    const remote = this.#remoteFor(parentId, helperId);
+    if (remote) {
+      const r = await this.#hubCall<ReadResult>(remote, 'helper.read', { ...opts });
+      this.#noteRemote(remote, r.state, r.usage);
+      return r;
+    }
+    const info = this.assertHelper(parentId, helperId);
+    return this.#readFor(info, opts, parentId);
+  }
+
+  /** Machines a helper could run on: this one, plus every machine the hub knows when linked. */
+  async machines(): Promise<{ connected: boolean; machines: HelperMachine[] }> {
+    const self = this.#d.machine;
+    const selfId = self?.id ?? '';
+    const view = (m: MachineInfo, workspaces: WorkspaceInfo[], isSelf: boolean): HelperMachine => ({
+      id: m.id,
+      name: m.name,
+      online: isSelf ? true : m.online,
+      self: isSelf,
+      os: m.os,
+      headful: m.headful,
+      tags: [...(m.tags ?? [])],
+      ...(m.description ? { description: m.description } : {}),
+      ...(m.lastSeenAt && !isSelf ? { lastSeenAt: m.lastSeenAt } : {}),
+      workspaces: workspaces
+        .filter((w) => w.machineId === m.id)
+        .map((w) => ({ id: w.id, name: w.name, path: w.path, kind: w.kind, ...(w.branch ? { branch: w.branch } : {}) })),
+    });
+    const localWs = this.#d.workspaces.list();
+    const hub = this.#d.hub;
+    if (hub?.connected) {
+      try {
+        const [{ machines }, { workspaces }] = await Promise.all([
+          hub.request<{ machines: MachineInfo[] }>('machines.list', {}),
+          hub.request<{ workspaces: WorkspaceInfo[] }>('workspaces.list', {}),
+        ]);
+        const out = machines.filter((m) => !(m.roles?.length === 1 && m.roles[0] === 'hub')).map((m) => view(m, m.id === selfId ? localWs : workspaces, m.id === selfId));
+        if (self && !out.some((m) => m.self)) out.unshift(view(self, localWs, true));
+        return { connected: true, machines: out };
+      } catch (err) {
+        this.#log.log('debug', 'machines.list through the hub failed', { err });
+      }
+    }
+    return { connected: false, machines: self ? [view(self, localWs, true)] : [] };
+  }
+
+  // --- the target side of cross-machine helpers (helper.*, called through the hub) -----------------------
+
+  /** `helper.start`: a parent on `caller`'s machine starts a helper here. */
+  async startForRemote(caller: NodeCaller | undefined, parent: HelperParent, req: HelperStartRequest): Promise<StartHelperResult> {
+    const from = callerMachine(caller);
+    if (!parent || typeof parent !== 'object') throw new BizziError('bad_request', 'parent is required');
+    if (typeof parent.sessionId !== 'string' || !parent.sessionId) throw new BizziError('bad_request', 'parent.sessionId is required');
+    if (!AGENT_KINDS.includes(parent.agent)) throw new BizziError('bad_request', 'parent.agent is required');
+    if (!Number.isInteger(parent.depth) || parent.depth < 0) throw new BizziError('bad_request', 'parent.depth must be a non-negative integer');
+    if (parent.permissionMode !== undefined && typeof parent.permissionMode !== 'string') throw new BizziError('bad_request', 'parent.permissionMode must be a string');
+    if (!req || typeof req !== 'object') throw new BizziError('bad_request', 'request is required');
+    if (!AGENT_KINDS.includes(req.agent)) throw new BizziError('bad_request', `unknown agent ${String(req.agent)}`);
+    if (typeof req.prompt !== 'string' || !req.prompt.trim()) throw new BizziError('bad_request', 'prompt is required');
+    if (this.#d.sessions.draining) throw new BizziError('machine_offline', 'this machine is shutting down');
+    const workspace = await this.#resolveWorkspaceForRemote(parent, req.workspace);
+    const settings = this.settings.effective(workspace.id);
+    const depth = parent.depth + 1;
+    if (depth > settings.maxDepth) {
+      throw new BizziError('conflict', `helper depth limit reached on ${this.#machineName()} (max ${settings.maxDepth}); finish this work yourself`, {
+        maxDepth: settings.maxDepth,
+      });
+    }
+    const budget = parseBudget(req.budget, 'request.budget');
+    const r = await this.#launch(
+      { id: parent.sessionId, agent: parent.agent, permissionMode: parent.permissionMode, depth: parent.depth, remote: { machineId: from } },
+      settings,
+      workspace,
+      { ...pickStart(req), ...(budget ? { budget } : {}) },
+    );
+    return r;
+  }
+
+  async remoteSend(caller: NodeCaller | undefined, parentId: string, helperId: string, input: InputBlock[]): Promise<{ turnId: string }> {
+    this.#assertLocal(parentId, helperId, callerMachine(caller));
+    return this.#d.sessions.send(helperId, input);
+  }
+
+  async remoteInterrupt(caller: NodeCaller | undefined, parentId: string, helperId: string): Promise<void> {
+    this.#assertLocal(parentId, helperId, callerMachine(caller));
+    await this.#d.sessions.interrupt(helperId);
+  }
+
+  async remoteStop(caller: NodeCaller | undefined, parentId: string, helperId: string): Promise<void> {
+    this.#assertLocal(parentId, helperId, callerMachine(caller));
+    this.#dequeue(helperId);
+    await this.#d.sessions.stop(helperId);
+  }
+
+  async remoteWait(caller: NodeCaller | undefined, parentId: string, helperId: string, until: WaitUntil, timeoutMs: number): Promise<WaitResult> {
+    this.#assertLocal(parentId, helperId, callerMachine(caller));
+    if (!WAIT_UNTIL.includes(until)) throw new BizziError('bad_request', `until must be one of ${WAIT_UNTIL.join(', ')}`);
+    const r = await this.#waitFor(helperId, until, Math.max(0, Math.min(timeoutMs, MAX_WAIT_MS)));
+    if (this.#d.sessions.has(helperId)) r.usage = this.#d.sessions.spent(helperId).tree;
+    return r;
+  }
+
+  async remoteRead(caller: NodeCaller | undefined, parentId: string, helperId: string, opts: ReadOptions): Promise<ReadResult> {
+    const info = this.#assertLocal(parentId, helperId, callerMachine(caller));
+    return this.#readFor(info, opts);
+  }
+
+  // --- internals -------------------------------------------------------------------------------------
+
+  /** Everything after the parent is known and the workspace resolved: the shared guardrails and the start. */
+  async #launch(parent: ParentFacts, settings: OrchestrationSettings, base: WorkspaceInfo, req: StartHelperRequest): Promise<StartHelperResult> {
+    const sessions = this.#d.sessions;
+    const depth = parent.depth + 1;
     const scope = req.scope ?? 'child';
     if (scope !== 'child' && scope !== 'detached') throw new BizziError('bad_request', "scope must be 'child' or 'detached'");
 
     const notes: string[] = [];
     const mode = req.mode ?? this.#d.registry.defaultMode(req.agent);
     const adapter = mode && this.#d.registry.select(req.agent, mode);
-    if (!mode || !adapter) throw new BizziError('agent_unavailable', `${req.agent} is not available on this machine`);
+    if (!mode || !adapter) throw new BizziError('agent_unavailable', `${req.agent} is not available on ${parent.remote ? this.#machineName() : 'this machine'}`);
     let available: string[] = [];
     try {
       available = adapter.capabilities(mode).permissionModes ?? [];
@@ -455,14 +661,14 @@ export class Orchestrator {
     });
     if (clamp.note) notes.push(clamp.note);
 
-    let workspace = this.#resolveWorkspace(parent, req.workspace);
+    let workspace = base;
     if (req.worktree !== undefined) {
       if (typeof req.worktree !== 'string' || !req.worktree.trim()) throw new BizziError('bad_request', 'worktree must be a branch name');
       workspace = await this.#d.workspaces.createWorktree({ workspaceId: workspace.id, branch: req.worktree.trim() });
     }
 
     // Concurrency (spec §12.2): live helpers per parent and per machine.
-    const limit = this.#limitReached(parentId, settings);
+    const limit = this.#limitReached(parent.id, settings);
     if (limit && settings.onLimit === 'fail') throw new BizziError('conflict', `${limit}; stop a helper first`);
     const queued = Boolean(limit);
     if (limit) notes.push(`queued: ${limit}`);
@@ -475,14 +681,15 @@ export class Orchestrator {
     if (req.budget) params.budget = req.budget;
     if (settings.parentAnswersApprovals) notes.push('you may answer some of its approvals and questions with session_answer; the user can still answer first');
     const session = await sessions.create(params, {
-      spawnedBy: parentId,
+      spawnedBy: parent.id,
       scope,
       depth,
       ...(queued ? { queued: true, queuedReason: `queued: ${limit}` } : {}),
       ...(settings.parentAnswersApprovals ? { parentAnswersApprovals: true } : {}),
+      ...(parent.remote ? { remoteParent: { machineId: parent.remote.machineId, agent: parent.agent, ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}) } } : {}),
     });
     if (queued) {
-      this.#queue.push({ sessionId: session.id, parentId, prompt: req.prompt });
+      this.#queue.push({ sessionId: session.id, parentId: parent.id, prompt: req.prompt });
     } else {
       try {
         await sessions.send(session.id, [{ type: 'text', text: req.prompt }]);
@@ -490,41 +697,259 @@ export class Orchestrator {
         notes.push(`the prompt could not be sent: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
-    this.#log.log('info', 'helper started', { parentId, sessionId: session.id, agent: req.agent, depth, scope, queued });
+    this.#log.log('info', 'helper started', {
+      parentId: parent.id,
+      sessionId: session.id,
+      agent: req.agent,
+      depth,
+      scope,
+      queued,
+      ...(parent.remote ? { parentMachineId: parent.remote.machineId } : {}),
+    });
     return { session: sessions.get(session.id).session, workspace, queued, notes };
   }
 
-  async send(parentId: string, helperId: string, input: InputBlock[]): Promise<{ turnId: string }> {
-    this.assertHelper(parentId, helperId);
-    return this.#d.sessions.send(helperId, input);
+  /** Start a helper on another machine through the hub; the guardrails this side can check come first. */
+  async #startRemote(parent: SessionInfo, req: StartHelperRequest, machine: MachineInfo): Promise<StartHelperResult> {
+    const sessions = this.#d.sessions;
+    const hub = this.#d.hub!;
+    const settings = this.settings.effective(parent.workspaceId);
+    const depth = (parent.depth ?? 0) + 1;
+    if (depth > settings.maxDepth) {
+      throw new BizziError('conflict', `helper depth limit reached (max ${settings.maxDepth}); finish this work yourself`, {
+        maxDepth: settings.maxDepth,
+      });
+    }
+    const over = sessions.overBudget(parent.id);
+    if (over) throw new BizziError('conflict', `${over}; no new helpers until the budget is raised`, { budget: true });
+    const scope = req.scope ?? 'child';
+    if (scope !== 'child' && scope !== 'detached') throw new BizziError('bad_request', "scope must be 'child' or 'detached'");
+    if (!AGENT_KINDS.includes(req.agent)) throw new BizziError('bad_request', `unknown agent ${String(req.agent)}`);
+    // The parent's limit counts its helpers everywhere. Another machine can't hold a queue slot for us, so
+    // a full parent fails here; the target applies its own per-machine limit (and its onLimit).
+    const live = this.#liveHelpers(parent.id);
+    if (live >= settings.maxHelpersPerParent) {
+      throw new BizziError('conflict', `this session already has ${live} live helper(s) (max ${settings.maxHelpersPerParent}); stop a helper first`);
+    }
+    // Budgets: the helper gets at most what the parent's caps have left; its spend comes back with waits and reads.
+    const requested = parseBudget(req.budget);
+    const budget = minBudget(requested, sessions.remainingBudget(parent.id));
+    const facts: HelperParent = { sessionId: parent.id, agent: parent.agent, depth: parent.depth ?? 0 };
+    if (parent.permissionMode) facts.permissionMode = parent.permissionMode;
+    const ws = this.#d.workspaces.list().find((w) => w.id === parent.workspaceId);
+    if (ws?.projectId) facts.projectId = ws.projectId;
+    if (ws && ws.kind !== 'dir') {
+      const url = await originUrl(ws.path);
+      if (url) facts.gitRemote = normalizeRemoteUrl(url);
+    }
+    const request: HelperStartRequest = { ...pickStart(req), scope };
+    if (budget) request.budget = budget;
+    else delete request.budget;
+    const r = await hub.request<HelperStartResult>('helper.start', { machineId: machine.id, parent: facts, request }, { timeoutMs: REMOTE_START_TIMEOUT_MS });
+    const rec: RemoteHelper = { helperId: r.session.id, machineId: machine.id, parentId: parent.id, scope, info: { ...r.session } };
+    this.#remote.set(rec.helperId, rec);
+    this.#saveRemote();
+    const notes = [...(r.notes ?? [])];
+    if (requested && budget && JSON.stringify(budget) !== JSON.stringify(requested)) notes.push(`budget capped at what this session has left: ${JSON.stringify(budget)}`);
+    else if (!requested && budget) notes.push(`budget set to what this session has left: ${JSON.stringify(budget)}`);
+    this.#log.log('info', 'remote helper started', { parentId: parent.id, sessionId: rec.helperId, machineId: machine.id, agent: req.agent, scope });
+    return { ...r, notes: [`runs on ${machine.name}`, ...notes] };
   }
 
-  async interrupt(parentId: string, helperId: string): Promise<void> {
-    this.assertHelper(parentId, helperId);
-    await this.#d.sessions.interrupt(helperId);
+  /** undefined when `ref` is this machine; the target MachineInfo otherwise (online), else throws. */
+  async #resolveMachine(ref: string): Promise<MachineInfo | undefined> {
+    const self = this.#d.machine;
+    const want = ref.trim();
+    if (self && (want === self.id || want.toLowerCase() === self.name.toLowerCase())) return undefined;
+    const hub = this.#d.hub;
+    if (!hub) throw new BizziError('unsupported', 'helpers on other machines need a hub link');
+    const { machines } = await hub.request<{ machines: MachineInfo[] }>('machines.list', {});
+    let m = machines.find((x) => x.id === want);
+    if (!m) {
+      const byName = machines.filter((x) => x.name.toLowerCase() === want.toLowerCase());
+      if (byName.length > 1) throw new BizziError('bad_request', `several machines are called ${want}; use a machine id`, { machines: byName.map((x) => x.id) });
+      m = byName[0];
+    }
+    if (!m) throw new BizziError('not_found', `no machine ${want} (machines: ${machines.map((x) => x.name).join(', ') || 'none'})`);
+    if (self && m.id === self.id) return undefined;
+    if (m.roles?.length === 1 && m.roles[0] === 'hub') throw new BizziError('bad_request', `${m.name} is the hub, not a machine that runs agents`);
+    if (!m.online) {
+      throw new BizziError('machine_offline', `machine ${m.name} is offline${m.lastSeenAt ? ` (last seen ${m.lastSeenAt})` : ''}`, {
+        machineId: m.id,
+        lastSeenAt: m.lastSeenAt,
+      });
+    }
+    return m;
   }
 
-  async stop(parentId: string, helperId: string): Promise<void> {
-    this.assertHelper(parentId, helperId);
-    this.#dequeue(helperId);
-    await this.#d.sessions.stop(helperId);
+  /** The record of a remote helper of `parentId`, or undefined when `helperId` should be local. */
+  #remoteFor(parentId: string, helperId: string): RemoteHelper | undefined {
+    if (typeof helperId !== 'string' || !helperId) throw new BizziError('bad_request', 'sessionId is required');
+    if (this.#d.sessions.has(helperId)) return undefined;
+    const r = this.#remote.get(helperId);
+    if (!r) return undefined;
+    if (r.parentId !== parentId) throw new BizziError('not_found', `no helper ${helperId} (only helpers this session started can be used)`);
+    return r;
   }
 
-  /** Wait until the helper reaches `until` or `timeoutMs` passes. Returns the state and a one-line reason. */
-  async wait(parentId: string, helperId: string, until: WaitUntil, timeoutMs = DEFAULT_WAIT_MS, signal?: AbortSignal): Promise<WaitResult> {
-    this.assertHelper(parentId, helperId);
-    if (!WAIT_UNTIL.includes(until)) throw new BizziError('bad_request', `until must be one of ${WAIT_UNTIL.join(', ')}`);
-    const ms = Math.max(0, Math.min(timeoutMs, MAX_WAIT_MS));
+  #hubCall<T = unknown>(r: RemoteHelper, method: string, params: Record<string, unknown>, timeoutMs?: number): Promise<T> {
+    const hub = this.#d.hub;
+    if (!hub) return Promise.reject(new BizziError('unsupported', 'helpers on other machines need a hub link'));
+    return hub.request<T>(method, { ...params, machineId: r.machineId, sessionId: r.helperId, parentId: r.parentId }, timeoutMs ? { timeoutMs } : {});
+  }
+
+  async #remoteWait(r: RemoteHelper, until: WaitUntil, ms: number, signal?: AbortSignal): Promise<WaitResult> {
+    const call = this.#hubCall<WaitResult>(r, 'helper.wait', { until, timeoutMs: ms }, ms + REMOTE_MARGIN_MS);
+    let res: WaitResult;
+    if (signal) {
+      if (signal.aborted) return { sessionId: r.helperId, state: r.info.status, reached: false, reason: 'the wait was cancelled' };
+      res = await new Promise<WaitResult>((resolve, reject) => {
+        const onAbort = () => resolve({ sessionId: r.helperId, state: r.info.status, reached: false, reason: 'the wait was cancelled' });
+        signal.addEventListener('abort', onAbort, { once: true });
+        call.then(
+          (v) => {
+            signal.removeEventListener('abort', onAbort);
+            resolve(v);
+          },
+          (e: unknown) => {
+            signal.removeEventListener('abort', onAbort);
+            reject(e);
+          },
+        );
+      });
+    } else {
+      res = await call;
+    }
+    this.#noteRemote(r, res.state, res.usage);
+    return res;
+  }
+
+  /** Remember a remote helper's state and spend (its spend counts in the parent's tree, spec §12.4). */
+  #noteRemote(r: RemoteHelper, state: SessionStatus | undefined, usage: Spent | undefined): void {
+    if (state && r.info.status !== state) {
+      r.info = { ...r.info, status: state };
+      this.#saveRemote();
+    }
+    if (usage && typeof usage === 'object') this.#d.sessions.recordRemoteSpent(r.parentId, r.helperId, usage);
+  }
+
+  /** Live helpers of `parentId` here plus remote ones not known to have ended. */
+  #liveHelpers(parentId: string): number {
+    const sessions = this.#d.sessions;
+    const local = sessions.list(undefined, { spawnedBy: parentId }).filter((s) => !TERMINAL.includes(s.status) && !sessions.isQueued(s.id)).length;
+    let remote = 0;
+    for (const r of this.#remote.values()) if (r.parentId === parentId && !TERMINAL.includes(r.info.status)) remote++;
+    return local + remote;
+  }
+
+  /** A parent ended (or was deleted): stop its child helpers on other machines, now or on the next link. */
+  #parentGone(parentId: string, removed: boolean): void {
+    let changed = false;
+    for (const r of [...this.#remote.values()]) {
+      if (r.parentId !== parentId) continue;
+      if (r.scope === 'child' && !TERMINAL.includes(r.info.status)) {
+        r.stopPending = true;
+        changed = true;
+      } else if (removed) {
+        this.#remote.delete(r.helperId);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.#saveRemote();
+      void this.#flushPendingStops(removed ? parentId : undefined);
+    }
+  }
+
+  async #flushPendingStops(dropParent?: string): Promise<void> {
+    const hub = this.#d.hub;
+    if (!hub?.connected) return;
+    for (const r of [...this.#remote.values()]) {
+      if (!r.stopPending) continue;
+      try {
+        await this.#hubCall(r, 'helper.stop', {});
+        r.stopPending = undefined;
+        r.info = { ...r.info, status: 'ended' };
+        this.#log.log('debug', 'stopped remote child helper with its parent', { sessionId: r.helperId, parentId: r.parentId, machineId: r.machineId });
+      } catch (err) {
+        const code = err instanceof BizziError ? err.code : undefined;
+        if (code === 'not_found') {
+          // Already gone on the target (deleted, or the machine was reset).
+          r.stopPending = undefined;
+          r.info = { ...r.info, status: 'ended' };
+        } else {
+          this.#log.log('debug', 'remote child helper not stopped yet', { sessionId: r.helperId, machineId: r.machineId, err });
+          continue;
+        }
+      }
+      if (!this.#d.sessions.has(r.parentId) || r.parentId === dropParent) this.#remote.delete(r.helperId);
+    }
+    this.#saveRemote();
+  }
+
+  #loadRemote(): void {
+    const raw = this.#d.store?.getMeta(REMOTE_HELPERS_KEY);
+    if (!raw) return;
+    let list: RemoteHelper[];
+    try {
+      list = JSON.parse(raw) as RemoteHelper[];
+    } catch {
+      return;
+    }
+    if (!Array.isArray(list)) return;
+    for (const r of list) {
+      if (!r || typeof r.helperId !== 'string' || typeof r.parentId !== 'string' || typeof r.machineId !== 'string' || !r.info) continue;
+      // A child whose parent ended (or vanished) while this node was down stops on the next link.
+      const parent = this.#d.sessions.has(r.parentId) ? this.#d.sessions.get(r.parentId).session : undefined;
+      if (r.scope === 'child' && !TERMINAL.includes(r.info.status) && (!parent || TERMINAL.includes(parent.status))) r.stopPending = true;
+      if (!parent && !r.stopPending) continue;
+      this.#remote.set(r.helperId, r);
+    }
+  }
+
+  #saveRemote(): void {
+    const store = this.#d.store;
+    if (!store) return;
+    try {
+      if (this.#remote.size === 0) store.deleteMeta(REMOTE_HELPERS_KEY);
+      else store.setMeta(REMOTE_HELPERS_KEY, JSON.stringify([...this.#remote.values()]));
+    } catch (err) {
+      // The store is closed during shutdown.
+      this.#log.log('debug', 'could not save remote helper records', { err });
+    }
+  }
+
+  #machineName(): string {
+    return this.#d.machine?.name ?? 'this machine';
+  }
+
+  /** Ownership: the helper exists here and was started by `parentId` (on `fromMachine` for remote parents). */
+  #assertLocal(parentId: string, helperId: string, fromMachine: string | undefined): SessionInfo {
+    if (typeof helperId !== 'string' || !helperId) throw new BizziError('bad_request', 'sessionId is required');
+    let s: SessionInfo;
+    try {
+      s = this.#d.sessions.get(helperId).session;
+    } catch {
+      throw new BizziError('not_found', `no helper ${helperId}`);
+    }
+    if (s.spawnedBy !== parentId || (s.spawnedByMachineId ?? undefined) !== fromMachine) {
+      throw new BizziError('not_found', `no helper ${helperId} (only helpers this session started can be used)`);
+    }
+    return s;
+  }
+
+  /** With `parentId` (a local parent), items the parent may answer are listed and `done` returns for new ones. */
+  #waitFor(helperId: string, until: WaitUntil, ms: number, signal?: AbortSignal, parentId?: string): Promise<WaitResult> {
     const check = (): WaitResult | undefined => {
       if (!this.#d.sessions.has(helperId)) return { sessionId: helperId, state: 'ended', reached: true, reason: 'the helper was deleted' };
-      const items = this.pendingFor(parentId, helperId);
+      const items = parentId ? this.pendingFor(parentId, helperId) : undefined;
       // `done` also returns for something new the parent may answer, so it can unblock its helper.
       const fresh = items?.some((i) => (i.parentMay.includes('allow') || i.parentMay.includes('answer')) && !this.#reported.get(helperId)?.has(i.id));
       if (!this.#reached(helperId, until) && !(until === 'done' && fresh)) return undefined;
       return this.#withPending(this.#waitResult(helperId, true, undefined, undefined, items), items);
     };
     const now = check();
-    if (now) return now;
+    if (now) return Promise.resolve(now);
     return new Promise<WaitResult>((resolve) => {
       let settled = false;
       const finish = (r: WaitResult) => {
@@ -549,25 +974,23 @@ export class Orchestrator {
       const offSession = this.#d.bus.on(sessionChannel(helperId), recheck);
       const timer = setTimeout(() => {
         const r = check();
-        finish(r ?? this.#withPending(this.#waitResult(helperId, false, ms), this.pendingFor(parentId, helperId)));
+        finish(r ?? this.#withPending(this.#waitResult(helperId, false, ms), parentId ? this.pendingFor(parentId, helperId) : undefined));
       }, ms);
       const onAbort = () => finish(this.#d.sessions.has(helperId) ? this.#waitResult(helperId, false, ms, 'the wait was cancelled') : { sessionId: helperId, state: 'ended', reached: true, reason: 'the helper was deleted' });
       signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
-  /** Structured summary of what the helper did since `since` (usage.md §2): never the raw transcript by default. */
-  async read(parentId: string, helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
-    this.assertHelper(parentId, helperId);
-    return this.summarize(helperId, opts, parentId);
-  }
-
   /**
    * The same summary for any session on this machine, without the ownership check (pipelines, docs/pipelines.md).
    * With `parentId`, pending items the parent may answer are listed too (parentAnswersApprovals).
    */
-  async summarize(helperId: string, opts: ReadOptions = {}, parentId?: string): Promise<ReadResult> {
-    const info = this.#d.sessions.get(helperId).session;
+  summarize(helperId: string, opts: ReadOptions = {}, parentId?: string): Promise<ReadResult> {
+    return this.#readFor(this.#d.sessions.get(helperId).session, opts, parentId);
+  }
+
+  async #readFor(info: SessionInfo, opts: ReadOptions, parentId?: string): Promise<ReadResult> {
+    const helperId = info.id;
     const since = opts.since ?? 0;
     if (!Number.isInteger(since) || since < 0) throw new BizziError('bad_request', 'since must be a non-negative integer');
     const maxTokens = Math.max(100, Math.min(opts.maxTokens ?? DEFAULT_READ_TOKENS, MAX_READ_TOKENS));
@@ -819,18 +1242,37 @@ export class Orchestrator {
 
   #resolveWorkspace(parent: SessionInfo, ref: string | undefined): WorkspaceInfo {
     if (ref === undefined || ref === '') return this.#d.workspaces.get(parent.workspaceId);
+    return this.#findWorkspace(ref);
+  }
+
+  #findWorkspace(ref: string): WorkspaceInfo {
     if (typeof ref !== 'string') throw new BizziError('bad_request', 'workspace must be a workspace id or path');
     const all = this.#d.workspaces.list();
     const ws = all.find((w) => w.id === ref) ?? all.find((w) => w.path === ref.replace(/\/+$/, ''));
-    if (!ws) throw new BizziError('not_found', `workspace ${ref} is not registered on this machine`);
+    if (!ws) throw new BizziError('not_found', `workspace ${ref} is not registered on ${this.#machineName()}`);
     return ws;
+  }
+
+  /**
+   * Default workspace for a helper whose parent is on another machine: the one linked to the parent's
+   * (same project, else same `origin`), else the only workspace here.
+   */
+  async #resolveWorkspaceForRemote(parent: HelperParent, ref: string | undefined): Promise<WorkspaceInfo> {
+    if (ref !== undefined && ref !== '') return this.#findWorkspace(ref);
+    const linked = await linkedWorkspace(this.#d.workspaces.list(), parent);
+    if (linked) return linked;
+    const roots = this.#d.workspaces.list().filter((w) => w.kind !== 'worktree');
+    if (roots.length === 1) return roots[0]!;
+    const names = roots.map((w) => `${w.name} (${w.path})`).join(', ');
+    throw new BizziError('bad_request', `no workspace on ${this.#machineName()} is linked to the parent's; pass workspace (one of: ${names || 'none registered'})`);
   }
 
   /** Why another helper can't run now, or undefined when there's a free slot. */
   #limitReached(parentId: string, settings: OrchestrationSettings): string | undefined {
     const sessions = this.#d.sessions;
     const live = sessions.list().filter((s) => s.spawnedBy && !TERMINAL.includes(s.status) && !sessions.isQueued(s.id));
-    const mine = live.filter((s) => s.spawnedBy === parentId).length;
+    let mine = live.filter((s) => s.spawnedBy === parentId).length;
+    for (const r of this.#remote.values()) if (r.parentId === parentId && !TERMINAL.includes(r.info.status)) mine++;
     if (mine >= settings.maxHelpersPerParent) return `this session already has ${mine} live helper(s) (max ${settings.maxHelpersPerParent})`;
     const machineMax = this.settings.get().maxHelpersPerMachine;
     if (live.length >= machineMax) return `this machine already runs ${live.length} helper(s) (max ${machineMax})`;
@@ -1012,6 +1454,62 @@ function realish(p: string): string {
   } catch {
     return resolve(p);
   }
+}
+
+/** The caller's machine id stamped by the hub (required for helper.* calls). */
+function callerMachine(caller: NodeCaller | undefined): string {
+  if (!caller || typeof caller !== 'object' || typeof caller.machineId !== 'string' || !caller.machineId) {
+    throw new BizziError('bad_request', 'caller is required (helper.* calls come through the hub)');
+  }
+  return caller.machineId;
+}
+
+/** The fields of a start request that travel to another machine. */
+function pickStart(req: StartHelperRequest | HelperStartRequest): HelperStartRequest {
+  const out: HelperStartRequest = { agent: req.agent, prompt: req.prompt };
+  for (const k of ['workspace', 'worktree', 'model', 'permissionMode', 'effort', 'title'] as const) {
+    const v = req[k];
+    if (v !== undefined && v !== null && v !== '') {
+      if (typeof v !== 'string') throw new BizziError('bad_request', `${k} must be a string`);
+      out[k] = v;
+    }
+  }
+  if (req.scope !== undefined) out.scope = req.scope;
+  if (req.budget !== undefined) out.budget = req.budget;
+  return out;
+}
+
+/** Field-wise minimum of two budgets (either may be undefined). */
+export function minBudget(a: SessionBudget | undefined, b: SessionBudget | undefined): SessionBudget | undefined {
+  if (!a) return b ? { ...b } : undefined;
+  if (!b) return { ...a };
+  const out: SessionBudget = {};
+  for (const k of ['usd', 'tokens', 'turns'] as const) {
+    const x = a[k];
+    const y = b[k];
+    if (x !== undefined || y !== undefined) out[k] = x === undefined ? y! : y === undefined ? x : Math.min(x, y);
+  }
+  return out;
+}
+
+/**
+ * The workspace on this machine linked to another machine's (spec §4 projects): same projectId, else
+ * the same normalized `origin` URL. Repository workspaces win over worktrees.
+ */
+export async function linkedWorkspace(all: WorkspaceInfo[], ref: { projectId?: string; gitRemote?: string }): Promise<WorkspaceInfo | undefined> {
+  const roots = all.filter((w) => w.kind !== 'worktree');
+  if (ref.projectId) {
+    const p = roots.find((w) => w.projectId === ref.projectId);
+    if (p) return p;
+  }
+  if (ref.gitRemote) {
+    for (const w of roots) {
+      if (w.kind !== 'git') continue;
+      const url = await originUrl(w.path);
+      if (url && normalizeRemoteUrl(url) === ref.gitRemote) return w;
+    }
+  }
+  return undefined;
 }
 
 function titleFrom(prompt: string): string {

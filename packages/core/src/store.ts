@@ -3,7 +3,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
-import type { ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+import type { AgentKind, ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
 import type { Spent } from './budget.ts';
 
 /** Core-private per-session state persisted next to the public SessionInfo. */
@@ -37,6 +37,10 @@ export interface SessionState {
    * `fromVersion`: the version that process ran.
    */
   nodeRestarted?: { fromVersion?: string };
+  /** Cross-machine helper (spec §12.4): the parent's agent and mode, for the permission cap on `session.set`. */
+  remoteParent?: { machineId: string; agent: AgentKind; permissionMode?: string };
+  /** Last known spend of this session's helpers on other machines, by helper id (counted in its tree). */
+  remoteSpent?: Record<string, Spent>;
 }
 
 export interface SessionRow {

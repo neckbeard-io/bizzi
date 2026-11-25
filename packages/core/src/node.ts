@@ -15,6 +15,10 @@ import {
   type MethodName,
   type MethodParams,
   type MethodResult,
+  type HelperParent,
+  type HelperStartRequest,
+  type InputBlock,
+  type NodeCaller,
   type SessionEventBody,
 } from '@bizzi/protocol';
 import { AdapterRegistry } from './agents.ts';
@@ -31,7 +35,9 @@ import {
   type MachineUserFields,
 } from './machine.ts';
 import { parseBudget } from './budget.ts';
-import { OrchestrationSettingsStore, Orchestrator } from './orchestration.ts';
+import { Forks } from './fork.ts';
+import { HubPort } from './hub-port.ts';
+import { DEFAULT_WAIT_MS, MAX_READ_TOKENS, MAX_WAIT_MS, OrchestrationSettingsStore, Orchestrator, WAIT_UNTIL } from './orchestration.ts';
 import { Pipelines, pipelinesExtension } from './pipelines.ts';
 import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
@@ -193,6 +199,15 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'pipeline.delete',
   // ---- container workspaces (topology.md §7)
   'container.create',
+  // ---- cross-machine work (spec §12.4, topology.md §6): `machineId` is the target, i.e. this node
+  'helper.start',
+  'helper.send',
+  'helper.interrupt',
+  'helper.stop',
+  'helper.wait',
+  'helper.read',
+  'fork.prepare',
+  'fork.receive',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
@@ -221,6 +236,10 @@ export interface BizziNode {
   readonly orchestration: Orchestrator;
   /** Stale agent processes and restart policies (updates.md). */
   readonly restarts: Restarts;
+  /** Node → hub requests (spec §5.4); the hub link attaches its transport here. */
+  readonly hub: HubPort;
+  /** Forks onto other machines (topology.md §6). */
+  readonly forks: Forks;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -285,12 +304,15 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       probeBilling: async (agent) => (await registry.list()).find((a) => a.agent === agent)?.billing,
     });
     sessions.load();
-    const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger });
+    const hub = new HubPort();
+    const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger, store, machine, hub });
     const restarts = new Restarts({ sessions, registry, bus, logger });
     for (const ext of opts.extensions ?? []) if (ext.prepareStart) startHooks.push(ext.prepareStart);
     // Runs as the node's OS user, like a terminal session (spec §10); see browse.ts.
     const browser = new FsBrowser({ ...opts.browse, workspaces: () => workspaces.list() });
     node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration, restarts, browser);
+    node.hub = hub;
+    node.forks = new Forks({ sessions, workspaces, registry, bus, hub, machine, dataDir: opts.dataDir, logger });
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
     const baselines = new BaselineTracker({
@@ -349,6 +371,8 @@ class Node implements BizziNode {
   baselines!: BaselineTracker;
   readonly orchestration: Orchestrator;
   readonly restarts: Restarts;
+  hub!: HubPort;
+  forks!: Forks;
   readonly #browser: FsBrowser;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
@@ -681,6 +705,50 @@ class Node implements BizziNode {
         s.recheckBudgets();
         return { settings };
       },
+
+      // ---- cross-machine work (spec §12.4, topology.md §6)
+      'session.forkTo': (p) => {
+        const params: MethodParams<'session.forkTo'> = { sessionId: reqString(p, 'sessionId'), toMachineId: reqString(p, 'toMachineId') };
+        for (const k of ['toWorkspaceId', 'toPath', 'title', 'prompt', 'branch'] as const) {
+          const v = optString(p, k);
+          if (v) params[k] = v;
+        }
+        const agent = optString(p, 'agent');
+        if (agent) params.agent = agent as MethodParams<'session.forkTo'>['agent'];
+        return this.forks.forkTo(params);
+      },
+      'helper.start': (p) => this.orchestration.startForRemote(p.caller as NodeCaller, p.parent as HelperParent, p.request as HelperStartRequest),
+      'helper.send': (p) => this.orchestration.remoteSend(p.caller as NodeCaller, reqString(p, 'parentId'), reqString(p, 'sessionId'), p.input as InputBlock[]),
+      'helper.interrupt': async (p) => {
+        await this.orchestration.remoteInterrupt(p.caller as NodeCaller, reqString(p, 'parentId'), reqString(p, 'sessionId'));
+        return {};
+      },
+      'helper.stop': async (p) => {
+        await this.orchestration.remoteStop(p.caller as NodeCaller, reqString(p, 'parentId'), reqString(p, 'sessionId'));
+        return {};
+      },
+      'helper.wait': (p) =>
+        this.orchestration.remoteWait(
+          p.caller as NodeCaller,
+          reqString(p, 'parentId'),
+          reqString(p, 'sessionId'),
+          oneOf(p, 'until', WAIT_UNTIL) ?? 'done',
+          optInt(p, 'timeoutMs', 0, MAX_WAIT_MS) ?? DEFAULT_WAIT_MS,
+        ),
+      'helper.read': (p) => {
+        const opts: { since?: number; maxTokens?: number; detail?: 'summary' | 'full' | 'diff'; path?: string } = {};
+        const since = optInt(p, 'since', 0);
+        const maxTokens = optInt(p, 'maxTokens', 100, MAX_READ_TOKENS);
+        const detail = oneOf(p, 'detail', ['summary', 'full', 'diff'] as const);
+        const path = optString(p, 'path');
+        if (since !== undefined) opts.since = since;
+        if (maxTokens !== undefined) opts.maxTokens = maxTokens;
+        if (detail) opts.detail = detail;
+        if (path) opts.path = path;
+        return this.orchestration.remoteRead(p.caller as NodeCaller, reqString(p, 'parentId'), reqString(p, 'sessionId'), opts);
+      },
+      'fork.prepare': (p) => this.forks.prepare(p.caller as NodeCaller, p as unknown as MethodParams<'fork.prepare'>),
+      'fork.receive': (p) => this.forks.receive(p.caller as NodeCaller, p as unknown as MethodParams<'fork.receive'>),
 
       'fs.list': (p) => fsList(ws.get(reqString(p, 'workspaceId')), optString(p, 'path')),
       'fs.read': (p) =>

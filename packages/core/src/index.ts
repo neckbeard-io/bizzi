@@ -16,6 +16,7 @@ export {
   TERMINAL_SNAPSHOT_MAX_BYTES,
   composePrepareStart,
   type AgentEnvProvider,
+  type CreateExtras,
   type HelperOptions,
   type Resolution,
   type Responder,
@@ -42,9 +43,12 @@ export {
   permissionLevel,
   type AnswerRequest,
   type AnswerResult,
+  linkedWorkspace,
+  minBudget,
   type ChangedFile,
   type PendingItem,
   type ClampResult,
+  type HelperMachine,
   type ReadOptions,
   type ReadResult,
   type StartHelperRequest,
@@ -54,7 +58,10 @@ export {
 } from './orchestration.ts';
 export { addTurn, budgetReached, parseBudget, type Spent } from './budget.ts';
 export { buildMachineInfo, detectHeadful } from './machine.ts';
-export { parseBranchLine, parsePorcelainZ } from './git.ts';
+export { normalizeRemoteUrl, parseBranchLine, parsePorcelainZ } from './git.ts';
+// ---- cross-machine work (spec §5.4, §12.4, topology.md §6)
+export { HUB_REQUEST_TIMEOUT_MS, HubPort, type HubPortState, type HubTransport } from './hub-port.ts';
+export { Forks, MAX_FORK_BUNDLE_BYTES, buildBrief, type ForksDeps } from './fork.ts';
 export {
   UsageTracker,
   USAGE_REPUBLISH_MS,
