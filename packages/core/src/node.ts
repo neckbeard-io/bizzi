@@ -32,6 +32,7 @@ import {
 } from './machine.ts';
 import { parseBudget } from './budget.ts';
 import { OrchestrationSettingsStore, Orchestrator } from './orchestration.ts';
+import { Pipelines, pipelinesExtension } from './pipelines.ts';
 import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
@@ -127,6 +128,13 @@ const UNIMPLEMENTED = [
   'theme.delete',
   'prefs.get',
   'prefs.set',
+  // ---- pipelines (docs/pipelines.md): served by the built-in pipelinesExtension
+  'pipelines.list',
+  'pipeline.start',
+  'pipeline.get',
+  'pipeline.gate',
+  'pipeline.cancel',
+  'pipeline.delete',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */
@@ -163,6 +171,12 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'fs.complete',
   'fs.suggest',
   'machine.set',
+  // ---- pipelines (docs/pipelines.md)
+  'pipelines.list',
+  'pipeline.get',
+  'pipeline.gate',
+  'pipeline.cancel',
+  'pipeline.delete',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
@@ -280,7 +294,8 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     node.baselines = baselines;
     const n = node;
     // Built-ins served through the extension mechanism (usage.list, baselines.list, themes.*), started first.
-    const builtins = [usageExtension(usage), baselinesExtension(baselines), themesExtension(store.path)];
+    const pipelines = new Pipelines({ dbPath: store.path, bus, sessions, workspaces, registry, orchestration, machineId, logger });
+    const builtins = [usageExtension(usage), baselinesExtension(baselines), themesExtension(store.path), pipelinesExtension(pipelines)];
     const contexts = [...builtins, ...(opts.extensions ?? [])].map((ext): [NodeExtension, ExtensionContext] => [
       ext,
       {

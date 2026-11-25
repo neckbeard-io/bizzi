@@ -557,6 +557,59 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
+    "pipelines.list": {
+      "description": "Newest first; `workspaceId` narrows to pipelines started there.",
+      "params": {
+        "$ref": "#/$defs/params:pipelines.list"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipelines.list"
+      }
+    },
+    "pipeline.start": {
+      "description": "Validate the definition and start stage 1 (or wait at its gate). `title` defaults to the task's first line.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.start"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.start"
+      }
+    },
+    "pipeline.get": {
+      "params": {
+        "$ref": "#/$defs/params:pipeline.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.get"
+      }
+    },
+    "pipeline.gate": {
+      "description": "Answer the pending gate: approve starts the stage (`message` becomes `{{gate.message}}`), reject cancels the run.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.gate"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.gate"
+      }
+    },
+    "pipeline.cancel": {
+      "description": "Stop the running stage's session and end the run as cancelled.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.cancel"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.cancel"
+      }
+    },
+    "pipeline.delete": {
+      "description": "Forget a run that isn't running or waiting; its sessions and worktree are kept.",
+      "params": {
+        "$ref": "#/$defs/params:pipeline.delete"
+      },
+      "result": {
+        "$ref": "#/$defs/result:pipeline.delete"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -869,6 +922,17 @@
         "description": "User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them.",
         "data": {
           "$ref": "#/$defs/global:prefs.updated"
+        }
+      },
+      "pipeline.updated": {
+        "description": "A pipeline run was started or changed (stage started or finished, gate opened or answered).",
+        "data": {
+          "$ref": "#/$defs/global:pipeline.updated"
+        }
+      },
+      "pipeline.removed": {
+        "data": {
+          "$ref": "#/$defs/global:pipeline.removed"
         }
       }
     }
@@ -1933,6 +1997,36 @@
               "$ref": "#/$defs/global:prefs.updated"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "pipeline.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:pipeline.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "pipeline.removed"
+            },
+            "data": {
+              "$ref": "#/$defs/global:pipeline.removed"
+            }
+          }
         }
       ]
     },
@@ -1951,7 +2045,9 @@
         "widget.updated",
         "widget.removed",
         "device.updated",
-        "prefs.updated"
+        "prefs.updated",
+        "pipeline.updated",
+        "pipeline.removed"
       ]
     },
     "InputBlock": {
@@ -2648,6 +2744,12 @@
         "knowledge.promote",
         "route.suggest",
         "route.score",
+        "pipelines.list",
+        "pipeline.start",
+        "pipeline.get",
+        "pipeline.gate",
+        "pipeline.cancel",
+        "pipeline.delete",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -2800,6 +2902,231 @@
         "owner",
         "clientUrl",
         "nodeUrl"
+      ]
+    },
+    "PipelineInfo": {
+      "description": "A pipeline run (docs/pipelines.md): stages run one after another on one machine.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "`pl_…`",
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "description": "Where it was started; `where: 'workspace'` stages run here.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "task": {
+          "description": "What `{{task}}` expands to.",
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/PipelineSpec"
+        },
+        "status": {
+          "$ref": "#/$defs/PipelineStatus"
+        },
+        "current": {
+          "description": "Index of the stage running, waiting at its gate, or that ended the run.",
+          "type": "number"
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineStageRun"
+          }
+        },
+        "gate": {
+          "description": "Set while `status` is `waiting`: the stage about to start and why (its gate, or the run's budget).",
+          "type": "object",
+          "properties": {
+            "stage": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string",
+              "enum": [
+                "gate",
+                "budget"
+              ]
+            },
+            "message": {
+              "type": "string"
+            },
+            "since": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "stage",
+            "reason",
+            "message",
+            "since"
+          ]
+        },
+        "worktreeId": {
+          "description": "The pipeline's worktree workspace, once created.",
+          "type": "string"
+        },
+        "error": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "machineId",
+        "workspaceId",
+        "title",
+        "task",
+        "spec",
+        "status",
+        "current",
+        "stages",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PipelineSpec": {
+      "type": "object",
+      "properties": {
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineStageSpec"
+          }
+        },
+        "branch": {
+          "description": "Branch of the pipeline's worktree (default `pipeline/<title>-<id>`); only used when a stage runs `where: 'worktree'`.",
+          "type": "string"
+        },
+        "budgetUsd": {
+          "description": "Metered spend cap for the whole run, checked before each stage; reaching it gates the next stage with reason `budget`.",
+          "type": "number"
+        }
+      },
+      "required": [
+        "stages"
+      ]
+    },
+    "PipelineStageRun": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/PipelineStageStatus"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "endedAt": {
+          "type": "string"
+        },
+        "summary": {
+          "description": "First line(s) of the stage's final message, at most 300 characters.",
+          "type": "string"
+        },
+        "changedFiles": {
+          "description": "Files the stage changed (from its `file.changed` events).",
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "agent",
+        "status"
+      ]
+    },
+    "PipelineStageSpec": {
+      "description": "One stage of a pipeline definition: an agent, a prompt template and where it runs.",
+      "type": "object",
+      "properties": {
+        "name": {
+          "description": "Short unique name within the pipeline: lowercase letters, digits, `-` and `_` (`plan`, `implement`, `review`).",
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "prompt": {
+          "description": "Prompt template. Placeholders: `{{task}}`, `{{gate.message}}`, `{{previous.name}}`, `{{previous.result}}`, `{{previous.diff}}`, `{{previous.files}}`, and `{{stages.<name>.result|diff|files}}` for any earlier stage.",
+          "type": "string"
+        },
+        "where": {
+          "description": "workspace (default): the pipeline's workspace · worktree: the pipeline's own worktree, shared by every stage that picks it.",
+          "type": "string",
+          "enum": [
+            "workspace",
+            "worktree"
+          ]
+        },
+        "gate": {
+          "description": "Stop for your approval before this stage starts (an inbox item); approving can add a note (`{{gate.message}}`).",
+          "type": "boolean"
+        },
+        "budget": {
+          "description": "Cap for this stage's session (usage.md §2).",
+          "$ref": "#/$defs/SessionBudget"
+        }
+      },
+      "required": [
+        "name",
+        "agent",
+        "prompt"
+      ]
+    },
+    "PipelineStageStatus": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "running",
+        "done",
+        "failed",
+        "cancelled"
+      ]
+    },
+    "PipelineStatus": {
+      "type": "string",
+      "enum": [
+        "running",
+        "waiting",
+        "done",
+        "failed",
+        "cancelled"
       ]
     },
     "PlanItem": {
@@ -4101,6 +4428,120 @@
             },
             "params": {
               "$ref": "#/$defs/params:route.score"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipelines.list"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipelines.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.start"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.start"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.gate"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.gate"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.cancel"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.cancel"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "pipeline.delete"
+            },
+            "params": {
+              "$ref": "#/$defs/params:pipeline.delete"
             }
           }
         },
@@ -5511,6 +5952,32 @@
         "machine"
       ]
     },
+    "global:pipeline.removed": {
+      "type": "object",
+      "properties": {
+        "pipelineId": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "pipelineId",
+        "machineId"
+      ]
+    },
+    "global:pipeline.updated": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
     "global:prefs.updated": {
       "type": "object",
       "properties": {
@@ -6430,6 +6897,126 @@
       },
       "required": [
         "kind"
+      ]
+    },
+    "params:pipeline.cancel": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.delete": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.gate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            },
+            "decision": {
+              "type": "string",
+              "enum": [
+                "approve",
+                "reject"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId",
+            "decision"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.get": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pipelineId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "pipelineId"
+          ]
+        }
+      ]
+    },
+    "params:pipeline.start": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "spec": {
+          "$ref": "#/$defs/PipelineSpec"
+        },
+        "task": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "spec",
+        "task"
+      ]
+    },
+    "params:pipelines.list": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            }
+          }
+        }
       ]
     },
     "params:prefs.get": {
@@ -7429,6 +8016,67 @@
         "code",
         "expiresAt",
         "pairUrl"
+      ]
+    },
+    "result:pipeline.cancel": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.delete": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:pipeline.gate": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.get": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipeline.start": {
+      "type": "object",
+      "properties": {
+        "pipeline": {
+          "$ref": "#/$defs/PipelineInfo"
+        }
+      },
+      "required": [
+        "pipeline"
+      ]
+    },
+    "result:pipelines.list": {
+      "type": "object",
+      "properties": {
+        "pipelines": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/PipelineInfo"
+          }
+        }
+      },
+      "required": [
+        "pipelines"
       ]
     },
     "result:prefs.get": {

@@ -30,6 +30,7 @@ const SessionView = lazy(() => import('./session/SessionView.tsx').then((m) => (
 const LoginView = lazy(() => import('./provision/LoginView.tsx').then((m) => ({ default: m.LoginView })));
 const KnowledgeView = lazy(() => import('./knowledge/KnowledgeView.tsx').then((m) => ({ default: m.KnowledgeView })));
 const FanoutView = lazy(() => import('./fanout/FanoutView.tsx').then((m) => ({ default: m.FanoutView })));
+const PipelineView = lazy(() => import('./pipelines/PipelineView.tsx').then((m) => ({ default: m.PipelineView })));
 const SettingsView = lazy(() => import('./settings/SettingsView.tsx').then((m) => ({ default: m.SettingsView })));
 
 export function Shell(props: { onFatal: (message: string) => void }): ReactNode {
@@ -139,6 +140,8 @@ function RouteView(props: { route: Route }): ReactNode {
       return <SessionView key={r.sessionId} sessionId={r.sessionId} tab={r.tab} />;
     case 'fanout':
       return <FanoutView key={r.group} group={r.group} />;
+    case 'pipeline':
+      return <PipelineView key={r.pipelineId} pipelineId={r.pipelineId} />;
     case 'login':
       return <LoginView key={r.sessionId} sessionId={r.sessionId} />;
     case 'inbox':
@@ -483,7 +486,7 @@ export function ThemeToggle(): ReactNode {
 // ---------------------------------------------------------------- phone
 
 const PHONE_NAV: { route: Route; label: string; icon: IconName; match: Route['name'][] }[] = [
-  { route: { name: 'machines' }, label: 'Machines', icon: 'machine', match: ['machines', 'machine', 'login', 'workspaces', 'workspace', 'session', 'fanout'] },
+  { route: { name: 'machines' }, label: 'Machines', icon: 'machine', match: ['machines', 'machine', 'login', 'workspaces', 'workspace', 'session', 'fanout', 'pipeline'] },
   { route: { name: 'inbox' }, label: 'Inbox', icon: 'inbox', match: ['inbox'] },
   { route: { name: 'knowledge' }, label: 'Knowledge', icon: 'book', match: ['knowledge'] },
   { route: { name: 'settings', section: 'general' }, label: 'Settings', icon: 'settings', match: ['settings'] },

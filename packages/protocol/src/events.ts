@@ -8,6 +8,7 @@ import type {
   InputBlock,
   MachineInfo,
   AccountUsage,
+  PipelineInfo,
   ContextUsage,
   SessionInfo,
   WidgetValue,
@@ -166,6 +167,10 @@ export interface GlobalEventMap {
   'device.updated': { device: DeviceInfo };
   /** User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them. */
   'prefs.updated': { prefs: UserPrefs };
+  // ---- pipelines (docs/pipelines.md)
+  /** A pipeline run was started or changed (stage started or finished, gate opened or answered). */
+  'pipeline.updated': { pipeline: PipelineInfo };
+  'pipeline.removed': { pipelineId: string; machineId: string };
 }
 
 export type SessionEventType = keyof SessionEventMap;

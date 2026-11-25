@@ -21,6 +21,8 @@ import type {
   MachineInfo,
   MachineRole,
   OrchestrationSettings,
+  PipelineInfo,
+  PipelineSpec,
   QuestionAnswers,
   RestartPolicy,
   RouteSuggestion,
@@ -364,6 +366,22 @@ export interface Methods {
     params: MachineTarget & { text: string; options: string[] };
     result: { probabilities: number[]; letterMass: number; ms: number; model: string };
   };
+
+  // ---- pipelines (docs/pipelines.md, spec §12.4); one machine: every stage runs on the workspace's node
+  /** Newest first; `workspaceId` narrows to pipelines started there. */
+  'pipelines.list': { params: MachineTarget & { workspaceId?: string }; result: { pipelines: PipelineInfo[] } };
+  /** Validate the definition and start stage 1 (or wait at its gate). `title` defaults to the task's first line. */
+  'pipeline.start': { params: { workspaceId: string; spec: PipelineSpec; task: string; title?: string }; result: { pipeline: PipelineInfo } };
+  'pipeline.get': { params: MachineTarget & { pipelineId: string }; result: { pipeline: PipelineInfo } };
+  /** Answer the pending gate: approve starts the stage (`message` becomes `{{gate.message}}`), reject cancels the run. */
+  'pipeline.gate': {
+    params: MachineTarget & { pipelineId: string; decision: 'approve' | 'reject'; message?: string };
+    result: { pipeline: PipelineInfo };
+  };
+  /** Stop the running stage's session and end the run as cancelled. */
+  'pipeline.cancel': { params: MachineTarget & { pipelineId: string }; result: { pipeline: PipelineInfo } };
+  /** Forget a run that isn't running or waiting; its sessions and worktree are kept. */
+  'pipeline.delete': { params: MachineTarget & { pipelineId: string }; result: Empty };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */

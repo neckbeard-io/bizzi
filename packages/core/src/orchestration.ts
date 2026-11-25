@@ -558,7 +558,13 @@ export class Orchestrator {
 
   /** Structured summary of what the helper did since `since` (usage.md §2): never the raw transcript by default. */
   async read(parentId: string, helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
-    const info = this.assertHelper(parentId, helperId);
+    this.assertHelper(parentId, helperId);
+    return this.summarize(helperId, opts);
+  }
+
+  /** The same summary for any session on this machine, without the ownership check (pipelines, docs/pipelines.md). */
+  async summarize(helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
+    const info = this.#d.sessions.get(helperId).session;
     const since = opts.since ?? 0;
     if (!Number.isInteger(since) || since < 0) throw new BizziError('bad_request', 'since must be a non-negative integer');
     const maxTokens = Math.max(100, Math.min(opts.maxTokens ?? DEFAULT_READ_TOKENS, MAX_READ_TOKENS));

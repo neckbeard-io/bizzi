@@ -213,6 +213,7 @@ function state(sessions: SessionInfo[], over: Partial<BizziState> = {}): BizziSt
     usageState: 'ok',
     widgets: {},
     gitStatus: {},
+    pipelines: {},
     ...over,
   };
 }

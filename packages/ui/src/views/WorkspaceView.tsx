@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
-import { fanoutGroupsEqual, selectAgents, selectFanoutGroups, selectNestedSessions, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
+import { PIPELINE_STATUS_LABEL, fanoutGroupsEqual, pipelinesEqual, selectAgents, selectFanoutGroups, selectNestedSessions, selectPipelines, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
 import { BizziError } from '@bizzi/protocol';
 import type { AgentKind, AgentListing, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
@@ -15,6 +15,8 @@ import { formatRelative } from '../lib/format.ts';
 import { routeHref } from '../lib/router.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, aheadBehind } from '../lib/states.ts';
 import { FanoutDialog } from './fanout/FanoutDialog.tsx';
+import { PipelineDialog } from './pipelines/PipelineDialog.tsx';
+import { PIPELINE_TONE } from './pipelines/PipelineGateCard.tsx';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 
 export function WorkspaceView(props: { workspaceId: string }): ReactNode {
@@ -28,6 +30,8 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
   const [newWorktree, setNewWorktree] = useState(false);
   const [fanout, setFanout] = useState(false);
   const groups = useBizzi((s) => selectFanoutGroups(s, props.workspaceId), fanoutGroupsEqual);
+  const [pipeline, setPipeline] = useState(false);
+  const pipelines = useBizzi((s) => selectPipelines(s, props.workspaceId), pipelinesEqual);
   const online = useMachineOnline(ws?.machineId);
   const machine = useMachine(ws?.machineId);
   const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
@@ -76,6 +80,9 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
           back={() => navigate({ name: 'workspaces' })}
           actions={
             <>
+              <Button size="sm" variant="ghost" icon="bolt" disabled={!online} onClick={() => setPipeline(true)} title="Pipeline: planner → implementer → reviewer, one stage after another, with gates you approve">
+                <span className="hidden sm:inline">Pipeline</span>
+              </Button>
               {ws.kind !== 'dir' ? (
                 <Button size="sm" variant="ghost" icon="tree" disabled={!online} onClick={() => setFanout(true)} title="Fan out: the same prompt to several agents, each in its own worktree, then compare">
                   <span className="hidden sm:inline">Fan out</span>
@@ -106,6 +113,18 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
               <Icon name="tree" size={12} className="text-muted" />
               <span className="max-w-[16rem] truncate">{g.title}</span>
               <span className="text-muted">· {g.sessions.length} runs</span>
+            </a>
+          ))}
+        </div>
+      ) : null}
+      {pipelines.length > 0 ? (
+        <div className="mb-3 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted">Pipelines:</span>
+          {pipelines.slice(0, 8).map((p) => (
+            <a key={p.id} href={routeHref({ name: 'pipeline', pipelineId: p.id })} className="inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 hover:bg-panel-2">
+              <Icon name="bolt" size={12} className="text-muted" />
+              <span className="max-w-[16rem] truncate">{p.title}</span>
+              <Badge tone={PIPELINE_TONE[p.status]}>{p.status === 'running' ? `${p.stages[p.current]?.name ?? ''}` : PIPELINE_STATUS_LABEL[p.status]}</Badge>
             </a>
           ))}
         </div>
@@ -162,6 +181,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       <ErrorText error={remove.error ?? removeWorktree.error} />
       {newWorktree ? <WorktreeDialog workspace={ws} onClose={() => setNewWorktree(false)} /> : null}
       {fanout ? <FanoutDialog workspace={ws} onClose={() => setFanout(false)} /> : null}
+      {pipeline ? <PipelineDialog workspace={ws} onClose={() => setPipeline(false)} /> : null}
     </Page>
   );
 }

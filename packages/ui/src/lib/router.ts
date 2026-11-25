@@ -15,6 +15,8 @@ export type Route =
   | { name: 'session'; sessionId: string; tab: SessionTab }
   /** A fan-out group's compare view (spec §12). */
   | { name: 'fanout'; group: string }
+  /** A pipeline run: its stages, gate and sessions (docs/pipelines.md). */
+  | { name: 'pipeline'; pipelineId: string }
   /** An `agent.login` terminal session with the login helper. */
   | { name: 'login'; sessionId: string }
   | { name: 'inbox' }
@@ -48,6 +50,8 @@ export function parseHash(hash: string): Route {
       return parts[1] ? { name: 'workspace', workspaceId: parts[1] } : { name: 'workspaces' };
     case 'fanout':
       return parts[1] ? { name: 'fanout', group: parts[1] } : { name: 'workspaces' };
+    case 'pipeline':
+      return parts[1] ? { name: 'pipeline', pipelineId: parts[1] } : { name: 'workspaces' };
     case 's': {
       if (!parts[1]) return { name: 'workspaces' };
       const tab = TABS.includes(parts[2] as SessionTab) ? (parts[2] as SessionTab) : 'chat';
@@ -79,6 +83,8 @@ export function routeHref(r: Route): string {
       return `#/w/${encodeURIComponent(r.workspaceId)}`;
     case 'fanout':
       return `#/fanout/${encodeURIComponent(r.group)}`;
+    case 'pipeline':
+      return `#/pipeline/${encodeURIComponent(r.pipelineId)}`;
     case 'session':
       return `#/s/${encodeURIComponent(r.sessionId)}${r.tab === 'chat' ? '' : `/${r.tab}`}`;
   }

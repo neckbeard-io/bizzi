@@ -49,6 +49,7 @@ import {
   iso,
 } from './fixtures.ts';
 import { FANOUT_DIFFS, FANOUT_GIT, FANOUT_SESSIONS, FANOUT_WORKSPACES, fanoutHistory } from './fanout.ts';
+import { MockPipelines } from './pipelines.ts';
 import type { MockHost, MockModule } from './host.ts';
 import { MockFs } from './fs.ts';
 import { MockKnowledge } from './knowledge.ts';
@@ -125,7 +126,7 @@ export class MockCore implements MockHost {
     this.provision = new MockProvision(this);
     this.usageModule = new MockUsage(this, { live: this.autoplay && this.speed > 0 });
     this.fs = new MockFs(this);
-    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule, this.fs];
+    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule, this.fs, new MockPipelines(this)];
   }
 
   /** Stop background timers (tests). */

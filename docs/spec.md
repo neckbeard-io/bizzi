@@ -491,7 +491,7 @@ Budgetless doesn't mean unlimited: GPU capacity is the limit, so a provider can 
 ### 12.4 Later
 
 - **Cross-machine agent-to-agent via the hub:** a parent on the laptop starts a helper on the Mac mini (Xcode build, screenshots) or the VPS (long test run). Needs nodes to send requests to the hub, an additive change to the hub contract (today the hub only acts as a client of nodes). A helper on an offline machine fails fast with `machine_offline`.
-- **Pipelines** (planner → implementer → reviewer across agents) and **watchers** (a cheap or budgetless model pings you only for real decisions). Shared knowledge keeps cross-agent work coherent.
+- **Pipelines** (planner → implementer → reviewer across agents) and **watchers** (a cheap or budgetless model pings you only for real decisions). Shared knowledge keeps cross-agent work coherent. Designed in [pipelines.md](pipelines.md); pipelines built on one machine (2026-11-25: stages, templates, a shared worktree, gates in the inbox, run budgets), watchers designed only.
 
 ### 12.5 Implementation notes (M4, one machine)
 

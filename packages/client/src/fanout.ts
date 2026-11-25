@@ -2,7 +2,7 @@
 // SessionInfo.group; the preflight shown before starting them (docs/usage.md §2); the compare view's
 // model. Pure helpers plus `startFanout`, which only uses public store methods. No UI dependencies.
 
-import { BizziError } from '@bizzi/protocol';
+import { BizziError, PIPELINE_ID_PREFIX } from '@bizzi/protocol';
 import type {
   AccountUsage,
   AgentKind,
@@ -328,7 +328,8 @@ export interface FanoutGroupSummary {
 export function selectFanoutGroups(s: BizziState, repoWorkspaceId?: string): FanoutGroupSummary[] {
   const by = new Map<string, SessionInfo[]>();
   for (const x of Object.values(s.sessions)) {
-    if (!x.group) continue;
+    // Pipeline stages share their pipeline's id as group; they have their own view (docs/pipelines.md).
+    if (!x.group || x.group.startsWith(PIPELINE_ID_PREFIX)) continue;
     const l = by.get(x.group);
     if (l) l.push(x);
     else by.set(x.group, [x]);
