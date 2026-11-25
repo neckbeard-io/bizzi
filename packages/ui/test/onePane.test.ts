@@ -98,10 +98,10 @@ test('picking a duplicate workspace inserts the machine too, unless one is named
 });
 
 test('/ completes agents installed on the target machine', () => {
-  assert.deepEqual(labels('@mac-mini /'), ['claude', 'codex [not installed on mac-mini]', 'opencode [not installed on mac-mini]', 'agy [not installed on mac-mini]']);
+  assert.deepEqual(labels('@mac-mini /'), ['claude', 'codex [not installed on mac-mini]', 'opencode [not installed on mac-mini]', 'agy [not installed on mac-mini]', 'api [not installed on mac-mini]']);
   assert.deepEqual(labels('#bizzi /c'), ['claude', 'codex', 'opencode [not installed on laptop]']);
   // No target yet: any online machine; the shell is never offered.
-  assert.deepEqual(labels('/'), ['claude (laptop, mac-mini)', 'codex (laptop)', 'opencode', 'agy']);
+  assert.deepEqual(labels('/'), ['claude (laptop, mac-mini)', 'codex (laptop)', 'opencode', 'agy', 'api']);
 });
 
 test('parseTokens reads what the server would consume', () => {
