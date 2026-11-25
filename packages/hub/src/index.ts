@@ -23,6 +23,37 @@ export {
 } from './crypto.ts';
 export { Auth, FailureLimiter, RateLimitedError, type AuthOptions } from './auth.ts';
 export { HubStore, publicDevice, type DeviceRow } from './store.ts';
-export { NtfyPusher, USAGE_PUSH_THRESHOLDS, type PushOptions, type PushStateStore } from './push.ts';
+export {
+  NtfyPusher,
+  NtfySink,
+  Pusher,
+  USAGE_PUSH_THRESHOLDS,
+  type NtfySinkOptions,
+  type PushNotification,
+  type PushOptions,
+  type PusherOptions,
+  type PushSink,
+  type PushStateStore,
+} from './push.ts';
+export {
+  VAPID_FILE,
+  WebPushService,
+  WebPushTable,
+  loadOrCreateVapidKeys,
+  type PushSubscriptionRow,
+  type WebPushServiceOptions,
+} from './webpush-service.ts';
+export {
+  WEB_PUSH_MAX_PLAINTEXT,
+  WEB_PUSH_RECORD_SIZE,
+  encryptWebPush,
+  generateVapidKeys,
+  pushAudience,
+  vapidAuthorization,
+  vapidJwt,
+  vapidKeyObject,
+  type EncryptOptions,
+  type VapidKeys,
+} from './webpush.ts';
 export { Relay, CLOSE_REVOKED } from './relay.ts';
 export { KnowledgeSync, type KnowledgeSyncOptions } from './knowledge-sync.ts';

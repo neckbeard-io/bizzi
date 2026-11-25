@@ -103,6 +103,9 @@ hub revokes the node's previous key automatically. To revoke a device, use *Devi
   server, plus `BIZZI_NTFY_TOKEN`). The hub notifies about approval requests, agent questions, and
   turns that ran longer than 20 s. Bursts are debounced per session, and tapping a notification opens
   `BIZZI_PUBLIC_URL/#/s/<session>`.
+- **Web Push (on by default):** browsers turn it on per device under Settings → Devices →
+  Notifications. The hub keeps its VAPID key in `/data/vapid.json`; set `BIZZI_VAPID_SUBJECT`
+  (`mailto:you@example.com`) for Safari, or `BIZZI_WEBPUSH=0` to turn it off.
 - No published ports. It sits on the `proxy` network (for the reverse proxy) and on `internal` (for the
   node). For a quick try without a proxy, uncomment `ports: ["7777:7777"]` and use
   `http://<host>:7777`.

@@ -23,6 +23,9 @@ bizzi hub serve [options]
   --ui-dir <dir>        serve a built UI at / (default: $BIZZI_UI_DIR)
   --log-level <level>   debug | info | warn | error (default: $BIZZI_LOG_LEVEL or info)
   Push: set BIZZI_NTFY_URL (ntfy topic URL) and optionally BIZZI_NTFY_TOKEN.
+  Web Push (browsers/PWAs that turn notifications on) is on by default; its VAPID key is kept in
+  <data-dir>/vapid.json. BIZZI_VAPID_SUBJECT sets the contact (mailto: or https:; Safari needs a real
+  one), BIZZI_WEBPUSH=0 turns it off.
   Routing: set BIZZI_ROUTER_URL and BIZZI_ROUTER_MODEL (an OpenAI-compatible endpoint that returns
   logprobs), optionally BIZZI_ROUTER_API_KEY, BIZZI_ROUTER_BODY (JSON) and BIZZI_ROUTER_THRESHOLD.
   Without a URL the hub borrows the classifier of an online node that has one (always-on first);
@@ -106,6 +109,8 @@ async function hubServe(argv: string[], version: string): Promise<void> {
     opts.ntfy = { url: process.env.BIZZI_NTFY_URL };
     if (process.env.BIZZI_NTFY_TOKEN) opts.ntfy.token = process.env.BIZZI_NTFY_TOKEN;
   }
+  if (process.env.BIZZI_WEBPUSH === '0') opts.webPush = false;
+  else if (process.env.BIZZI_VAPID_SUBJECT) opts.webPush = { subject: process.env.BIZZI_VAPID_SUBJECT };
   try {
     opts.router = routerOptionsFromEnv();
   } catch (err) {

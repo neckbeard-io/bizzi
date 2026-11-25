@@ -135,6 +135,11 @@ const UNIMPLEMENTED = [
   'pipeline.gate',
   'pipeline.cancel',
   'pipeline.delete',
+  // ---- Web Push (tech-choices.md D9): hub only.
+  'push.config',
+  'push.register',
+  'push.unregister',
+  'push.test',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */

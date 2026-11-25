@@ -38,7 +38,7 @@ Exactly one install in your fleet has the hub role. Everything else pairs with i
 | `bizzi hub serve` | hub role: HTTP pairing/auth API, `/ws` for clients, `/ws/node` for nodes, the built UI at `/`; prints the setup code on first start |
 | `bizzi hub code [--kind node\|device]` | mint a pairing code directly on the hub host (headless/docker setups) |
 
-First run: start the hub → pair your first device (browser/phone/desktop) with the setup code → from that device create a node pairing code → start each node with `--connect` and `BIZZI_PAIR_CODE`. `npm run smoke:hub` exercises this whole path. Push notifications: set `BIZZI_NTFY_URL` on the hub (ntfy topic).
+First run: start the hub → pair your first device (browser/phone/desktop) with the setup code → from that device create a node pairing code → start each node with `--connect` and `BIZZI_PAIR_CODE`. `npm run smoke:hub` exercises this whole path. Push notifications: set `BIZZI_NTFY_URL` on the hub (ntfy topic), and/or turn on Web Push per browser under Settings → Devices ([tech-choices.md](tech-choices.md) D9).
 
 ### 2.1 GUI-capable vs headless machines
 

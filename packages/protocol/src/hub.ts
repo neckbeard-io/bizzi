@@ -8,6 +8,7 @@
 //   POST /api/pair             PairRequest      → PairResponse
 //   POST /api/auth/challenge   ChallengeRequest → ChallengeResponse
 //   POST /api/auth/token       TokenRequest     → TokenResponse
+//   POST /api/push/action      PushActionRequest → PushActionResponse   (Web Push notification buttons)
 //   GET  /healthz                               → { ok: true, role: 'hub' }
 // Errors: HTTP 4xx/5xx with body { error: ErrorObject }.
 //
@@ -22,7 +23,7 @@
 // re-subscribes every channel with `since` = the last seq it stored, so nothing is lost or duplicated.
 // Request ids from the hub are prefixed `h:` so a node can tell them apart in logs.
 
-import type { DeviceKind, MachineInfo } from './model.ts';
+import type { ApprovalDecisionKind, DeviceKind, MachineInfo } from './model.ts';
 
 /** Ed25519 public key as a JWK (`{ kty: 'OKP', crv: 'Ed25519', x }`). */
 export interface Ed25519PublicJwk {
@@ -99,3 +100,39 @@ export type NodeLinkControlMsg = NodeHelloMsg | NodeWelcomeMsg;
 
 /** Prefix the hub puts on request ids it sends over a node link. */
 export const HUB_REQUEST_PREFIX = 'h:';
+
+// ---- Web Push (tech-choices.md D9)
+//
+// The hub encrypts a `WebPushPayload` (JSON, RFC 8291) to each subscription registered with
+// `push.register`. The UI's service worker shows it. For an approval it adds Approve / Deny buttons, which
+// POST the payload's single-use `token` to `actionUrl` (/api/push/action): a service worker has no
+// protocol connection, and the token stands in for one, scoped to exactly that approval and device.
+
+export interface WebPushPayload {
+  v: 1;
+  title: string;
+  body: string;
+  /** Notifications with the same tag replace each other (one per session, or per login for usage). */
+  tag: string;
+  /** Absolute click-through URL (`<ui>/#/s/<sessionId>`), or relative to the service worker scope. */
+  url: string;
+  sessionId?: string;
+  urgent?: boolean;
+  /** Present when the notification is about exactly one pending approval. */
+  approval?: {
+    sessionId: string;
+    approvalId: string;
+    options: ApprovalDecisionKind[];
+    token: string;
+    actionUrl: string;
+  };
+}
+
+export interface PushActionRequest {
+  token: string;
+  decision: ApprovalDecisionKind;
+}
+
+export interface PushActionResponse {
+  ok: true;
+}
