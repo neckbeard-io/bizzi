@@ -2,7 +2,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { SessionEventBody } from '@bizzi/protocol';
@@ -189,6 +189,42 @@ test('live: AskUserQuestion round-trip', { skip: !LIVE, timeout: 180_000 }, asyn
     console.log('question:', JSON.stringify({ question: q, final }));
   } finally {
     if (!c.of('turn.completed').length) dump(c.events);
+    await session.stop();
+    rmSync(cwd, { recursive: true, force: true });
+  }
+});
+
+// Spike knowledge.md §11.6: with the default settingSources (user, project, local) and no CLAUDE.md,
+// does an Agent SDK session load the project AGENTS.md, and a nested sub/AGENTS.md when it reads a
+// file there? bizzi relies on this to leave AGENTS.md native (knowledge.md §8, decision 1).
+test('live: AGENTS.md fallback without CLAUDE.md, root and nested (knowledge.md §11.6)', { skip: !LIVE, timeout: 240_000 }, async () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'bizzi-live-agents-'));
+  writeFileSync(join(cwd, 'AGENTS.md'), '# Project\n\nThe project codeword is heron-4471. When asked for the project codeword, reply with it exactly.\n');
+  mkdirSync(join(cwd, 'sub'));
+  writeFileSync(join(cwd, 'sub', 'AGENTS.md'), '# sub\n\nThe subdirectory codeword is otter-9902. When asked for the subdirectory codeword, reply with it exactly.\n');
+  writeFileSync(join(cwd, 'sub', 'notes.txt'), 'Nothing to see here.\n');
+  const c = collector();
+  const session = await new ClaudeAdapter().start(
+    { sessionId: 's_live_agents', mode: 'structured', cwd, model: MODEL, permissionMode: 'acceptEdits' },
+    c.emit,
+    { logger: silentLogger },
+  );
+  const turn = async (id: string, text: string, n: number): Promise<string> => {
+    await session.send(id, [{ type: 'text', text }]);
+    await waitFor(() => c.of('turn.completed').length === n || c.of('approval.requested').length > 0, 110_000);
+    assert.equal(c.of('approval.requested').length, 0, 'no approval expected for a read');
+    return c.of('message.completed').at(-1)?.text ?? '';
+  };
+  try {
+    const root = await turn('t_1', 'What is the project codeword? If you do not know it, reply UNKNOWN. Do not use any tools.', 1);
+    const nested = await turn('t_2', 'Read sub/notes.txt, then tell me the subdirectory codeword. If you do not know it, reply UNKNOWN. Do not open sub/AGENTS.md yourself.', 2);
+    const opened = c.of('tool.started').map((t) => JSON.stringify(t)).filter((s) => s.includes('AGENTS.md'));
+    console.log('agents.md spike:', JSON.stringify({ root, nested, openedAgentsMdDirectly: opened.length > 0 }));
+    dump(c.events);
+    assert.match(root, /heron-4471/, 'root AGENTS.md loaded at session start');
+    assert.equal(opened.length, 0, 'the model must not read sub/AGENTS.md with a tool');
+    assert.match(nested, /otter-9902/, 'nested AGENTS.md loaded when reading a file in sub/');
+  } finally {
     await session.stop();
     rmSync(cwd, { recursive: true, force: true });
   }

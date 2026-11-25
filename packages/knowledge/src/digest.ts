@@ -38,6 +38,22 @@ export interface DigestOptions {
   machine?: MachineCardFacts;
   /** Clock for recency ranking (tests). */
   now?: number;
+  /**
+   * Keep memories the session's agent already loads natively (Claude auto-memory harvested from this
+   * workspace on this machine, knowledge.md §8). Default false: they'd be seen twice.
+   */
+  includeNative?: boolean;
+}
+
+/**
+ * A memory the session's agent reads natively anyway: harvested from Claude's auto-memory on the
+ * same machine for the same workspace, and the session is Claude (knowledge.md §8). Memories
+ * harvested on another machine, or from another workspace's memory directory, aren't native here.
+ */
+export function isNativeToSession(item: KnowledgeItem, ctx: KnowledgeContext): boolean {
+  const s = item.source;
+  if (ctx.agent !== 'claude' || s.via !== 'harvest' || s.agent !== 'claude' || s.machineId !== ctx.machineId) return false;
+  return s.workspaceId === undefined || ctx.workspaceId === undefined || s.workspaceId === ctx.workspaceId;
 }
 
 export interface KnowledgeDigest {
@@ -150,7 +166,7 @@ export function buildKnowledgeDigest(context: KnowledgeContext, opts: DigestOpti
     requireMatch: false,
     limit: 1000,
     ...(opts.now !== undefined ? { now: opts.now } : {}),
-  });
+  }).filter((m) => opts.includeNative === true || !isNativeToSession(m.item, context));
 
   const memHeader = ['## Memory digest', 'What bizzi remembers about this context, most relevant first (search for more with `memory_search`):'];
   const included: RankedMemory[] = [];

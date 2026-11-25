@@ -29,6 +29,7 @@ describe('services inside createNode({ extensions })', { skip: supported ? false
       widgets: { dir: join(dir, 'widgets'), watch: false },
       recipes,
       knowledge: () => store,
+      claudeHome: join(dir, '.claude'),
       login: { env: { PATH: '/usr/bin:/bin', HOME: home }, probeOptions: { home, npmPrefix: null }, workspacePath: dir },
     });
     const structured = new FakeAdapter({ agent: 'claude' });

@@ -1,6 +1,8 @@
 // Knowledge extension (docs/knowledge.md): the `knowledge.*` methods on top of @bizzi/knowledge,
-// `knowledge.changed` events, Claude auto-memory harvest when a Claude session ends, and the
-// `knowledge.sync.*` pair the hub calls to replicate the store between machines (§9.4).
+// `knowledge.changed` events, Claude auto-memory harvest (§8: on node start, when a workspace is
+// added, on a watch of each workspace's memory directory, and when a Claude session ends),
+// "Add to AGENTS.md" (`knowledge.promote*`, §8), and the `knowledge.sync.*` pair the hub calls to
+// replicate the store between machines (§9.4).
 //
 // The KnowledgeStore is shared with the session-start injection hook (apps/cli/src/knowledge.ts):
 // pass the same instance, or a function that opens it lazily for a machine id.
@@ -16,6 +18,7 @@ import {
   type ChannelEvent,
   type KnowledgeInboxCard,
   type KnowledgeItemInfo,
+  type KnowledgePromotePreview,
   type KnowledgeRecord,
   type KnowledgeScope as WireScope,
   type KnowledgeSettings as WireSettings,
@@ -24,11 +27,13 @@ import {
 } from '@bizzi/protocol';
 import {
   MEMORY_KINDS,
+  MemoryDirWatcher,
   POLICY_PRESETS,
   POLICY_SOURCES,
   SESSION_SCOPE_LEVELS,
   acceptItems,
   addKnowledge,
+  applyPromotion,
   claudeMemoryDir,
   forgetKnowledge,
   harvestClaudeMemory,
@@ -37,10 +42,13 @@ import {
   loadSettings,
   normalizeScope,
   parseRemoteItem,
+  planPromotion,
   rejectItems,
   saveSettings,
   updateKnowledge,
+  type DirWatchFn,
   type HarvestResult,
+  type KnowledgeContext,
   type KnowledgeItem,
   type KnowledgeScope,
   type KnowledgeSettings,
@@ -64,8 +72,19 @@ export type KnowledgeStoreSource = KnowledgeStore | ((machineId: string) => Know
 
 export interface KnowledgeExtensionOptions {
   store: KnowledgeStoreSource;
-  /** Import Claude auto-memory when a Claude session ends (default true). */
+  /**
+   * Import Claude auto-memory (default true): on start, when a workspace is added, when its memory
+   * directory changes (see `watch`) and when a Claude session ends.
+   */
   harvest?: boolean;
+  /** Watch each workspace's Claude memory directory and harvest on change (default true; needs `harvest`). */
+  watch?: boolean;
+  /** Quiet period before a watched change is harvested. Default 1000 ms. */
+  watchDebounceMs?: number;
+  /** Re-check memory directories that appeared without an event we saw. Default 60 000 ms; 0 disables. */
+  watchRearmMs?: number;
+  /** `fs.watch`-compatible (tests). */
+  watchFn?: DirWatchFn;
   /** Claude's config dir for harvest (default ~/.claude). */
   claudeHome?: string;
   /**
@@ -187,8 +206,11 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
   let lastHlc: string | undefined;
   let pollTimer: NodeJS.Timeout | undefined;
   let globalSub: { unsubscribe(): void } | undefined;
+  let watcher: MemoryDirWatcher | undefined;
+  let rearmTimer: NodeJS.Timeout | undefined;
   const lastStatus = new Map<string, SessionInfo['status']>();
   const harvests = new Set<Promise<unknown>>();
+  const claudeHome = opts.claudeHome ?? join(homedir(), '.claude');
 
   function getStore(ctx: ExtensionContext): KnowledgeStore {
     if (!store) {
@@ -244,7 +266,7 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
   async function harvestWorkspace(ctx: ExtensionContext, workspaceId: string): Promise<HarvestResult | undefined> {
     const ws = await workspaceById(ctx, workspaceId);
     if (!ws) return undefined;
-    const dir = claudeMemoryDir(ws.path, opts.claudeHome ?? join(homedir(), '.claude'));
+    const dir = claudeMemoryDir(ws.path, claudeHome);
     if (!existsSync(dir)) return undefined;
     const st = getStore(ctx);
     const res = harvestClaudeMemory(st, {
@@ -271,18 +293,70 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
     return p;
   }
 
+  /** Run a harvest outside the current call stack (bus listeners, watch callbacks), logging failures. */
+  function harvestLater(ctx: ExtensionContext, workspaceId: string, why: string): void {
+    track(
+      new Promise<void>((resolve) => setImmediate(resolve))
+        .then(() => harvestWorkspace(ctx, workspaceId))
+        .catch((err) => ctx.logger.log('warn', 'Claude memory harvest failed', { workspaceId, why, err: String(err) })),
+    );
+  }
+
+  /** Point the memory-directory watch at the node's current workspaces. */
+  async function syncWatches(ctx: ExtensionContext): Promise<WorkspaceInfo[]> {
+    const { workspaces } = await ctx.node.call('workspaces.list', {});
+    watcher?.update(new Map(workspaces.map((ws) => [ws.id, claudeMemoryDir(ws.path, claudeHome)])));
+    return workspaces;
+  }
+
+  /** On start: watch every workspace's memory directory, then harvest each one (catches up on what changed while the node was down). */
+  async function harvestAll(ctx: ExtensionContext): Promise<void> {
+    const workspaces = await syncWatches(ctx);
+    for (const ws of workspaces) {
+      try {
+        await harvestWorkspace(ctx, ws.id);
+      } catch (err) {
+        ctx.logger.log('warn', 'Claude memory harvest failed', { workspaceId: ws.id, why: 'start', err: String(err) });
+      }
+    }
+  }
+
   function onGlobal(ctx: ExtensionContext, ev: ChannelEvent): void {
+    if (ev.type === 'workspace.created' || ev.type === 'workspace.removed') {
+      // Watch first, then harvest, so a memory saved in between isn't missed.
+      track(syncWatches(ctx).catch((err) => ctx.logger.log('warn', 'memory watch update failed', { err: String(err) })));
+      if (ev.type === 'workspace.created') harvestLater(ctx, ev.data.workspace.id, 'workspace added');
+      return;
+    }
     if (ev.type !== 'session.updated' && ev.type !== 'session.created') return;
     const s = ev.data.session;
     const prev = lastStatus.get(s.id);
     lastStatus.set(s.id, s.status);
     if (s.agent !== 'claude' || !isEnded(s) || (prev !== undefined && (prev === 'ended' || prev === 'failed'))) return;
     // Run outside the bus listener (harvest writes and emits).
-    track(
-      new Promise<void>((resolve) => setImmediate(resolve))
-        .then(() => harvestWorkspace(ctx, s.workspaceId))
-        .catch((err) => ctx.logger.log('warn', 'Claude memory harvest failed', { workspaceId: s.workspaceId, err: String(err) })),
-    );
+    harvestLater(ctx, s.workspaceId, 'session ended');
+  }
+
+  /** Workspace + the context its sessions resolve knowledge in (for the promote scope check). */
+  async function promoteTarget(ctx: ExtensionContext, p: Params): Promise<{ ws: WorkspaceInfo; context: KnowledgeContext }> {
+    const workspaceId = reqString(p, 'workspaceId');
+    const ws = await workspaceById(ctx, workspaceId);
+    if (!ws) throw new BizziError('not_found', `workspace ${workspaceId} not found`);
+    const machine = ctx.node.machine;
+    const context: KnowledgeContext = {
+      agent: 'claude',
+      machineId: machine.id,
+      ...(machine.tags.length > 0 ? { machineTags: [...machine.tags] } : {}),
+      workspaceId: ws.id,
+      ...(ws.projectId ? { projectId: ws.projectId } : {}),
+    };
+    return { ws, context };
+  }
+
+  function promoteParams(p: Params): { ids: string[]; heading?: string } {
+    const ids = reqStringArray(p, 'ids');
+    const heading = optString(p, 'heading');
+    return { ids, ...(heading !== undefined ? { heading } : {}) };
   }
 
   const w = <T>(fn: (p: Params, ctx: ExtensionContext, st: KnowledgeStore) => T) => (raw: unknown, ctx: ExtensionContext) => {
@@ -419,6 +493,40 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
         return { settings: toWireSettings(next) };
       }),
 
+      'knowledge.promote.preview': async (raw: unknown, ctx: ExtensionContext) => {
+        const p = asParams(raw);
+        checkMachine(p, ctx.node.machine.id);
+        const { ws, context } = await promoteTarget(ctx, p);
+        const plan = planPromotion(getStore(ctx), { workspacePath: ws.path, context, ...promoteParams(p) });
+        const preview: KnowledgePromotePreview = {
+          path: plan.path,
+          exists: plan.exists,
+          baseHash: plan.baseHash,
+          heading: plan.heading,
+          ids: plan.items.map((i) => i.id),
+          skipped: plan.skipped,
+          diff: plan.diff,
+          warnings: plan.warnings,
+        };
+        return { preview };
+      },
+
+      'knowledge.promote': async (raw: unknown, ctx: ExtensionContext) => {
+        const p = asParams(raw);
+        checkMachine(p, ctx.node.machine.id);
+        const { ws, context } = await promoteTarget(ctx, p);
+        const baseHash = optString(p, 'baseHash');
+        const res = applyPromotion(getStore(ctx), {
+          workspacePath: ws.path,
+          context,
+          ...promoteParams(p),
+          ...(baseHash !== undefined ? { baseHash } : {}),
+        });
+        ctx.logger.log('info', 'added memories to AGENTS.md', { workspaceId: ws.id, path: res.path, count: res.promoted.length, created: res.created });
+        changed(ctx, res.promoted);
+        return { path: res.path, created: res.created, promoted: res.promoted.map((i) => i.id) };
+      },
+
       'knowledge.sync.pull': w((p, _ctx, st) => {
         const since = optString(p, 'since');
         const limit = optInt(p, 'limit', 1, 5000) ?? 500;
@@ -458,6 +566,26 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
           onGlobal(ctx, ev);
         });
         replaying = false;
+        if (opts.watch !== false) {
+          watcher = new MemoryDirWatcher({
+            root: claudeHome,
+            debounceMs: opts.watchDebounceMs ?? 1000,
+            ...(opts.watchFn ? { watchFn: opts.watchFn } : {}),
+            logger: ctx.logger,
+            onChange: (workspaceId) => harvestLater(ctx, workspaceId, 'memory changed'),
+          });
+          const rearmMs = opts.watchRearmMs ?? 60_000;
+          if (rearmMs > 0) {
+            rearmTimer = setInterval(() => watcher?.rearm(), rearmMs);
+            rearmTimer.unref();
+          }
+        }
+        // After start returns: the node answers workspaces.list once it is up.
+        track(
+          new Promise<void>((resolve) => setImmediate(resolve))
+            .then(() => (ctxRef === ctx ? harvestAll(ctx) : undefined))
+            .catch((err) => ctx.logger.log('warn', 'Claude memory harvest on start failed', { err: String(err) })),
+        );
       }
       const pollMs = opts.pollMs ?? 5000;
       if (pollMs > 0) {
@@ -471,6 +599,10 @@ export function createKnowledgeExtension(opts: KnowledgeExtensionOptions): Knowl
     async stop() {
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = undefined;
+      if (rearmTimer) clearInterval(rearmTimer);
+      rearmTimer = undefined;
+      watcher?.close();
+      watcher = undefined;
       globalSub?.unsubscribe();
       globalSub = undefined;
       await Promise.allSettled([...harvests]);

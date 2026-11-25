@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { after, describe, it } from 'node:test';
 import { FakeAdapter } from '@bizzi/core/testing';
@@ -10,7 +10,7 @@ import { harness, tempDir, waitFor, type Harness } from './helpers.ts';
 
 const isCode = (c: string) => (e: unknown) => e instanceof BizziError && e.code === c;
 
-async function setup(opts: { pollMs?: number; claudeHome?: string; adapters?: FakeAdapter[] } = {}) {
+async function setup(opts: { pollMs?: number; claudeHome?: string; adapters?: FakeAdapter[]; watch?: boolean } = {}) {
   let store: KnowledgeStore | undefined;
   const opened: string[] = [];
   const ext = createKnowledgeExtension({
@@ -21,7 +21,10 @@ async function setup(opts: { pollMs?: number; claudeHome?: string; adapters?: Fa
       return store;
     },
     pollMs: opts.pollMs ?? 0,
-    ...(opts.claudeHome ? { claudeHome: opts.claudeHome } : {}),
+    // Never the real ~/.claude in tests.
+    claudeHome: opts.claudeHome ?? join(tempDir(), '.claude'),
+    watch: opts.watch ?? false,
+    watchDebounceMs: 20,
   });
   const h = await harness({ extensions: [ext], ...(opts.adapters ? { adapters: opts.adapters } : {}) });
   after(() => h.close());
@@ -208,6 +211,86 @@ describe('knowledge extension', () => {
     const again = await (ext as KnowledgeExtension).harvestWorkspace(workspace.id);
     assert.deepEqual([again?.imported.length, again?.skipped[0]?.reason], [0, 'unchanged']);
     assert.equal(changedIds(h).length, 1);
+  });
+
+  it('harvests when a workspace is added and on node start; harvested memories go live without inbox items (§8)', async () => {
+    const claudeHome = join(tempDir(), '.claude');
+    const { ext, h, store } = await setup({ claudeHome });
+    const wsPath = tempDir('bizzi-services-ws-');
+    const memDir = claudeMemoryDir(wsPath, claudeHome);
+    mkdirSync(memDir, { recursive: true });
+    writeFileSync(join(memDir, 'MEMORY.md'), '- [Ports](ports.md) — dev ports\n');
+    writeFileSync(join(memDir, 'ports.md'), '---\nname: ports\ndescription: Dev ports\ntype: project\n---\n\nThe dev server runs on 5173.\n');
+
+    const { workspace } = await h.node.call('workspace.create', { path: wsPath });
+    await waitFor(() => changedIds(h).length > 0, 'knowledge.changed after the workspace was added');
+    await (ext as KnowledgeExtension).idle();
+    const [item, ...rest] = store().list({ status: ['active', 'suggested'] });
+    assert.equal(rest.length, 0);
+    assert.equal(item?.title, 'Ports');
+    assert.equal(item?.type, 'memory', 'mirrored as a memory, never a rule suggestion');
+    assert.equal(item?.status, 'active');
+    assert.equal(item?.source.workspaceId, workspace.id);
+    assert.deepEqual((await h.call(ext, 'knowledge.inbox', {})).cards, [], 'balanced: no inbox items');
+
+    // A node starting later catches up on every workspace it has.
+    const fresh = new KnowledgeStore({ path: ':memory:', machineId: h.node.machine.id });
+    const ext2 = createKnowledgeExtension({ store: fresh, pollMs: 0, claudeHome, watch: false });
+    await ext2.start!(h.ctx);
+    await ext2.idle();
+    await ext2.stop!();
+    assert.deepEqual(fresh.list({ status: 'active' }).map((i) => i.title), ['Ports']);
+  });
+
+  it('watches memory directories, so memories saved by a plain `claude` are harvested (§8)', async () => {
+    const claudeHome = join(tempDir(), '.claude');
+    mkdirSync(claudeHome, { recursive: true });
+    const { ext, h, store } = await setup({ claudeHome, watch: true });
+    const wsPath = tempDir('bizzi-services-ws-');
+    await h.node.call('workspace.create', { path: wsPath });
+    await (ext as KnowledgeExtension).idle();
+    await h.call(ext, 'knowledge.list', {}); // opens the store
+    assert.equal(store().list().length, 0);
+
+    // Claude creates the memory directory on its first memory there.
+    const memDir = claudeMemoryDir(wsPath, claudeHome);
+    mkdirSync(memDir, { recursive: true });
+    writeFileSync(join(memDir, 'seed.md'), '---\nname: seed\ntype: project\n---\n\nRun `make seed` before the tests.\n');
+    await waitFor(() => store().list({ status: 'active' }).length === 1, 'harvest after the memory dir appeared');
+
+    // An edit supersedes the earlier import.
+    writeFileSync(join(memDir, 'seed.md'), '---\nname: seed\ntype: project\n---\n\nRun `make seed-all` before the tests.\n');
+    await waitFor(() => store().list({ status: 'active' })[0]?.body.includes('seed-all') === true, 'harvest after an edit');
+    await (ext as KnowledgeExtension).idle();
+    assert.equal(store().list({ status: 'superseded' }).length, 1);
+  });
+
+  it('promote.preview / promote: append picked memories to the workspace AGENTS.md and tag them `promoted` (§8)', async () => {
+    const { ext, h, store } = await setup();
+    const wsPath = tempDir('bizzi-services-ws-');
+    writeFileSync(join(wsPath, 'AGENTS.md'), '# acme\n');
+    const { workspace } = await h.node.call('workspace.create', { path: wsPath });
+    const add = async (title: string, scope: object) => (await h.call(ext, 'knowledge.add', { type: 'memory', title, body: `${title} body`, scope })).item.id as string;
+    const a = await add('Staging DB', { level: 'workspace', workspaceId: workspace.id });
+    const b = await add('Elsewhere', { level: 'workspace', workspaceId: 'w_OTHER' });
+
+    const { preview } = await h.call(ext, 'knowledge.promote.preview', { workspaceId: workspace.id, ids: [a, b], heading: 'Team notes' });
+    assert.equal(preview.path, join(wsPath, 'AGENTS.md'));
+    assert.equal(preview.exists, true);
+    assert.deepEqual(preview.ids, [a]);
+    assert.deepEqual(preview.skipped, [{ id: b, reason: 'not_visible' }]);
+    assert.match(preview.diff, /\+## Team notes\n\+\n\+- \*\*Staging DB\*\*: Staging DB body\n$/);
+
+    const before = changedIds(h).length;
+    const res = await h.call(ext, 'knowledge.promote', { workspaceId: workspace.id, ids: [a], heading: 'Team notes', baseHash: preview.baseHash });
+    assert.deepEqual(res, { path: join(wsPath, 'AGENTS.md'), created: false, promoted: [a] });
+    assert.equal(readFileSync(join(wsPath, 'AGENTS.md'), 'utf8'), '# acme\n\n## Team notes\n\n- **Staging DB**: Staging DB body\n');
+    assert.ok(store().require(a).tags.includes('promoted'));
+    assert.deepEqual(changedIds(h).slice(before), [[a]]);
+
+    await assert.rejects(h.call(ext, 'knowledge.promote.preview', { workspaceId: workspace.id, ids: [a] }), isCode('bad_request'));
+    await assert.rejects(h.call(ext, 'knowledge.promote', { workspaceId: 'w_NOPE', ids: [a] }), isCode('not_found'));
+    await assert.rejects(h.call(ext, 'knowledge.promote', { workspaceId: workspace.id }), isCode('bad_request'));
   });
 
   it('polls for changes written by other processes (the MCP server)', async () => {
