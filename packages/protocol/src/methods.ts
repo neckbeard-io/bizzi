@@ -22,7 +22,10 @@ import type {
   OrchestrationSettings,
   QuestionAnswers,
   RestartPolicy,
+  RouteDecision,
+  RouteDecisionInput,
   RouteSuggestion,
+  RoutingRule,
   SecretInfo,
   SessionBudget,
   SessionInfo,
@@ -344,6 +347,18 @@ export interface Methods {
     params: MachineTarget & { text: string; options: string[] };
     result: { probabilities: number[]; letterMass: number; ms: number; model: string };
   };
+  // ---- one-pane mode (spec §11.2 steps 2–3, override recording). Stored where `route.suggest` answers:
+  // on the hub across machines, on a node in local mode. Never relayed.
+  /** Record a routed prompt (the labelled eval set). Returns it with its id and time. */
+  'route.record': { params: { decision: RouteDecisionInput }; result: { decision: RouteDecision } };
+  /** Recorded decisions, newest first; `overridden` filters; `before` (an id) pages. `total` counts the filter's matches. */
+  'route.decisions': {
+    params: { limit?: number; before?: string; overridden?: boolean };
+    result: { decisions: RouteDecision[]; total: number };
+  };
+  /** Routing rules (knowledge.md §9.3), tried in order; the first that matches applies. `set` replaces the list. */
+  'route.rules.get': { params: Empty; result: { rules: RoutingRule[] } };
+  'route.rules.set': { params: { rules: RoutingRule[] }; result: { rules: RoutingRule[] } };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */

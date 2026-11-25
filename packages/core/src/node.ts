@@ -124,6 +124,11 @@ const UNIMPLEMENTED = [
   'theme.delete',
   'prefs.get',
   'prefs.set',
+  // ---- one-pane mode (spec §11.2): served by @bizzi/routing's extension
+  'route.record',
+  'route.decisions',
+  'route.rules.get',
+  'route.rules.set',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */

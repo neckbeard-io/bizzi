@@ -475,9 +475,10 @@ export interface RouteSuggestion {
    * explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must
    * pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists ·
    * classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or
-   * the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.
+   * the tokens can't be satisfied: see `note`) · rule: a routing rule (`route.rules.get`) left one target, or a
+   * few to pick from when no classifier can choose. Whenever `confident` is false the client asks.
    */
-  source: 'explicit' | 'single' | 'classifier' | 'none';
+  source: 'explicit' | 'single' | 'classifier' | 'none' | 'rule';
   /** Best first, at most 3: the choices to offer when asking. Empty when nothing decided. */
   candidates: RouteCandidate[];
   /** 1 − entropy / ln(N) over the targets scored; 1 for explicit and single. */
@@ -500,6 +501,53 @@ export interface RouteSuggestion {
   };
   /** Why nothing was decided: no classifier, its error, several matches, or a token problem ("vps is offline", "no workspace matches @mac-mini and #bizzi"). */
   note?: string;
+  /** The routing rule that narrowed the targets (step 3), whatever then chose among them. */
+  rule?: { id: string; label: string };
+}
+
+// ---- one-pane mode (spec §11.2 steps 2–3: routing rules, recorded decisions)
+
+/**
+ * A routing preference (knowledge.md §9.3), e.g. "production, prod logs → machines tagged prod-access".
+ * Matches when any of `match` appears in the prompt as a whole word or phrase, case-insensitive; a trailing
+ * `*` matches a word prefix (`prod*`). Exactly one of `tag`, `machineId`, `workspaceId` says where it goes.
+ */
+export interface RoutingRule {
+  id: string;
+  match: string[];
+  tag?: string;
+  machineId?: string;
+  workspaceId?: string;
+  /** Agent to use when the prompt names none with `/agent`. */
+  agent?: AgentKind;
+}
+
+/**
+ * One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set
+ * for comparing classifiers (spec §11.2 "Choosing"): `text` → `chosen`, with what was offered and by whom.
+ */
+export interface RouteDecisionInput {
+  /** The prompt as typed, routing tokens included. */
+  text: string;
+  source: 'explicit' | 'single' | 'classifier' | 'none' | 'rule';
+  /** What the suggestion offered, best first (may be empty). */
+  candidates: RouteCandidate[];
+  confidence: number;
+  classifier?: { model: string; via?: string };
+  rule?: { id: string; label: string };
+  chosen: { machineId: string; workspaceId: string; label: string; agent?: AgentKind };
+  /** suggested: sent to the top candidate · picked: another offered candidate · other: a target that wasn't offered. */
+  via: 'suggested' | 'picked' | 'other';
+  /** `chosen` isn't the top candidate (false when nothing was offered). */
+  overridden: boolean;
+  /** The session started for it. */
+  sessionId?: string;
+}
+
+export interface RouteDecision extends RouteDecisionInput {
+  id: string;
+  /** ISO time recorded. */
+  at: string;
 }
 
 // ---- hub: devices and pairing

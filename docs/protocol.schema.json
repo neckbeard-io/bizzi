@@ -539,6 +539,41 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
+    "route.record": {
+      "description": "Record a routed prompt (the labelled eval set). Returns it with its id and time.",
+      "params": {
+        "$ref": "#/$defs/params:route.record"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.record"
+      }
+    },
+    "route.decisions": {
+      "description": "Recorded decisions, newest first; `overridden` filters; `before` (an id) pages. `total` counts the filter's matches.",
+      "params": {
+        "$ref": "#/$defs/params:route.decisions"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.decisions"
+      }
+    },
+    "route.rules.get": {
+      "description": "Routing rules (knowledge.md §9.3), tried in order; the first that matches applies. `set` replaces the list.",
+      "params": {
+        "$ref": "#/$defs/params:route.rules.get"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.rules.get"
+      }
+    },
+    "route.rules.set": {
+      "params": {
+        "$ref": "#/$defs/params:route.rules.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:route.rules.set"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -2553,6 +2588,10 @@
         "knowledge.sync.push",
         "route.suggest",
         "route.score",
+        "route.record",
+        "route.decisions",
+        "route.rules.get",
+        "route.rules.set",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -3983,6 +4022,82 @@
               "type": "string"
             },
             "method": {
+              "const": "route.record"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.record"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.decisions"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.decisions"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.rules.get"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.rules.get"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "route.rules.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:route.rules.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "pairing.create"
             },
             "params": {
@@ -4197,17 +4312,148 @@
         "probability"
       ]
     },
-    "RouteSuggestion": {
+    "RouteDecision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/RouteDecisionInput"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "at": {
+              "description": "ISO time recorded.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "at"
+          ]
+        }
+      ]
+    },
+    "RouteDecisionInput": {
+      "description": "One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set for comparing classifiers (spec §11.2 \"Choosing\"): `text` → `chosen`, with what was offered and by whom.",
       "type": "object",
       "properties": {
+        "text": {
+          "description": "The prompt as typed, routing tokens included.",
+          "type": "string"
+        },
         "source": {
-          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.",
           "type": "string",
           "enum": [
             "explicit",
             "single",
             "classifier",
-            "none"
+            "none",
+            "rule"
+          ]
+        },
+        "candidates": {
+          "description": "What the suggestion offered, best first (may be empty).",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteCandidate"
+          }
+        },
+        "confidence": {
+          "type": "number"
+        },
+        "classifier": {
+          "type": "object",
+          "properties": {
+            "model": {
+              "type": "string"
+            },
+            "via": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "model"
+          ]
+        },
+        "rule": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
+        },
+        "chosen": {
+          "type": "object",
+          "properties": {
+            "machineId": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            },
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            }
+          },
+          "required": [
+            "machineId",
+            "workspaceId",
+            "label"
+          ]
+        },
+        "via": {
+          "description": "suggested: sent to the top candidate · picked: another offered candidate · other: a target that wasn't offered.",
+          "type": "string",
+          "enum": [
+            "suggested",
+            "picked",
+            "other"
+          ]
+        },
+        "overridden": {
+          "description": "`chosen` isn't the top candidate (false when nothing was offered).",
+          "type": "boolean"
+        },
+        "sessionId": {
+          "description": "The session started for it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "source",
+        "candidates",
+        "confidence",
+        "chosen",
+        "via",
+        "overridden"
+      ]
+    },
+    "RouteSuggestion": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`) · rule: a routing rule (`route.rules.get`) left one target, or a few to pick from when no classifier can choose. Whenever `confident` is false the client asks.",
+          "type": "string",
+          "enum": [
+            "explicit",
+            "single",
+            "classifier",
+            "none",
+            "rule"
           ]
         },
         "candidates": {
@@ -4264,6 +4510,22 @@
         "note": {
           "description": "Why nothing was decided: no classifier, its error, several matches, or a token problem (\"vps is offline\", \"no workspace matches @mac-mini and #bizzi\").",
           "type": "string"
+        },
+        "rule": {
+          "description": "The routing rule that narrowed the targets (step 3), whatever then chose among them.",
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "label": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "label"
+          ]
         }
       },
       "required": [
@@ -4273,6 +4535,38 @@
         "confident",
         "text",
         "offered"
+      ]
+    },
+    "RoutingRule": {
+      "description": "A routing preference (knowledge.md §9.3), e.g. \"production, prod logs → machines tagged prod-access\". Matches when any of `match` appears in the prompt as a whole word or phrase, case-insensitive; a trailing `*` matches a word prefix (`prod*`). Exactly one of `tag`, `machineId`, `workspaceId` says where it goes.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "match": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "tag": {
+          "type": "string"
+        },
+        "machineId": {
+          "type": "string"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "agent": {
+          "description": "Agent to use when the prompt names none with `/agent`.",
+          "$ref": "#/$defs/AgentKind"
+        }
+      },
+      "required": [
+        "id",
+        "match"
       ]
     },
     "SecretInfo": {
@@ -6280,6 +6574,48 @@
         "questionId"
       ]
     },
+    "params:route.decisions": {
+      "type": "object",
+      "properties": {
+        "limit": {
+          "type": "number"
+        },
+        "before": {
+          "type": "string"
+        },
+        "overridden": {
+          "type": "boolean"
+        }
+      }
+    },
+    "params:route.record": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/RouteDecisionInput"
+        }
+      },
+      "required": [
+        "decision"
+      ]
+    },
+    "params:route.rules.get": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:route.rules.set": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
+    },
     "params:route.score": {
       "allOf": [
         {
@@ -7226,6 +7562,63 @@
     },
     "result:question.respond": {
       "$ref": "#/$defs/Empty"
+    },
+    "result:route.decisions": {
+      "type": "object",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RouteDecision"
+          }
+        },
+        "total": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "decisions",
+        "total"
+      ]
+    },
+    "result:route.record": {
+      "type": "object",
+      "properties": {
+        "decision": {
+          "$ref": "#/$defs/RouteDecision"
+        }
+      },
+      "required": [
+        "decision"
+      ]
+    },
+    "result:route.rules.get": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
+    },
+    "result:route.rules.set": {
+      "type": "object",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/RoutingRule"
+          }
+        }
+      },
+      "required": [
+        "rules"
+      ]
     },
     "result:route.score": {
       "type": "object",

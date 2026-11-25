@@ -120,7 +120,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
   } catch (err) {
     throw new UsageError((err as Error).message);
   }
-  const routing = createRoutingExtension({ ...routerOpts, logger: logger.child({ component: 'router' }) });
+  const routing = createRoutingExtension({ ...routerOpts, logger: logger.child({ component: 'router' }) }, { dbPath: join(dataDir, 'routing.db') });
   const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : []), routing];
 
   const node = await createNode({

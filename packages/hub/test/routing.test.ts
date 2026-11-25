@@ -136,3 +136,37 @@ test('a hub without a classifier borrows a machine\'s (preferred first, the next
   const { suggestion: none } = await client.call<{ suggestion: RouteSuggestion }>('route.suggest', { text: '#infra bump the chart' });
   assert.deepEqual([none.source, none.candidates[0]?.label], ['explicit', 'vps · infra']);
 });
+
+test('the hub keeps routing rules and recorded decisions itself and routes with the rules', async (t) => {
+  const dirs = [tempDir(), tempDir(), tempDir(), tempDir('bizzi-hub-ws-')];
+  const hub = await makeHub(dirs[0]!.path);
+  const owner = await pairDevice(hub, setupCode(hub));
+  const client = await TestClient.connect(hub.clientUrl, await tokenFor(hub, owner));
+  const a = await linkNode(hub, client, dirs[1]!.path, 'laptop');
+  const b = await linkNode(hub, client, dirs[2]!.path, 'mac-mini');
+  t.after(async () => {
+    client.close();
+    await a.link.close();
+    await b.link.close();
+    await hub.close();
+    await a.node.close();
+    await b.node.close();
+    for (const d of dirs) d.cleanup();
+  });
+  const ws = dirs[3]!.path;
+  await client.call('workspace.create', { machineId: a.node.machine.id, path: `${ws}/a`, create: true, name: 'acme-shop' });
+  const { workspace: site } = await client.call<{ workspace: { id: string } }>('workspace.create', { machineId: b.node.machine.id, path: `${ws}/b`, create: true, name: 'site' });
+  await waitFor(() => hub.relay.store.listWorkspaces().length === 2, 5000, 'workspaces indexed');
+
+  const { rules } = await client.call<{ rules: { id: string }[] }>('route.rules.set', { rules: [{ match: ['screenshot*'], workspaceId: site.id }] });
+  assert.equal(rules.length, 1);
+  const { suggestion } = await client.call<{ suggestion: RouteSuggestion }>('route.suggest', { text: 'take screenshots of the header' });
+  assert.deepEqual([suggestion.source, suggestion.candidates[0]?.label, suggestion.rule?.id], ['rule', 'mac-mini · site', rules[0]!.id]);
+  await assert.rejects(client.call('route.rules.set', { rules: [{ match: ['x'] }] }), /exactly one of tag/);
+
+  const chosen = { machineId: b.node.machine.id, workspaceId: site.id, label: 'mac-mini · site' };
+  await client.call('route.record', { decision: { text: 'header looks off', source: 'none', candidates: [], confidence: 0, chosen, via: 'other', overridden: false } });
+  const { decisions, total } = await client.call<{ decisions: { chosen: unknown }[]; total: number }>('route.decisions', {});
+  assert.deepEqual([total, decisions[0]?.chosen], [1, chosen]);
+  assert.equal(hub.relay.store.routes.list({}).total, 1);
+});

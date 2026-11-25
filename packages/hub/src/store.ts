@@ -22,6 +22,7 @@ import type {
   WorkspaceInfo,
 } from '@bizzi/protocol';
 import { GLOBAL_CHANNEL } from '@bizzi/protocol';
+import { RouteStore } from '@bizzi/routing';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -180,6 +181,8 @@ export class HubStore {
   readonly themes: ThemeTable;
   /** User-wide preferences (theme choice, density), shared by every device. */
   readonly prefs: PrefsTable;
+  /** One-pane routing rules and recorded decisions (spec §11.2). */
+  readonly routes: RouteStore;
   readonly #db: DatabaseSync;
   readonly #insertEvent: StatementSync;
   readonly #replay: StatementSync;
@@ -196,6 +199,7 @@ export class HubStore {
     this.#db.exec(SCHEMA);
     this.themes = new ThemeTable(this.#db);
     this.prefs = new PrefsTable(this.#db);
+    this.routes = new RouteStore(this.#db);
     this.#insertEvent = this.#db.prepare('INSERT OR IGNORE INTO events (ch, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)');
     this.#replay = this.#db.prepare('SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?');
     this.#maxSeq = this.#db.prepare('SELECT MAX(seq) AS seq FROM events WHERE ch = ?');
