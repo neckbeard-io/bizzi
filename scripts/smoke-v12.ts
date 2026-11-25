@@ -4,7 +4,8 @@
 // second device, a command widget dropped at runtime (widget.updated via the hub) that feeds usage.list
 // through billing.account, hub-stored themes, orchestration settings, agents.list decorations, and the
 // bizzi-agents MCP endpoint called by a (fake) structured agent with its own session token, and the
-// workspace picker (fs.browse / fs.complete / fs.suggest).
+// workspace picker (fs.browse / fs.complete / fs.suggest), and a pipeline (plan → gate → implement in a
+// worktree → review) started on device A and approved on device B.
 //
 //   node scripts/smoke-v12.ts            # or: npm run smoke:v12
 
@@ -12,6 +13,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { reviewPipeline } from '@bizzi/client';
 import { pairWithHub, requestToken, type PairedDevice } from '@bizzi/hub';
 import { check, Client, Procs, step, until, validateTraffic } from './smoke-lib.ts';
 
@@ -256,6 +258,35 @@ try {
     return session.status === 'ended' || session.status === 'failed';
   }, 'child helper stopped with its parent');
   step('session.stop on the parent cascades to its child helper');
+
+  // ---- pipelines (docs/pipelines.md): the built-in planner → implementer → reviewer, through the hub
+  const plSpec = reviewPipeline({ planner: 'claude', implementer: 'claude', reviewer: 'claude' });
+  const gateOnB = b.next((e) => e.type === 'pipeline.updated' && e.data.pipeline.status === 'waiting', 'pipeline gate on device B', 20_000);
+  const { pipeline: pl } = await a.call('pipeline.start', { workspaceId: ws.id, spec: plSpec, task: 'add a smoke file' });
+  check(pl.id.startsWith('pl_') && pl.machineId === machineId, `pipeline.start through the hub (${pl.id})`);
+  const gateEv = await gateOnB;
+  check(gateEv.data.pipeline.id === pl.id && gateEv.data.pipeline.gate?.stage === 1 && gateEv.data.pipeline.stages[0].status === 'done', 'run waits at the implement gate after the plan');
+  check((await b.call('pipelines.list', { machineId })).pipelines.some((p: any) => p.id === pl.id && p.status === 'waiting'), 'device B lists the waiting run');
+  step(`pipeline ${pl.id}: plan done, waiting at "${gateEv.data.pipeline.gate.message}"`);
+  const doneOnA = a.next((e) => e.type === 'pipeline.updated' && e.data.pipeline.id === pl.id && e.data.pipeline.status === 'done', 'pipeline done on device A', 30_000);
+  await b.call('pipeline.gate', { machineId, pipelineId: pl.id, decision: 'approve', message: 'smoke note' });
+  const plDone = (await doneOnA).data.pipeline;
+  check(plDone.stages.every((s: any) => s.status === 'done'), `every stage done (${plDone.stages.map((s: any) => s.status).join(',')})`);
+  const plWt = (await a.call('workspaces.list', { machineId })).workspaces.find((w: any) => w.id === plDone.worktreeId);
+  check(plWt?.kind === 'worktree' && plWt.parentWorkspaceId === ws.id && existsSync(plWt.path), 'implement and review ran in the pipeline worktree');
+  const implId: string = plDone.stages[1].sessionId;
+  const { session: implSession } = await b.call('session.get', { sessionId: implId });
+  check(implSession.group === pl.id && implSession.workspaceId === plWt.id, 'stage session carries the pipeline as group, in the worktree');
+  const implCh = `session:${implId}`;
+  const implTurn = a.next((e) => e.ch === implCh && e.type === 'turn.started', 'implement prompt');
+  await a.call('subscribe', { ch: implCh, since: 0 });
+  const implText: string = (await implTurn).data.input[0].text;
+  check(implText.includes('echo: Plan this task') && implText.includes('add a smoke file'), 'implement prompt carries the task and the plan stage result');
+  check(implText.endsWith('Note from the user: smoke note'), 'the gate note reaches the implement stage');
+  const removedPl = b.next((e) => e.type === 'pipeline.removed' && e.data.pipelineId === pl.id, 'pipeline.removed on device B');
+  await a.call('pipeline.delete', { machineId, pipelineId: pl.id });
+  await removedPl;
+  step(`pipeline approved on device B → implement (gate note in its prompt) and review in ${plWt.branch}; deleted`);
 
   // ---- everything both devices sent and received matches docs/protocol.schema.json
   const schema = JSON.parse(readFileSync(new URL('../docs/protocol.schema.json', import.meta.url), 'utf8'));

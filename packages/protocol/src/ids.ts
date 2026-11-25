@@ -15,6 +15,7 @@ export type IdPrefix =
   | 'q' // question
   | 'd' // device
   | 'k' // knowledge item
+  | 'pl' // pipeline
   | 'r'; // request
 
 export function ulid(now: number = Date.now()): string {

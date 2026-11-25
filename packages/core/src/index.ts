@@ -68,3 +68,12 @@ export {
   SOURCE_ROOTS,
   type BrowserOptions,
 } from './browse.ts';
+export {
+  MAX_PIPELINE_STAGES,
+  MAX_PLACEHOLDER_CHARS,
+  Pipelines,
+  parsePipelineSpec,
+  pipelinesExtension,
+  renderTemplate,
+  type PipelinesDeps,
+} from './pipelines.ts';

@@ -502,6 +502,82 @@ export interface RouteSuggestion {
   note?: string;
 }
 
+// ---- pipelines (docs/pipelines.md, spec §12.4)
+
+/** Stage sessions carry `group: <pipeline id>`; pipeline ids start with this, so fan-out views can skip them. */
+export const PIPELINE_ID_PREFIX = 'pl_';
+
+/** One stage of a pipeline definition: an agent, a prompt template and where it runs. */
+export interface PipelineStageSpec {
+  /** Short unique name within the pipeline: lowercase letters, digits, `-` and `_` (`plan`, `implement`, `review`). */
+  name: string;
+  agent: AgentKind;
+  model?: string;
+  permissionMode?: string;
+  effort?: string;
+  /**
+   * Prompt template. Placeholders: `{{task}}`, `{{gate.message}}`, `{{previous.name}}`, `{{previous.result}}`,
+   * `{{previous.diff}}`, `{{previous.files}}`, and `{{stages.<name>.result|diff|files}}` for any earlier stage.
+   */
+  prompt: string;
+  /** workspace (default): the pipeline's workspace · worktree: the pipeline's own worktree, shared by every stage that picks it. */
+  where?: 'workspace' | 'worktree';
+  /** Stop for your approval before this stage starts (an inbox item); approving can add a note (`{{gate.message}}`). */
+  gate?: boolean;
+  /** Cap for this stage's session (usage.md §2). */
+  budget?: SessionBudget;
+}
+
+export interface PipelineSpec {
+  stages: PipelineStageSpec[];
+  /** Branch of the pipeline's worktree (default `pipeline/<title>-<id>`); only used when a stage runs `where: 'worktree'`. */
+  branch?: string;
+  /** Metered spend cap for the whole run, checked before each stage; reaching it gates the next stage with reason `budget`. */
+  budgetUsd?: number;
+}
+
+export type PipelineStatus = 'running' | 'waiting' | 'done' | 'failed' | 'cancelled';
+export type PipelineStageStatus = 'pending' | 'running' | 'done' | 'failed' | 'cancelled';
+
+export interface PipelineStageRun {
+  name: string;
+  agent: AgentKind;
+  status: PipelineStageStatus;
+  sessionId?: string;
+  workspaceId?: string;
+  startedAt?: string;
+  endedAt?: string;
+  /** First line(s) of the stage's final message, at most 300 characters. */
+  summary?: string;
+  /** Files the stage changed (from its `file.changed` events). */
+  changedFiles?: number;
+  error?: string;
+}
+
+/** A pipeline run (docs/pipelines.md): stages run one after another on one machine. */
+export interface PipelineInfo {
+  /** `pl_…` */
+  id: string;
+  machineId: string;
+  /** Where it was started; `where: 'workspace'` stages run here. */
+  workspaceId: string;
+  title: string;
+  /** What `{{task}}` expands to. */
+  task: string;
+  spec: PipelineSpec;
+  status: PipelineStatus;
+  /** Index of the stage running, waiting at its gate, or that ended the run. */
+  current: number;
+  stages: PipelineStageRun[];
+  /** Set while `status` is `waiting`: the stage about to start and why (its gate, or the run's budget). */
+  gate?: { stage: number; reason: 'gate' | 'budget'; message: string; since: string };
+  /** The pipeline's worktree workspace, once created. */
+  worktreeId?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 // ---- hub: devices and pairing
 
 export type DeviceKind = 'device' | 'node';
