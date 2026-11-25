@@ -21,7 +21,9 @@ export type Route =
   | { name: 'login'; sessionId: string }
   | { name: 'inbox' }
   | { name: 'knowledge' }
-  | { name: 'settings'; section: SettingsSection };
+  | { name: 'settings'; section: SettingsSection }
+  /** One-pane mode (spec §11.2): one composer that routes the prompt; with `sessionId`, follow-ups continue it. */
+  | { name: 'ask'; sessionId?: string };
 
 const TABS: readonly SessionTab[] = ['chat', 'plan', 'files', 'changes'];
 const SECTIONS: readonly SettingsSection[] = ['general', 'knowledge', 'devices', 'connection'];
@@ -40,6 +42,8 @@ export function parseHash(hash: string): Route {
       return { name: 'inbox' };
     case 'knowledge':
       return { name: 'knowledge' };
+    case 'ask':
+      return parts[1] ? { name: 'ask', sessionId: parts[1] } : { name: 'ask' };
     case 'settings': {
       const section = SECTIONS.includes(parts[1] as SettingsSection) ? (parts[1] as SettingsSection) : 'general'; // incl. 'appearance'
       return { name: 'settings', section };
@@ -73,6 +77,8 @@ export function routeHref(r: Route): string {
       return '#/inbox';
     case 'knowledge':
       return '#/knowledge';
+    case 'ask':
+      return r.sessionId ? `#/ask/${encodeURIComponent(r.sessionId)}` : '#/ask';
     case 'settings':
       return r.section === 'general' ? '#/settings' : `#/settings/${r.section}`;
     case 'login':

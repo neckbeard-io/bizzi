@@ -32,6 +32,7 @@ const KnowledgeView = lazy(() => import('./knowledge/KnowledgeView.tsx').then((m
 const FanoutView = lazy(() => import('./fanout/FanoutView.tsx').then((m) => ({ default: m.FanoutView })));
 const PipelineView = lazy(() => import('./pipelines/PipelineView.tsx').then((m) => ({ default: m.PipelineView })));
 const SettingsView = lazy(() => import('./settings/SettingsView.tsx').then((m) => ({ default: m.SettingsView })));
+const OnePaneView = lazy(() => import('./onepane/OnePaneView.tsx').then((m) => ({ default: m.OnePaneView })));
 
 export function Shell(props: { onFatal: (message: string) => void }): ReactNode {
   const { store } = useBizziContext();
@@ -150,6 +151,8 @@ function RouteView(props: { route: Route }): ReactNode {
       return <KnowledgeView />;
     case 'settings':
       return <SettingsView section={r.section} />;
+    case 'ask':
+      return <OnePaneView {...(r.sessionId ? { sessionId: r.sessionId } : {})} />;
   }
 }
 
@@ -305,6 +308,8 @@ function Sidebar(props: { route: Route }): ReactNode {
 }
 
 const HEADER_NAV: { route: Route; label: string; icon: IconName; match: Route['name'][] }[] = [
+  // One-pane mode (spec §11.2): a front door next to the tree, not a replacement.
+  { route: { name: 'ask' }, label: 'Ask', icon: 'sparkle', match: ['ask'] },
   { route: { name: 'inbox' }, label: 'Inbox', icon: 'inbox', match: ['inbox'] },
   { route: { name: 'knowledge' }, label: 'Knowledge', icon: 'book', match: ['knowledge'] },
   { route: { name: 'settings', section: 'general' }, label: 'Settings', icon: 'settings', match: ['settings'] },
@@ -486,6 +491,7 @@ export function ThemeToggle(): ReactNode {
 // ---------------------------------------------------------------- phone
 
 const PHONE_NAV: { route: Route; label: string; icon: IconName; match: Route['name'][] }[] = [
+  { route: { name: 'ask' }, label: 'Ask', icon: 'sparkle', match: ['ask'] },
   { route: { name: 'machines' }, label: 'Machines', icon: 'machine', match: ['machines', 'machine', 'login', 'workspaces', 'workspace', 'session', 'fanout', 'pipeline'] },
   { route: { name: 'inbox' }, label: 'Inbox', icon: 'inbox', match: ['inbox'] },
   { route: { name: 'knowledge' }, label: 'Knowledge', icon: 'book', match: ['knowledge'] },

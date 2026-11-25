@@ -243,6 +243,7 @@ Built: `renderMachineCard` in `@bizzi/knowledge` puts it first in the launch-mod
 - A machine's capabilities are its tags plus its description: `gui`, `always-on`, `gpu` (suggested from facts) and ones only you know (`prod-access`). The mac mini simply doesn't have `prod-access`.
 - **Routing preferences** live on the user, not on a session: "production investigations → the machine tagged `prod-access`", "UI work and screenshots → `gui`", "long test runs → `always-on`". They're used by one-pane mode ([spec.md](spec.md) §11.2) and, later, by cross-machine helpers (spec §12.4).
 - The machine card (§9.2) tells an agent what its machine is for, so an agent on the mac mini asked for a prod investigation can say "that belongs on the laptop" instead of trying.
+- **Built (2026-11-25):** routing preferences as `RoutingRule`s (words or phrases → a machine tag, a machine or a workspace, optionally an agent), kept by the hub (or the node in local mode) rather than in the knowledge store, since they steer routing rather than an agent; edited on the one-pane Ask page; `route.rules.get` / `route.rules.set`. How they apply: spec §11.2 "Built (2026-11-25)". Not used by cross-machine helpers yet.
 
 ### 9.4 Replication (built 2026-11-11)
 

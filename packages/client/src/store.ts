@@ -29,7 +29,10 @@ import type {
   PipelineInfo,
   QuestionAnswers,
   RestartPolicy,
+  RouteDecision,
+  RouteDecisionInput,
   RouteSuggestion,
+  RoutingRule,
   SecretInfo,
   SessionEvent,
   SessionInfo,
@@ -1246,6 +1249,27 @@ export class BizziStore {
   async suggestRoute(text: string): Promise<RouteSuggestion> {
     const { suggestion } = await this.client.request('route.suggest', { text });
     return suggestion;
+  }
+
+  // ---- one-pane mode (spec §11.2): recorded decisions (the labelled eval set) and routing rules
+
+  async recordRoute(decision: RouteDecisionInput): Promise<RouteDecision> {
+    const { decision: saved } = await this.client.request('route.record', { decision });
+    return saved;
+  }
+
+  listRouteDecisions(params: MethodParams<'route.decisions'> = {}): Promise<MethodResult<'route.decisions'>> {
+    return this.client.request('route.decisions', params);
+  }
+
+  async getRouteRules(): Promise<RoutingRule[]> {
+    const { rules } = await this.client.request('route.rules.get', {});
+    return rules;
+  }
+
+  async setRouteRules(rules: RoutingRule[]): Promise<RoutingRule[]> {
+    const { rules: saved } = await this.client.request('route.rules.set', { rules });
+    return saved;
   }
 
   // ---------------------------------------------------------------- knowledge

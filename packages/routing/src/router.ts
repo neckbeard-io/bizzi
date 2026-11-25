@@ -1,12 +1,13 @@
-// Routing a prompt to a machine · workspace (spec §11.2), cheapest step first: explicit tokens, a single
-// target, then the logprob classifier. Continuation and routing preferences (steps 2–3) belong to the
-// client and to rules, which aren't built yet.
+// Routing a prompt to a machine · workspace (spec §11.2), cheapest step first: explicit tokens, routing
+// rules (step 3), a single target, then the logprob classifier. Continuation (step 2) belongs to the
+// client: it knows which session the conversation is in.
 
-import { BizziError, type Logger, type RouteCandidate, type RouteSuggestion } from '@bizzi/protocol';
+import { BizziError, type Logger, type RouteCandidate, type RouteSuggestion, type RoutingRule } from '@bizzi/protocol';
 import { buildTargets, type CatalogueInput, type RouteTarget } from './catalogue.ts';
 import { parseExplicit } from './explicit.ts';
 import { backendScorer, confidence, type LogprobBackend, type OptionScorer } from './logprobs.ts';
 import { MAX_REMOTE_ATTEMPTS } from './remote.ts';
+import { applyRules } from './rules.ts';
 
 export interface RouterOptions {
   /** No backend: explicit tokens and single targets only. */
@@ -21,6 +22,8 @@ export interface RouterOptions {
 export interface SuggestOptions {
   /** Machines' classifiers to borrow, best first (`remoteScorers`); used only when the router has no backend. */
   remote?: OptionScorer[];
+  /** Routing rules (step 3), tried in order when no `@` / `#` token narrowed the targets. */
+  rules?: readonly RoutingRule[];
 }
 
 export const DEFAULT_THRESHOLD = 0.8;
@@ -43,8 +46,17 @@ export class Router {
     if (typeof rawText !== 'string' || rawText.trim() === '') throw new BizziError('bad_request', 'text is required');
     const all = buildTargets(input, { includeOffline: true });
     const ex = parseExplicit(rawText.slice(0, MAX_TEXT), all, input.machines);
-    const base = { text: ex.text, ...(ex.agent ? { agent: ex.agent } : {}) };
-    const sure = (source: 'explicit' | 'single', t: RouteTarget): RouteSuggestion => ({
+    // Step 3: a routing rule narrows the targets unless a `@` / `#` token already did. It never overrides tokens.
+    const ruled = !ex.problem && !ex.narrowed && o.rules?.length ? applyRules(o.rules, ex.text, all, input.machines, input.workspaces) : null;
+    const agent = ex.agent ?? ruled?.rule.agent;
+    const base = {
+      text: ex.text,
+      ...(agent ? { agent } : {}),
+      ...(ruled ? { rule: { id: ruled.rule.id, label: ruled.label } } : {}),
+    };
+    const targets = ruled ? ruled.targets : ex.targets;
+    const narrowed = ex.narrowed || ruled !== null;
+    const sure = (source: 'explicit' | 'single' | 'rule', t: RouteTarget): RouteSuggestion => ({
       ...base,
       source,
       candidates: [candidate(t, 1)],
@@ -53,30 +65,31 @@ export class Router {
       offered: 1,
     });
     const none = (offered: number, note: string): RouteSuggestion => ({ ...base, source: 'none', candidates: [], confidence: 0, confident: false, offered, note });
-    // Tokens left several targets (`#acme-shop` on two machines) and nothing can choose: the user picks among them.
+    // Tokens or a rule left several targets (`#acme-shop` on two machines) and nothing can choose: the user picks among them.
     const pick = (note: string): RouteSuggestion => ({
       ...base,
-      source: 'explicit',
-      candidates: ex.targets.slice(0, 3).map((t) => candidate(t, 1 / ex.targets.length)),
+      source: ruled ? 'rule' : 'explicit',
+      candidates: targets.slice(0, 3).map((t) => candidate(t, 1 / targets.length)),
       confidence: 0,
       confident: false,
-      offered: ex.targets.length,
+      offered: targets.length,
       note,
     });
 
     if (ex.problem) return none(0, ex.problem);
-    if (ex.targets.length === 0) return none(0, 'no workspace on an online machine');
-    if (ex.targets.length === 1) return sure(ex.narrowed ? 'explicit' : 'single', ex.targets[0]!);
-    const matches = `${ex.used.join(' ')} matches ${ex.targets.length} workspaces`;
+    if (ruled?.problem) return none(0, ruled.problem);
+    if (targets.length === 0) return none(0, 'no workspace on an online machine');
+    if (targets.length === 1) return sure(ruled ? 'rule' : ex.narrowed ? 'explicit' : 'single', targets[0]!);
+    const matches = ruled ? `rule "${ruled.label}" matches ${targets.length} workspaces` : `${ex.used.join(' ')} matches ${targets.length} workspaces`;
     const scorers = this.backend ? [backendScorer(this.backend)] : (o.remote ?? []).slice(0, MAX_REMOTE_ATTEMPTS);
-    if (scorers.length === 0) return ex.narrowed ? pick(matches) : none(ex.targets.length, 'no routing classifier configured');
+    if (scorers.length === 0) return narrowed ? pick(matches) : none(targets.length, 'no routing classifier configured');
 
     // A borrowed classifier can fail for reasons of its own (the machine went to sleep): try the next one.
     let failure = '';
     let offered: RouteTarget[] = [];
     for (const scorer of scorers) {
       // Most recently active first, so a cap keeps the likely ones.
-      offered = ex.targets.slice(0, scorer.limit);
+      offered = targets.slice(0, scorer.limit);
       try {
         const r = await scorer.score(ex.text || rawText, offered.map((t) => t.detail));
         const ranked = offered.map((t, i) => candidate(t, r.probabilities[i] ?? 0)).sort((a, b) => b.probability - a.probability);
@@ -89,14 +102,14 @@ export class Router {
           confident: conf >= this.threshold,
           offered: offered.length,
           classifier: { model: scorer.model, ...(scorer.via ? { via: scorer.via } : {}), ms: r.ms, letterMass: round(r.letterMass) },
-          ...(ex.targets.length > offered.length ? { note: `${ex.targets.length - offered.length} less recently used targets were left out` } : {}),
+          ...(targets.length > offered.length ? { note: `${targets.length - offered.length} less recently used targets were left out` } : {}),
         };
       } catch (err) {
         failure = (err as Error).message;
         this.#log?.log('warn', 'routing classifier failed', { model: scorer.model, ...(scorer.via ? { via: scorer.via } : {}), err: failure });
       }
     }
-    return ex.narrowed ? pick(`${matches}; ${failure}`) : none(offered.length, failure);
+    return narrowed ? pick(`${matches}; ${failure}`) : none(offered.length, failure);
   }
 }
 

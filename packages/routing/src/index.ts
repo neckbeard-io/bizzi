@@ -17,4 +17,6 @@ export {
 } from './logprobs.ts';
 export { MAX_REMOTE_ATTEMPTS, remoteScorers, type ScoreCall } from './remote.ts';
 export { DEFAULT_THRESHOLD, Router, routerOptionsFromEnv, type RouterOptions, type SuggestOptions } from './router.ts';
-export { createRoutingExtension } from './extension.ts';
+export { createRoutingExtension, type RoutingExtensionOptions } from './extension.ts';
+export { MAX_RULES, applyRules, parseRules, ruleLabel, ruleMatches, type RuleRoute } from './rules.ts';
+export { MAX_DECISIONS, RouteStore, parseDecision } from './store.ts';

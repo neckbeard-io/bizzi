@@ -393,10 +393,19 @@ export class Relay {
         const suggestion = await this.router.suggest(
           p.text,
           { machines, workspaces: this.store.listWorkspaces(), sessions: this.store.listSessions({}) },
-          { remote },
+          { remote, rules: this.store.routes.rules() },
         );
         return { suggestion };
       }
+      // ---- one-pane mode (spec §11.2): rules and recorded decisions live where routing happens; never relayed.
+      case 'route.record':
+        return { decision: this.store.routes.record(p) };
+      case 'route.decisions':
+        return this.store.routes.list(p);
+      case 'route.rules.get':
+        return { rules: this.store.routes.rules() };
+      case 'route.rules.set':
+        return { rules: this.store.routes.setRules(p) };
       case 'widgets.list': {
         const machineId = this.#optMachine(p);
         if (!machineId) return { widgets: this.store.listWidgets() };
