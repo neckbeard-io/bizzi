@@ -176,6 +176,34 @@ Running sessions are never hijacked. If you want to carry work to another machin
 - **Fork to machine B:** bizzi pushes the workspace state (git branch, or a shadow-git snapshot for directories) to machine B's linked workspace, and starts a new session there seeded with a brief from the original's timeline (goal, plan, decisions, files touched, open questions). The original stays where it was, linked as `forked_from`.
 - **Tool bridging:** a session on server-a borrows laptop-local tools while the laptop is online (the laptop's node exposes an MCP server, e.g. Playwright against your browser, tunneled through the hub).
 
+### 6.1 Fork to machine: built (2026-11-25)
+
+`session.forkTo { sessionId, toMachineId, toWorkspaceId?, toPath?, agent?, title?, prompt?, branch? }` is served by the source session's node over node → hub requests (spec §5.4). In the UI it's the machine button in the session header, shown only on hub connections. The flow:
+
+1. **`fork.prepare` on B** resolves where the fork lands. It returns the commits B's repository already has (`heads`), so the bundle can be thin, and checks that the agent is available on B before anything is sent.
+2. **Snapshot on A.** A git workspace (repository or worktree) is committed in a temporary index. A clean work tree gives HEAD. Otherwise it gives one bizzi snapshot commit on top of HEAD with every uncommitted and untracked change; ignored files stay behind. The work tree, the real index and the branch are untouched. A plain directory is committed in a shadow repository at `<data dir>/shadow/<hash of the path>.git`, so the directory itself never gets a `.git`. Snapshot commits use the identity `bizzi <bizzi@localhost>`, so they need no git config.
+3. **Bundle through the hub.** A `git bundle` of a temporary ref, excluding the commits B has. Nothing is sent when B already has the commit. The cap is 32 MiB (`MAX_FORK_BUNDLE_BYTES`): the links carry 64 MiB frames and base64 adds a third. A bigger state fails with `conflict` and a hint to push the branch to a shared remote and fork into a workspace that has it.
+4. **`fork.receive` on B** applies the bundle and starts the session with the brief as its first message. The new session has `forkedFrom` and `forkedFromMachineId`. A's timeline gets an `agent.raw` note (`bizzi.forkTo`).
+
+Where a fork lands (decisions where this section left it open):
+
+- **Git into an existing workspace** (`toWorkspaceId`, else the one linked to the source by `projectId` or normalized `origin` URL): a new branch, by default `fork/<source branch>-<id>`, checked out in a new worktree (spec §12.5 layout). B's own checkout is never touched. A branch name that already exists is `conflict`.
+- **Git into `toPath`**: a new or empty directory becomes a fresh repository with the branch checked out, and `origin` set to the source's `origin` URL.
+- **Plain directory**: `toPath` is required, since a directory has nothing to link it by. It must be new or empty, and gets the files plus its own shadow repository on B. Forks never overwrite files.
+
+The brief comes from the timeline, not the transcript. It covers the goal (the first prompt), the latest plan, files touched, later requests, the last assistant message, and pending questions and approvals. It names the branch and commit, and says whether a snapshot commit holds uncommitted work. It ends with `prompt`, or a default "carry on". Decisions aren't extracted on their own; they are in the plan and the last message.
+
+Left: no automatic merge back. Forking back from B to A is the same call made from B.
+
+### 6.2 Tool bridging: designed, not built
+
+Tool bridging uses the same primitive. It isn't built yet because it needs three things that don't exist: an MCP client on the lending node, per-server config, and consent UI.
+
+- **Lending (machine A, e.g. the laptop).** The node config lists the MCP servers it lends, off by default: `bridge: { playwright: { command: [...] } | { url } }`. `MachineInfo.bridges` advertises them as `[{ name, description }]`, so the hub and other machines can see them. A lent server runs on A as A's OS user, like a terminal session there.
+- **Using (machine B).** A session on B asks for `playwright@laptop`, as a per-session option or a workspace default. B's node then injects an `http` MCP server pointing at its own loopback listener `/bridge/<machineId>/<name>`, with a per-session token as for bizzi-agents (spec §12.5).
+- **Tunnel.** Each JSON-RPC message B's listener receives becomes `tools.bridge.call { machineId, server, sessionId, message }`. That's a new entry in `NODE_RELAYED_METHODS`, which the hub forwards with `caller` stamped. A's node hands the message to its MCP client for that server and returns the response. v1 is stateless request and response only, with no server-initiated notifications or sampling. The 64 MiB frame cap applies, which screenshots fit within.
+- **Lifetime and safety.** A lends a server only while it is online. A call to an offline lender fails fast with `machine_offline`, which the agent sees as a tool error. Each lent server is allow-listed per using machine. A's timeline records nothing. B's session shows the calls as `mcp` tools named `<server>@<machine>`.
+
 ## 7. Containers: what they would be, and whether they're worth it
 
 **What:** a workspace kind, `container`, that lives *inside* a host machine. The host's node starts a container (Docker or Podman on Linux; Docker Desktop / OrbStack / Apple's `container` tool on macOS), puts the workspace in it (a fresh clone or a mounted directory), and runs the ADE inside it. The adapter talks to the agent through `docker exec` stdio, so the session looks exactly like any other.

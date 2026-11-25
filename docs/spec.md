@@ -126,9 +126,9 @@ Org ─< Machine                     # an install with the node role (pairs with
        ─< Session
             agent, mode: structured | terminal
             agent_session_ref (claude session id / codex thread id / opencode session id / pty id)
-            forked_from?           # forks; later: forks onto another machine
+            forked_from?           # forks; also forks onto another machine (+ forked_from_machine, topology.md §6)
             agent_version          # version the agent process started on (§7 updates)
-            spawned_by?            # parent session when an agent started it (§12.1); same machine for now
+            spawned_by?            # parent session when an agent started it (§12.1); + spawned_by_machine when it runs elsewhere (§12.4)
             scope: child | detached  # child: stops with its parent
             status: starting|running|waiting_input|waiting_approval|idle|
                     paused (machine asleep/offline)|ended|failed
@@ -182,9 +182,19 @@ Two protocols (client↔hub/node, node↔hub), one shared schema package, JSON e
 
 ### 5.4 Node ↔ hub
 
-Same envelope. Node→hub: `hello` (facts, installs, last-acked seq per session), events from the outbox, `heartbeat` (power, load), knowledge replication. Hub→node: relayed client requests, knowledge replication, (later) `tools.bridge`.
+Same envelope. Node→hub: `hello` (facts, installs, last-acked seq per session), events from the outbox, `heartbeat` (power, load), knowledge replication, and the node's own requests (below). Hub→node: relayed client requests, knowledge replication, node-to-node requests from other machines, (later) `tools.bridge`.
 
 The node writes events to its local SQLite first; the outbox drains to the hub when connected. A laptop that worked offline uploads its sessions on reconnect, so the phone can see them afterwards.
+
+**Node → hub requests** are the primitive behind cross-machine helpers, forks and, later, tool bridging. The node link stays one socket. Besides answering the hub's `h:` requests, a node sends ordinary requests with `n:` ids and gets `{ id, result }` / `{ id, error }` back. The contract is in `packages/protocol/src/hub.ts`:
+
+- **Negotiated, additive.** The hub lists `node.requests` in `node.welcome` `features`. A node linked to an older hub gets `unsupported` locally. A node without a link gets `machine_offline` ("not connected to a hub"). Neither case waits on a timeout.
+- **Authenticated as the node.** The identity comes from the link (the `node.hello` token and machine id), never from the params.
+- **Allowlisted.** The hub answers hub-index reads (`machines.list`, `workspaces.list`, `sessions.list`) as it would for a paired device. Node-to-node methods (`helper.*`, `fork.prepare`, `fork.receive`) need `machineId`. The hub forwards them to that machine and stamps `caller: { machineId }` on them, so the target can check ownership. Every other method is `unauthorized`, and devices can't call the node-to-node methods at all.
+- **Fails fast.** A request to an offline target gets `machine_offline` with `{ machineId, lastSeenAt }` straight away. A request in flight fails with `machine_offline` when either link drops. Long calls carry their own timeouts: a `helper.wait` gets its wait plus a margin, and a fork gets up to 5 minutes.
+- **In core.** Node code calls `node.hub` (`HubPort`). The hub link attaches its transport when the hub welcomes the node and detaches it on close, so core never sees WebSockets.
+
+Built (2026-11-25): all of the above, used by §12.4 and by fork-to-machine ([topology.md](topology.md) §6). It is tested end to end with a real hub and two nodes (`apps/cli/test/cross-machine.test.ts`).
 
 ## 6. Agent adapters
 
@@ -436,7 +446,7 @@ Node-local MCP tools, injected next to the knowledge MCP server:
 - `session_read { sessionId, since? }`: structured summary of events since a cursor
 - `session_stop { sessionId }`, `sessions_list` (this session's helpers)
 
-**Boundary: the machine.** `workspace` must be on the parent's node, so the node serves these tools without the hub and they work offline. Cross-machine helpers come later (§12.4).
+**Boundary: the machine.** Without `machine`, `workspace` must be on the parent's node, so the node serves these tools without the hub and they work offline. Helpers on other machines go through the hub (§12.4).
 
 The helper records `spawned_by`. A `child` helper stops when its parent stops or ends; a `detached` one outlives it. Helpers appear nested under their parent in the session list and count inside the parent's mark in the sidebar (§11.1).
 
@@ -460,9 +470,20 @@ Context and spend per helper, `session_read` size limits, the fan-out preflight 
 
 Budgetless doesn't mean unlimited: GPU capacity is the limit, so a provider can set `maxConcurrent` and helpers queue when it's full. Tokens are still recorded, and an optional notional rate lets reports show what the same work would have cost elsewhere. Helper defaults can prefer budgetless models (explorers and reviewers on the local model, OpenCode pointed at the gateway, §6.5). The UI tags sessions running on a budgetless provider, and session trees show metered spend only.
 
-### 12.4 Later
+### 12.4 Cross-machine agent-to-agent, and later
 
 - **Cross-machine agent-to-agent via the hub:** a parent on the laptop starts a helper on the Mac mini (Xcode build, screenshots) or the VPS (long test run). Needs nodes to send requests to the hub, an additive change to the hub contract (today the hub only acts as a client of nodes). A helper on an offline machine fails fast with `machine_offline`.
+
+  Built (2026-11-25) on node → hub requests (§5.4):
+  - **Tools.** `session_start` takes `machine`, a name or id (case-insensitive). This machine's own name or id means "here". A new `machines_list` tool shows each machine with its online state, OS, GUI, tags, description and workspaces. `session_send`, `session_interrupt`, `session_wait`, `session_read`, `session_stop` and `sessions_list` work the same on a remote helper. The parent's node keeps a record of each remote helper in node meta and routes these calls through the hub as `helper.*` on the target. `sessions_list` refreshes remote helpers from the hub index.
+  - **A first-class session on B.** The helper is an ordinary session on the target machine, with `spawnedBy` (the parent's id) and `spawnedByMachineId`. It shows in the sidebar under its own workspace, and its header links to the parent. As with every helper, its approvals go to you.
+  - **Default workspace.** Without `workspace`, the helper goes to the target's workspace linked to the parent's: the same `projectId`, else the same normalized `origin` URL (`git@github.com:Acme/App.git` matches `https://github.com/acme/app`). Failing that, it goes to the target's only workspace; with several, the start is `bad_request` and lists them. The helper sees the target's copy of the files. Carrying uncommitted work over is what fork-to-machine is for.
+  - **Guardrails on both sides.** The parent's machine checks its depth limit, the budgets and the per-parent limit (local plus remote live helpers). The target checks its own depth limit and per-machine limit (with its `onLimit`). It clamps the permission mode against the parent's agent and mode, and stores that cap with the helper so `session.set` keeps it. Decision: a remote start over the per-parent limit always fails rather than queues, because the parent's machine can't hold a slot in another machine's queue.
+  - **Budgets.** The helper's budget is capped, field by field, at what the parent's caps have left: its own, its ancestors' and `treeBudgetUsd` (`Sessions.remainingBudget`). Every `session_wait` and `session_read` brings the helper's spend back, and from then on it counts in the parent's tree, so the parent's caps see it at the next turn boundary. Decision: the spend counted is as of the last wait or read; it isn't streamed.
+  - **Ownership.** The target serves `helper.*` only when `caller` (stamped by the hub) is the parent's machine and `parentId` is the helper's `spawnedBy`. Sessions on the target can't drive a remote parent's helper, and the reverse holds too.
+  - **Cascade.** When the parent stops, ends, fails or is deleted, its `child` helpers on other machines are stopped through the hub. If the hub is unreachable at that moment, they're marked and stopped on the next link, including after a node restart. `detached` helpers carry on.
+  - **Offline.** A start on an offline target fails with `machine_offline` before anything is sent; an unknown machine is `not_found`. If the target drops during a wait, the wait fails with `machine_offline`.
+  - Left: queuing remote starts behind the per-parent limit; streaming remote spend instead of reporting it on wait and read; a machine picker for helper defaults in the UI.
 - **Pipelines** (planner → implementer → reviewer across agents) and **watchers** (a cheap or budgetless model pings you only for real decisions). Shared knowledge keeps cross-agent work coherent.
 
 ### 12.5 Implementation notes (M4, one machine)
