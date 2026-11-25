@@ -559,11 +559,14 @@ export class Orchestrator {
   /** Structured summary of what the helper did since `since` (usage.md §2): never the raw transcript by default. */
   async read(parentId: string, helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
     this.assertHelper(parentId, helperId);
-    return this.summarize(helperId, opts);
+    return this.summarize(helperId, opts, parentId);
   }
 
-  /** The same summary for any session on this machine, without the ownership check (pipelines, docs/pipelines.md). */
-  async summarize(helperId: string, opts: ReadOptions = {}): Promise<ReadResult> {
+  /**
+   * The same summary for any session on this machine, without the ownership check (pipelines, docs/pipelines.md).
+   * With `parentId`, pending items the parent may answer are listed too (parentAnswersApprovals).
+   */
+  async summarize(helperId: string, opts: ReadOptions = {}, parentId?: string): Promise<ReadResult> {
     const info = this.#d.sessions.get(helperId).session;
     const since = opts.since ?? 0;
     if (!Number.isInteger(since) || since < 0) throw new BizziError('bad_request', 'since must be a non-negative integer');
@@ -626,7 +629,7 @@ export class Orchestrator {
     }
     out.changedFiles = [...files].map(([path, change]) => ({ path, change, diffRef: path }));
     if (pending.approvals.length || pending.questions.length || pending.budget) {
-      const items = this.pendingFor(parentId, helperId);
+      const items = parentId ? this.pendingFor(parentId, helperId) : undefined;
       out.waitingOn = {
         approvals: pending.approvals.map((a) => a.title || a.kind),
         questions: pending.questions.map((q) => q.text),
