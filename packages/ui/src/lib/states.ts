@@ -2,10 +2,10 @@
 import type { MarkState, MeterTone } from '@bizzi/client';
 import type { AgentKind, BillingClass, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
 
-export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', agy: 'agy', shell: 'Shell' };
+export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', agy: 'agy', shell: 'Shell', api: 'API chat' };
 
 /** One-letter glyph inside a mark (agent-type icon). */
-export const AGENT_GLYPH: Record<AgentKind, string> = { claude: 'C', codex: 'X', opencode: 'O', agy: 'A', shell: '$' };
+export const AGENT_GLYPH: Record<AgentKind, string> = { claude: 'C', codex: 'X', opencode: 'O', agy: 'A', shell: '$', api: '@' };
 
 export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', failed: 'failed', working: 'working', done: 'done, not yet seen', idle: 'idle' };
 

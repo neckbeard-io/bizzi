@@ -18,8 +18,12 @@ export function hasUpdate(a: AgentListing): boolean {
   return Boolean(a.latestVersion && a.version && a.latestVersion !== a.version);
 }
 
-/** Which provisioning actions make sense for an agent listing. The built-in shell has none. */
+/**
+ * Which provisioning actions make sense for an agent listing. The built-in shell has none; API chat
+ * (built in, spec §6.5) only has API keys.
+ */
 export function agentActions(a: AgentListing): AgentActions {
+  if (a.agent === 'api') return { install: false, update: false, uninstall: false, login: false, loginProminent: false, secrets: true };
   const managed = a.agent !== 'shell';
   return {
     install: managed && !a.installed,
@@ -73,6 +77,7 @@ export const SECRET_SUGGESTIONS: Record<AgentKind, readonly string[]> = {
   opencode: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY'],
   agy: ['GEMINI_API_KEY'],
   shell: [],
+  api: ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY', 'OPENROUTER_API_KEY', 'GEMINI_API_KEY'],
 };
 
 export function suggestedSecretNames(agent: AgentKind, existing: readonly string[] = []): string[] {

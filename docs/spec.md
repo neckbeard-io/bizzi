@@ -220,6 +220,34 @@ interface AgentCapabilities {
 1. **Chat/utility (no tools):** provider abstraction on the node or hub: quick questions, session titles, handoff briefs, memory extraction, review passes. Anthropic, OpenAI, Gemini, OpenRouter, OpenAI-compatible base URLs.
 2. **Agentic:** OpenCode on the node, configured for that provider/model.
 
+**Built (2026-11-25): item 1, `@bizzi/adapter-api`.**
+
+- **Agent kind `api`** ("API chat"), loaded by `bizzi serve` like the other adapters. A structured session with no tools: token streaming (`message.delta`, and `reasoning.delta` for thinking / `reasoning_content`), interrupt (aborts the request; partial text is kept in the conversation), `turn.completed` usage per turn, `usage.updated` totals, `context.updated` (last request's prompt + output against the window; no breakdown beyond a "bizzi overhead" row for the injected rules), model and effort switchable mid-session (also across providers), images, and text files attached as text (≤ 256 KiB). Rules and memory arrive as the system prompt (`systemPromptAppend`); MCP servers are ignored (`mcpInjection: 'none'`). Capabilities match the §6.7 column, plus fork and resume: the conversation is kept in `<dataDir>/api-chat/<ref>.json` (0600), so sessions resume after a node restart and fork natively.
+- **Providers:** two wire formats, Anthropic Messages (`/messages`, `x-api-key`, `anthropic-version`, `output_config.effort`, thinking blocks replayed unchanged to Anthropic-format providers) and OpenAI-compatible chat completions (`/chat/completions`, bearer, `stream_options.include_usage`, `reasoning_effort`). Presets: `anthropic`, `openai`, `gemini` and `openrouter` (the last two through their OpenAI-compatible endpoints). Others go in `<dataDir>/api-providers.json`, re-read when it changes:
+
+  ```jsonc
+  {
+    "defaultModel": "h200/qwen3.8-27b",
+    "utilityModel": "h200/qwen3.8-27b",
+    "providers": {
+      "h200": { "api": "openai", "baseUrl": "https://gpu-gateway.example/v1", "apiKeyEnv": "BIFROST_KEY",
+                "billing": "budgetless", "maxConcurrent": 8,
+                "body": { "chat_template_kwargs": { "enable_thinking": false } }, "models": ["qwen3.8-27b"] },
+      "gemini": null                      // removes a preset
+    }
+  }
+  ```
+
+  Models are `provider/model` (the provider is everything before the first slash, so `openrouter/anthropic/claude-sonnet-5-5` works). Other fields: `auth` (`bearer` | `x-api-key`), `headers`, `contextWindow`, `maxOutputTokens`, `maxTokensParam`, `streamUsage`, `discover`, and per model `{ id, contextWindow, maxOutputTokens, price: { inputPerMTok, outputPerMTok, cacheReadPerMTok?, cacheWritePerMTok? }, body }`.
+- **Keys:** a provider names an environment variable (`apiKeyEnv`), never the key. It's looked up in the secrets stored for agent `api` (`agent.setSecret`, which the core passes as the session env), then the node's environment. A missing key fails the session start with `agent_unavailable` naming the secret. Keys are sent in headers only and scrubbed from error text; logs carry provider, model and base URL.
+- **Billing (§12.3):** each session emits `account.usage` for its provider (`billing` from the config, presets `metered`; account id = provider plus a 12-hex SHA-256 fingerprint of the key), which sets the session's billing class. `maxConcurrent` is a per-provider queue shared by all sessions and utility calls on the node. Cost (`tokens+cost`) only where the config gives a price; there is no built-in price table.
+- **Context windows:** from the config, else discovered once per model from the provider (`GET /models/{id}` → `max_input_tokens` on Anthropic; `GET /models` → `max_model_len` (vLLM), `context_length` (OpenRouter) or `context_window`). Unknown windows report no context, per [usage.md](usage.md) §1.2. The Anthropic output cap defaults to the discovered `max_tokens` (capped at 32k), else 16k; OpenAI-compatible requests send no cap unless configured.
+- **Reliability:** retries (2) on 408/409/425/429/5xx/529 and network errors before any output, honouring `retry-after`; 120 s to response headers; a stream with no data for 300 s fails the turn.
+- **Utility completions:** `createUtilityCompleter({ dataDir, key })` → `complete({ system, prompt | messages, model?, maxTokens?, signal?, timeoutMs? })` → `{ text, model, billing, stopReason, usage }`, using `utilityModel` (then `defaultModel`). For titles, handoff briefs, memory extraction and review passes; no consumer is wired to it yet. `key` is typically the node's secrets for agent `api` (`@bizzi/services` `secretLookup`, `api:NAME`) with the environment as fallback.
+- **Decisions:** fetch + a small SSE parser rather than vendor SDKs (two wire formats, one code path, no dependencies; the OpenCode adapter already parses SSE the same way). The adapter doesn't set `temperature` or thinking parameters (newer Claude models reject some of them); extra fields go in `body`. API chat helpers (`session_start agent: "api"`) are allowed under a read-only parent: no tools means nothing to escalate. `stop_reason` `max_tokens` ends the turn as `other` with an `error` event (`code: max_tokens`); `refusal` maps to `refusal`.
+- **Relation to item 2:** OpenCode stays the agentic path for the same providers (it has tools and its own provider config). API chat is the cheap, toolless path; the same `api-providers.json` isn't read by OpenCode.
+- **Left:** a provider/model picker that lists providers by name in the new-session dialog (the UI shows `models: dynamic` as free text unless every provider lists its models); wiring utility completions into titles, briefs and harvest; deleting transcripts when a session is deleted (the adapter isn't told); a notional rate for budgetless providers; Anthropic prompt caching (`cache_control`) for long chats.
+
 ### 6.6 Terminal mode
 Any agent or shell in a PTY under a small detached per-session supervisor (survives node restarts/upgrades); xterm.js in the UI; scrollback chunked to blobs. Also the vehicle for interactive logins (§7).
 

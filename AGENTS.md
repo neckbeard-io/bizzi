@@ -11,6 +11,7 @@ packages/
   adapter-claude/    @bizzi/adapter-claude    Claude Agent SDK adapter
   adapter-codex/     @bizzi/adapter-codex     `codex app-server` JSON-RPC adapter
   adapter-opencode/  @bizzi/adapter-opencode  `opencode serve` adapter
+  adapter-api/       @bizzi/adapter-api       plain model APIs (Anthropic, OpenAI-compatible): `api` chat agent + utility completions
   pty/               @bizzi/pty           node-pty terminal host + terminal-mode adapter (agy, shell, any TUI)
   knowledge/         @bizzi/knowledge     rules + memory store, resolver, policy, MCP server
   orchestration/     @bizzi/orchestration bizzi-agents MCP tools for agent-to-agent helpers (loopback HTTP)

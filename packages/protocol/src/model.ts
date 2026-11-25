@@ -1,7 +1,8 @@
 // Domain objects exchanged over the protocol. Hierarchy: Machine > Workspace > Session.
 
-export type AgentKind = 'claude' | 'codex' | 'opencode' | 'agy' | 'shell';
-export const AGENT_KINDS: readonly AgentKind[] = ['claude', 'codex', 'opencode', 'agy', 'shell'];
+// 'api': plain model API chat without tools (spec §6.5 item 1, @bizzi/adapter-api).
+export type AgentKind = 'claude' | 'codex' | 'opencode' | 'agy' | 'shell' | 'api';
+export const AGENT_KINDS: readonly AgentKind[] = ['claude', 'codex', 'opencode', 'agy', 'shell', 'api'];
 
 export type SessionMode = 'structured' | 'terminal';
 
