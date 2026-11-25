@@ -7,16 +7,20 @@ import {
   cardSummary,
   filterByAgent,
   groupByScope,
+  PROMOTED_TAG,
   knownTags,
   matchesAgent,
   parseTags,
   projectOptions,
+  promotionCandidates,
+  reachesWorkspace,
   retargetScope,
   sameScope,
   scopeComplete,
   scopeLabel,
 } from '../src/lib/knowledge.ts';
 import type { ScopeContext } from '../src/lib/knowledge.ts';
+import { diffStats, parseUnifiedDiff } from '../src/lib/diff.ts';
 
 const machine = (id: string, name: string): MachineInfo => ({
   id,
@@ -204,4 +208,54 @@ test('mock knowledge: list filters, inbox, accept with scope, forget, settings',
 
   const s = await store.setKnowledgeSettings({ preset: 'strict' });
   assert.deepEqual(s, { preset: 'strict', defaultAgentScope: 'project' });
+});
+
+test('promotion candidates: active memories that reach the workspace, not promoted yet, most specific first', () => {
+  const w1 = CTX.workspaces!.w_1!;
+  const items = [
+    item({ id: 'g', status: 'active', title: 'Global', scope: { level: 'global' } }),
+    item({ id: 'p', status: 'active', title: 'Project', scope: { level: 'project', projectId: 'p_acme' } }),
+    item({ id: 'w', status: 'active', title: 'Workspace', scope: { level: 'workspace', workspaceId: 'w_1' } }),
+    item({ id: 'w2', status: 'active', title: 'Other workspace', scope: { level: 'workspace', workspaceId: 'w_2' } }),
+    item({ id: 'mb', status: 'active', title: 'Other machine', scope: { level: 'machine', machineId: 'm_b' } }),
+    item({ id: 't', status: 'active', title: 'Tagged', scope: { level: 'tag', tag: 'gui' } }),
+    item({ id: 'done', status: 'active', title: 'Done', tags: [PROMOTED_TAG] }),
+    item({ id: 'sug', title: 'Suggested' }),
+    item({ id: 'r', status: 'active', type: 'rule', title: 'A rule' }),
+  ];
+  assert.deepEqual(promotionCandidates(items, w1).map((i) => i.id), ['w', 'p', 'g']);
+  assert.deepEqual(promotionCandidates(items, w1, { tags: ['gui'] }).map((i) => i.id), ['w', 'p', 't', 'g']);
+  assert.equal(reachesWorkspace({ scope: { level: 'machine', machineId: 'm_a' } }, w1), true);
+});
+
+test('mock knowledge: Add to AGENTS.md preview and write', async (t) => {
+  const core = new MockCore({ speed: 0, autoplay: false });
+  const client = new BizziClient({ createSocket: createMockSocketFactory(core) });
+  const scheduler = createManualScheduler();
+  const store = new BizziStore(client, { scheduler });
+  t.after(() => {
+    store.dispose();
+    client.close();
+  });
+  await client.connect('mock://local');
+  await waitFor(() => {
+    scheduler.flush();
+    return store.getState().knowledgeInbox !== null && store.getState().workspaces !== null;
+  });
+  const memories = promotionCandidates(await store.listKnowledge({ type: 'memory' }), store.getState().workspaces!.w_acme!);
+  const ids = memories.slice(0, 2).map((i) => i.id);
+  assert.equal(ids.length, 2);
+  const preview = await store.previewPromotion({ workspaceId: 'w_acme', ids, heading: '## Team notes' });
+  assert.equal(preview.exists, false);
+  assert.equal(preview.heading, 'Team notes');
+  assert.deepEqual(preview.ids, ids);
+  const files = parseUnifiedDiff(preview.diff, 'AGENTS.md');
+  assert.equal(files.length, 1);
+  assert.equal(diffStats(files).additions, 4);
+  const res = await store.promoteKnowledge({ workspaceId: 'w_acme', ids, heading: preview.heading, baseHash: preview.baseHash });
+  assert.deepEqual(res.promoted, ids);
+  assert.equal(res.created, true);
+  const after = await store.listKnowledge({ type: 'memory' });
+  assert.ok(ids.every((id) => after.find((i) => i.id === id)?.tags.includes(PROMOTED_TAG)));
+  await assert.rejects(store.previewPromotion({ workspaceId: 'w_acme', ids }), /none of the picked/);
 });

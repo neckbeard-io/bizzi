@@ -16,6 +16,7 @@ import type {
   InstallPlan,
   KnowledgeInboxCard,
   KnowledgeItemInfo,
+  KnowledgePromotePreview,
   KnowledgeScope,
   KnowledgeSettings,
   Logger,
@@ -1237,6 +1238,25 @@ export class BizziStore {
     const res = await this.client.request('knowledge.settings.set', { ...this.knowledgeTarget(), settings });
     this.patch({ knowledgeSettings: res.settings });
     return res.settings;
+  }
+
+  // ---- knowledge: Add to AGENTS.md (knowledge.md §8). Runs on the workspace's machine (it writes the file there).
+
+  /** The workspace's machine when known; otherwise nothing, and a hub routes the call by `workspaceId`. */
+  private workspaceTarget(workspaceId: string): MachineTarget {
+    const machineId = this.state.workspaces?.[workspaceId]?.machineId;
+    return machineId ? { machineId } : {};
+  }
+
+  async previewPromotion(params: { workspaceId: string; ids: string[]; heading?: string }): Promise<KnowledgePromotePreview> {
+    const { preview } = await this.client.request('knowledge.promote.preview', { ...this.workspaceTarget(params.workspaceId), ...params });
+    return preview;
+  }
+
+  async promoteKnowledge(params: { workspaceId: string; ids: string[]; heading?: string; baseHash?: string }): Promise<MethodResult<'knowledge.promote'>> {
+    const res = await this.client.request('knowledge.promote', { ...this.workspaceTarget(params.workspaceId), ...params });
+    this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
+    return res;
   }
 
   // ---------------------------------------------------------------- hub: devices

@@ -117,3 +117,25 @@ test('mcpServerSpec / knowledgeForSession', () => {
   assert.equal(noMcp.mcpServers, undefined);
   assert.ok(!noMcp.systemPromptAppend.includes('memory_search'));
 });
+
+test('Claude sessions skip Claude memories harvested here; other agents and machines keep them (§8)', () => {
+  const { store } = memStore();
+  const harvested = (title: string, machineId: string, workspaceId: string) =>
+    put(store, {
+      title,
+      tags: ['harvest:claude'],
+      source: { via: 'harvest', agent: 'claude', machineId, workspaceId, ref: `claude:/x/${title}.md` },
+    });
+  harvested('Native here', M1, W1);
+  harvested('From another workspace', M1, 'w_ALPHA_OTHER');
+  harvested('From another machine', 'm_TWO', 'w_REMOTE');
+  put(store, { title: 'Saved through the tool', source: { via: 'tool', agent: 'claude', machineId: M1, workspaceId: W1 } });
+
+  const claude = buildKnowledgeDigest(CTX, { store });
+  assert.deepEqual(claude.memories.map((m) => m.item.title).sort(), ['From another machine', 'From another workspace', 'Saved through the tool']);
+  assert.equal(claude.omittedMemories, 0, 'native memories are not counted as omitted');
+  assert.ok(!claude.text.includes('Native here'));
+
+  assert.equal(buildKnowledgeDigest({ ...CTX, agent: 'codex' }, { store }).memories.length, 4, 'other agents get every memory');
+  assert.equal(buildKnowledgeDigest(CTX, { store, includeNative: true }).memories.length, 4);
+});

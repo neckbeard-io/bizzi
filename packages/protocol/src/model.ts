@@ -462,6 +462,25 @@ export interface KnowledgeRecord {
   hlc: string;
 }
 
+// ---- knowledge: Add to AGENTS.md (knowledge.md §8)
+
+export interface KnowledgePromotePreview {
+  /** Absolute path of the workspace's AGENTS.md on its machine. */
+  path: string;
+  /** False: writing creates the file. */
+  exists: boolean;
+  /** Pass back to `knowledge.promote` so it fails if the file changed in between. */
+  baseHash: string;
+  heading: string;
+  /** Items that would be written, in order. */
+  ids: string[];
+  skipped: { id: string; reason: 'not_found' | 'inactive' | 'already_promoted' | 'not_visible' }[];
+  /** Unified diff of the change (always an append at the end of the file). */
+  diff: string;
+  /** E.g. the workspace has a CLAUDE.md, so Claude Code won't read AGENTS.md. */
+  warnings: string[];
+}
+
 // ---- routing (spec §11.2: one-pane mode decides where a prompt runs)
 
 export interface RouteCandidate {

@@ -65,6 +65,7 @@ export {
   approxTokens,
   buildKnowledgeDigest,
   buildSystemPromptAppend,
+  isNativeToSession,
   knowledgeForSession,
   mcpServerArgs,
   mcpServerSpec,
@@ -90,4 +91,20 @@ export type { ClaudeHarvestOptions, ClaudeMemoryEntry, HarvestResult, HarvestSki
 export { harvestCodexMemories } from './harvest/codex.ts';
 export type { CodexHarvestOptions, CodexHarvestResult } from './harvest/codex.ts';
 export { parseFrontmatter } from './harvest/frontmatter.ts';
+export { MemoryDirWatcher } from './harvest/watch.ts';
+export type { DirWatchFn, DirWatcher, MemoryDirWatcherOptions } from './harvest/watch.ts';
+export {
+  ABSENT_FILE_HASH,
+  AGENTS_FILE,
+  DEFAULT_PROMOTE_HEADING,
+  PROMOTED_TAG,
+  appendDiff,
+  appendSection,
+  applyPromotion,
+  fileHash,
+  normalizeHeading,
+  planPromotion,
+  renderPromotedItem,
+} from './promote.ts';
+export type { PromoteOptions, PromoteSkipReason, PromotionPlan, PromotionResult } from './promote.ts';
 export type { Frontmatter, FrontmatterValue, ParsedMarkdown } from './harvest/frontmatter.ts';

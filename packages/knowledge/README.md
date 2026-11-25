@@ -24,8 +24,13 @@ Rules and memories that every coding agent (Claude, Codex, OpenCode, agy) on eve
   `rule_add`, `knowledge_update`, `knowledge_forget`. `history_search` and `handoff_brief` reply "not
   available yet".
 - **Harvest**: `harvestClaudeMemory` imports Claude auto-memory one way and is idempotent. It dedupes by
-  content hash and provenance, and an edited file supersedes its earlier import. `harvestCodexMemories` is a
-  documented stub.
+  content hash and provenance, and an edited file supersedes its earlier import. `MemoryDirWatcher` watches
+  memory directories (through their deepest existing ancestor until they appear) so the node can harvest on
+  change. Claude sessions don't get memories harvested from their own workspace on their own machine in the
+  digest (`isNativeToSession`): Claude loads those natively. `harvestCodexMemories` is a documented stub.
+- **Add to AGENTS.md** (`planPromotion` / `applyPromotion`): appends picked items to a workspace's
+  `AGENTS.md` under a heading, as a previewable unified diff with a base hash for conflict detection, and tags
+  them `promoted`. Never commits.
 
 ## Session start (core)
 

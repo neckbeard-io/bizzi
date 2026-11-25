@@ -107,6 +107,9 @@ const UNIMPLEMENTED = [
   'knowledge.settings.set',
   'knowledge.sync.pull',
   'knowledge.sync.push',
+  // ---- knowledge: Add to AGENTS.md (knowledge.md §8)
+  'knowledge.promote.preview',
+  'knowledge.promote',
   'route.suggest',
   'route.score',
   'pairing.create',
@@ -149,6 +152,9 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'knowledge.settings.set',
   'knowledge.sync.pull',
   'knowledge.sync.push',
+  // ---- knowledge: Add to AGENTS.md (knowledge.md §8)
+  'knowledge.promote.preview',
+  'knowledge.promote',
   'route.score',
   'orchestration.settings.get',
   'orchestration.settings.set',

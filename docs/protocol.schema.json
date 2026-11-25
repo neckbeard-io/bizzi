@@ -521,6 +521,24 @@
         "$ref": "#/$defs/result:knowledge.sync.push"
       }
     },
+    "knowledge.promote.preview": {
+      "description": "What \"Add to AGENTS.md…\" would append to the workspace's root AGENTS.md: the picked items under a `## heading` section, as a unified diff. Reads only. Items already tagged `promoted`, inactive or outside the workspace's scope are listed in `skipped`.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.promote.preview"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.promote.preview"
+      }
+    },
+    "knowledge.promote": {
+      "description": "Append the picked items to the workspace's AGENTS.md (creating it if missing) and tag them `promoted`. With the preview's `baseHash`, fails with `conflict` if the file changed since. Never commits.",
+      "params": {
+        "$ref": "#/$defs/params:knowledge.promote"
+      },
+      "result": {
+        "$ref": "#/$defs/result:knowledge.promote"
+      }
+    },
     "route.suggest": {
       "description": "Where should this prompt run? On a hub: across every online machine. On a node: its own workspaces. Explicit `@machine`, `#workspace` and `/agent` tokens win; otherwise the configured logprob classifier scores the targets. Read-only: nothing is started.",
       "params": {
@@ -2183,6 +2201,78 @@
         "strict"
       ]
     },
+    "KnowledgePromotePreview": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "description": "Absolute path of the workspace's AGENTS.md on its machine.",
+          "type": "string"
+        },
+        "exists": {
+          "description": "False: writing creates the file.",
+          "type": "boolean"
+        },
+        "baseHash": {
+          "description": "Pass back to `knowledge.promote` so it fails if the file changed in between.",
+          "type": "string"
+        },
+        "heading": {
+          "type": "string"
+        },
+        "ids": {
+          "description": "Items that would be written, in order.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string",
+                "enum": [
+                  "not_found",
+                  "inactive",
+                  "already_promoted",
+                  "not_visible"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "reason"
+            ]
+          }
+        },
+        "diff": {
+          "description": "Unified diff of the change (always an append at the end of the file).",
+          "type": "string"
+        },
+        "warnings": {
+          "description": "E.g. the workspace has a CLAUDE.md, so Claude Code won't read AGENTS.md.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "exists",
+        "baseHash",
+        "heading",
+        "ids",
+        "skipped",
+        "diff",
+        "warnings"
+      ]
+    },
     "KnowledgeRecord": {
       "description": "A knowledge item as it replicates between nodes through the hub (knowledge.md §9.4): the whole stored item, including its clock. Last writer by `hlc` wins; forgetting is a `deleted` tombstone.",
       "type": "object",
@@ -2553,6 +2643,8 @@
         "knowledge.settings.set",
         "knowledge.sync.pull",
         "knowledge.sync.push",
+        "knowledge.promote.preview",
+        "knowledge.promote",
         "route.suggest",
         "route.score",
         "pairing.create",
@@ -3932,6 +4024,44 @@
             },
             "params": {
               "$ref": "#/$defs/params:knowledge.sync.push"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.promote.preview"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.promote.preview"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "knowledge.promote"
+            },
+            "params": {
+              "$ref": "#/$defs/params:knowledge.promote"
             }
           }
         },
@@ -6008,6 +6138,65 @@
         }
       ]
     },
+    "params:knowledge.promote": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "heading": {
+              "type": "string"
+            },
+            "baseHash": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "ids"
+          ]
+        }
+      ]
+    },
+    "params:knowledge.promote.preview": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "workspaceId": {
+              "type": "string"
+            },
+            "ids": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "heading": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "ids"
+          ]
+        }
+      ]
+    },
     "params:knowledge.reject": {
       "allOf": [
         {
@@ -7071,6 +7260,39 @@
       },
       "required": [
         "items"
+      ]
+    },
+    "result:knowledge.promote": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "created": {
+          "type": "boolean"
+        },
+        "promoted": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "path",
+        "created",
+        "promoted"
+      ]
+    },
+    "result:knowledge.promote.preview": {
+      "type": "object",
+      "properties": {
+        "preview": {
+          "$ref": "#/$defs/KnowledgePromotePreview"
+        }
+      },
+      "required": [
+        "preview"
       ]
     },
     "result:knowledge.reject": {

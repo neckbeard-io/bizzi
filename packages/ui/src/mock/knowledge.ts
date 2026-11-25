@@ -1,6 +1,6 @@
 // Mock knowledge store: rules and memories, inbox suggestions, settings (docs/knowledge.md).
 import { BizziError, GLOBAL_CHANNEL } from '@bizzi/protocol';
-import type { AgentKind, KnowledgeInboxCard, KnowledgeItemInfo, KnowledgeScope, KnowledgeScopeLevel, KnowledgeSettings } from '@bizzi/protocol';
+import type { AgentKind, KnowledgeInboxCard, KnowledgeItemInfo, KnowledgePromotePreview, KnowledgeScope, KnowledgeScopeLevel, KnowledgeSettings, WorkspaceInfo } from '@bizzi/protocol';
 import type { MockHost, MockModule } from './host.ts';
 
 const LAPTOP = 'm_laptop';
@@ -222,6 +222,8 @@ export class MockKnowledge implements MockModule {
   private readonly host: MockHost;
   private readonly items = new Map<string, KnowledgeItemInfo>();
   private settings: KnowledgeSettings = { preset: 'balanced', defaultAgentScope: 'project' };
+  /** workspace id → its AGENTS.md (absent: no file yet). */
+  private readonly agentsMd = new Map<string, string>();
 
   constructor(host: MockHost) {
     this.host = host;
@@ -237,7 +239,8 @@ export class MockKnowledge implements MockModule {
   }
 
   handle(method: string, params: Record<string, unknown>): unknown {
-    const machine = this.host.requireOnline(params.machineId);
+    // Like a hub: a call naming only a workspace goes to that workspace's machine.
+    const machine = this.host.requireOnline(params.machineId ?? this.host.workspaces().find((w) => w.id === params.workspaceId)?.machineId);
     switch (method) {
       case 'knowledge.list':
         return { items: this.list(params) };
@@ -319,9 +322,63 @@ export class MockKnowledge implements MockModule {
         this.settings = { ...this.settings, ...patch };
         return { settings: { ...this.settings } };
       }
+      // ---- Add to AGENTS.md (knowledge.md §8)
+      case 'knowledge.promote.preview':
+        return { preview: this.promotion(params).preview };
+      case 'knowledge.promote': {
+        const { preview, content, items, ws } = this.promotion(params);
+        if (typeof params.baseHash === 'string' && params.baseHash !== preview.baseHash) throw new BizziError('conflict', 'AGENTS.md changed since the preview');
+        this.agentsMd.set(ws.id, content);
+        const now = new Date().toISOString();
+        for (const i of items) this.items.set(i.id, { ...i, tags: [...i.tags, 'promoted'], updatedAt: now });
+        this.changed(preview.ids);
+        return { path: preview.path, created: !preview.exists, promoted: preview.ids };
+      }
       default:
         throw new BizziError('unsupported', `mock does not implement ${method}`);
     }
+  }
+
+  /** A simplified version of the node's planPromotion (append-only, same preview shape). */
+  private promotion(p: Record<string, unknown>): { preview: KnowledgePromotePreview; content: string; items: KnowledgeItemInfo[]; ws: WorkspaceInfo } {
+    const ws = this.host.workspaces().find((w) => w.id === p.workspaceId);
+    if (!ws) throw new BizziError('not_found', `workspace ${String(p.workspaceId)} not found`);
+    const heading = (typeof p.heading === 'string' ? p.heading.replace(/^#+\s*/, '').trim() : '') || 'Notes from bizzi memory';
+    const skipped: KnowledgePromotePreview['skipped'] = [];
+    const items: KnowledgeItemInfo[] = [];
+    for (const id of stringList(p.ids)) {
+      const i = this.items.get(id);
+      if (!i) skipped.push({ id, reason: 'not_found' });
+      else if (i.status !== 'active') skipped.push({ id, reason: 'inactive' });
+      else if (i.tags.includes('promoted')) skipped.push({ id, reason: 'already_promoted' });
+      else items.push(i);
+    }
+    if (items.length === 0) throw new BizziError('bad_request', 'none of the picked items can be added to AGENTS.md');
+    const before = this.agentsMd.get(ws.id);
+    const bullets = items.map((i) => `- **${i.title}**: ${i.body.trim().split('\n').join('\n  ')}`);
+    const added = [...(before ? [''] : []), `## ${heading}`, '', ...bullets];
+    const old = before ? before.replace(/\n$/, '').split('\n') : [];
+    const ctx = old.slice(-3);
+    const start = old.length - ctx.length + 1;
+    const diff = [
+      before === undefined ? '--- /dev/null' : '--- a/AGENTS.md',
+      '+++ b/AGENTS.md',
+      `@@ -${ctx.length ? start : 0},${ctx.length} +${ctx.length ? start : 1},${ctx.length + added.length} @@`,
+      ...ctx.map((l) => ` ${l}`),
+      ...added.map((l) => `+${l}`),
+      '',
+    ].join('\n');
+    const preview: KnowledgePromotePreview = {
+      path: `${ws.path}/AGENTS.md`,
+      exists: before !== undefined,
+      baseHash: before === undefined ? 'absent' : `len-${before.length}`,
+      heading,
+      ids: items.map((i) => i.id),
+      skipped,
+      diff,
+      warnings: [],
+    };
+    return { preview, content: `${before ?? ''}${added.join('\n')}\n`, items, ws };
   }
 
   private get(id: unknown): KnowledgeItemInfo {

@@ -203,3 +203,35 @@ export function groupByScope(entries: readonly { id: string; scope?: KnowledgeSc
   }
   return [...groups.values()];
 }
+
+// ---- Add to AGENTS.md (knowledge.md §8)
+
+/** Tag the node puts on items written into an AGENTS.md; they aren't offered again. */
+export const PROMOTED_TAG = 'promoted';
+
+/** Whether an item's scope reaches sessions in `workspace` (the node checks this again). */
+export function reachesWorkspace(item: Pick<KnowledgeItemInfo, 'scope'>, workspace: WorkspaceInfo, machine?: Pick<MachineInfo, 'tags'>): boolean {
+  const s = item.scope;
+  switch (s.level) {
+    case 'global':
+      return true;
+    case 'tag':
+      return !!s.tag && (machine?.tags ?? []).includes(s.tag);
+    case 'machine':
+      return s.machineId === workspace.machineId;
+    case 'project':
+      return !!workspace.projectId && s.projectId === workspace.projectId;
+    case 'workspace':
+      return s.workspaceId === workspace.id;
+    default:
+      return false;
+  }
+}
+
+/** Memories "Add to AGENTS.md…" offers for a workspace: active, reaching it, not promoted yet; most specific scope first. */
+export function promotionCandidates(items: readonly KnowledgeItemInfo[], workspace: WorkspaceInfo, machine?: Pick<MachineInfo, 'tags'>): KnowledgeItemInfo[] {
+  const rank: Partial<Record<KnowledgeScopeLevel, number>> = { workspace: 0, project: 1, machine: 2, tag: 3, global: 4 };
+  return items
+    .filter((i) => i.type === 'memory' && i.status === 'active' && !i.tags.includes(PROMOTED_TAG) && reachesWorkspace(i, workspace, machine))
+    .sort((a, b) => (rank[a.scope.level] ?? 9) - (rank[b.scope.level] ?? 9) || a.title.localeCompare(b.title));
+}

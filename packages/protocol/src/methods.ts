@@ -12,6 +12,7 @@ import type {
   InstallPlan,
   KnowledgeInboxCard,
   KnowledgeItemInfo,
+  KnowledgePromotePreview,
   KnowledgeRecord,
   KnowledgeScope,
   KnowledgeScopeLevel,
@@ -327,6 +328,25 @@ export interface Methods {
   };
   /** Merge items from other machines: last writer by HLC wins. `applied` counts the ones that were newer. */
   'knowledge.sync.push': { params: MachineTarget & { items: KnowledgeRecord[] }; result: { applied: number } };
+
+  // ---- knowledge: Add to AGENTS.md (knowledge.md §8)
+  /**
+   * What "Add to AGENTS.md…" would append to the workspace's root AGENTS.md: the picked items under a
+   * `## heading` section, as a unified diff. Reads only. Items already tagged `promoted`, inactive or
+   * outside the workspace's scope are listed in `skipped`.
+   */
+  'knowledge.promote.preview': {
+    params: MachineTarget & { workspaceId: string; ids: string[]; heading?: string };
+    result: { preview: KnowledgePromotePreview };
+  };
+  /**
+   * Append the picked items to the workspace's AGENTS.md (creating it if missing) and tag them
+   * `promoted`. With the preview's `baseHash`, fails with `conflict` if the file changed since. Never commits.
+   */
+  'knowledge.promote': {
+    params: MachineTarget & { workspaceId: string; ids: string[]; heading?: string; baseHash?: string };
+    result: { path: string; created: boolean; promoted: string[] };
+  };
 
   // ---- routing (spec §11.2)
   /**

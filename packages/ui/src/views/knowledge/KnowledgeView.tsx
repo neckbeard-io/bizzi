@@ -14,6 +14,7 @@ import { KNOWLEDGE_AGENTS, SCOPE_LEVELS, filterByAgent, scopeLabel } from '../..
 import type { ScopeContext } from '../../lib/knowledge.ts';
 import { KnowledgeEditor, useScopeContext } from './KnowledgeEditor.tsx';
 import type { EditorTarget } from './KnowledgeEditor.tsx';
+import { PromoteDialog } from './PromoteDialog.tsx';
 
 type LevelFilter = 'all' | KnowledgeScopeLevel;
 type TypeFilter = 'all' | 'rule' | 'memory';
@@ -43,6 +44,7 @@ export function KnowledgeView(): ReactNode {
   const [items, setItems] = useState<KnowledgeItemInfo[] | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [editor, setEditor] = useState<EditorTarget | null>(null);
+  const [promoting, setPromoting] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -81,6 +83,9 @@ export function KnowledgeView(): ReactNode {
             </Button>
             <Button size="sm" icon="plus" onClick={() => setEditor({ mode: 'new', type: 'memory' })}>
               Memory
+            </Button>
+            <Button size="sm" icon="file" onClick={() => setPromoting(true)} title="Copy picked memories into a workspace's AGENTS.md">
+              AGENTS.md…
             </Button>
             <IconButton icon="settings" label="Knowledge settings" onClick={() => navigate({ name: 'settings', section: 'knowledge' })} />
           </>
@@ -141,6 +146,7 @@ export function KnowledgeView(): ReactNode {
         )}
       </div>
       {editor ? <KnowledgeEditor target={editor} onClose={() => setEditor(null)} /> : null}
+      {promoting ? <PromoteDialog onClose={() => setPromoting(false)} /> : null}
     </div>
   );
 }
