@@ -519,6 +519,15 @@ export interface DeviceInfo {
   revoked?: boolean;
 }
 
+// ---- hub: Web Push (tech-choices.md D9)
+
+/** A browser push subscription, as `PushSubscription.toJSON()` returns it (keys base64url). */
+export interface WebPushSubscription {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: { p256dh: string; auth: string };
+}
+
 /** Printed by `bizzi serve` as a single JSON line on stdout once it is listening. */
 export interface ServeReady {
   event: 'ready';

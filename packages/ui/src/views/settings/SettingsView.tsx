@@ -7,6 +7,7 @@ import type { SettingsSection } from '../../lib/router.ts';
 import { KnowledgeSettings } from '../knowledge/KnowledgeSettings.tsx';
 import { AppearanceSettings } from './AppearanceSettings.tsx';
 import { DevicesSettings } from './DevicesSettings.tsx';
+import { NotificationSettings } from './NotificationSettings.tsx';
 
 /**
  * App-level settings only (the gear in the sidebar header): appearance, knowledge, devices (hub), connection.
@@ -25,7 +26,12 @@ export function SettingsView(props: { section: SettingsSection }): ReactNode {
   return (
     <Page header={<PageHeader title="Settings" subtitle="For the whole app; machine settings are on each machine's page" />}>
       <Tabs<SettingsSection> className="mb-4" value={section} onChange={(s) => navigate({ name: 'settings', section: s }, { replace: true })} items={items} />
-      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'devices' ? <DevicesSettings /> : <ConnectionSettings />}
+      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'devices' ? (
+        <>
+          <NotificationSettings />
+          <DevicesSettings />
+        </>
+      ) : <ConnectionSettings />}
     </Page>
   );
 }

@@ -30,6 +30,7 @@ import type {
   ThemeFile,
   UpdatePolicy,
   UserPrefs,
+  WebPushSubscription,
   WidgetValue,
   WorkspaceInfo,
 } from './model.ts';
@@ -360,6 +361,15 @@ export interface Methods {
   /** User-wide preferences (theme choice, density); hub-local like themes.*. `prefs.set` merges and emits `prefs.updated`. */
   'prefs.get': { params: Empty; result: { prefs: UserPrefs } };
   'prefs.set': { params: { prefs: Partial<UserPrefs> }; result: { prefs: UserPrefs } };
+
+  // ---- Web Push (tech-choices.md D9; hub only, paired devices)
+  /** The hub's VAPID public key (base64url), the `applicationServerKey` for `pushManager.subscribe`. */
+  'push.config': { params: Empty; result: { webPush: { publicKey: string } } };
+  /** Register (or move to this device) a browser push subscription; replaces any row with the same endpoint. */
+  'push.register': { params: { subscription: WebPushSubscription; name?: string }; result: Empty };
+  'push.unregister': { params: { endpoint: string }; result: Empty };
+  /** Send a test notification to this device's subscriptions. */
+  'push.test': { params: Empty; result: { sent: number; failed: number } };
 }
 
 export type MethodName = keyof Methods;

@@ -1,5 +1,5 @@
 // The hub server: HTTP pairing/auth API (hub.ts), /healthz, the client endpoint /ws, the node endpoint
-// /ws/node, optional static UI, and ntfy push.
+// /ws/node, optional static UI, and push (ntfy, Web Push).
 
 import { readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
@@ -13,10 +13,11 @@ import { Auth, RateLimitedError, type AuthOptions } from './auth.ts';
 import { HubBus } from './bus.ts';
 import { ClientConn } from './client-conn.ts';
 import { NodeLink } from './node-link.ts';
-import { NtfyPusher } from './push.ts';
+import { NtfySink, Pusher, type PushSink } from './push.ts';
 import { Relay } from './relay.ts';
 import { HubStore } from './store.ts';
 import { nullLogger } from './util.ts';
+import { WebPushService } from './webpush-service.ts';
 
 export interface HubOptions {
   /** Directory for hub.db and setup-code (created if missing). */
@@ -42,6 +43,13 @@ export interface HubOptions {
   router?: RouterOptions;
   /** ntfy push notifications. */
   ntfy?: { url: string; token?: string; debounceMs?: number; minTurnMs?: number; fetch?: typeof fetch };
+  /**
+   * Web Push to browsers/PWAs that subscribe (`push.register`); on unless `false`. The VAPID keypair is
+   * generated into `<dataDir>/vapid.json`. `subject` is the VAPID contact (mailto: or https:).
+   */
+  webPush?:
+    | false
+    | { subject?: string; ttlSec?: number; debounceMs?: number; minTurnMs?: number; allowInsecureEndpoints?: boolean; fetch?: typeof fetch };
   /** Called with a freshly issued setup code (default: logged at warn level). */
   onSetupCode?: (code: string, file: string) => void;
 }
@@ -68,7 +76,7 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
   const host = opts.host ?? '127.0.0.1';
   const store = new HubStore(opts.dataDir);
   const setupCodeFile = join(opts.dataDir, 'setup-code');
-  let pusher: NtfyPusher | undefined;
+  let pusher: Pusher | undefined;
   try {
     const bus = new HubBus(store, logger.child({ component: 'bus' }));
     const auth = new Auth(store, opts.auth);
@@ -91,15 +99,44 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
       rmSync(setupCodeFile, { force: true });
     }
 
-    if (opts.ntfy?.url) {
-      const n = opts.ntfy;
-      pusher = new NtfyPusher({
-        url: n.url,
-        ...(n.token ? { token: n.token } : {}),
+    const sinks: PushSink[] = [];
+    const n = opts.ntfy?.url ? opts.ntfy : undefined;
+    const wp = opts.webPush === false ? undefined : (opts.webPush ?? {});
+    if (n) {
+      sinks.push(
+        new NtfySink({
+          url: n.url,
+          ...(n.token ? { token: n.token } : {}),
+          ...(relay.publicUrl ? { publicUrl: relay.publicUrl } : {}),
+          ...(n.fetch ? { fetch: n.fetch } : {}),
+          logger: logger.child({ component: 'push' }),
+        }),
+      );
+      logger.log('info', 'ntfy push enabled');
+    }
+    let webPush: WebPushService | undefined;
+    if (wp) {
+      webPush = new WebPushService({
+        store,
+        dataDir: opts.dataDir,
+        logger: logger.child({ component: 'webpush' }),
         ...(relay.publicUrl ? { publicUrl: relay.publicUrl } : {}),
-        ...(n.debounceMs !== undefined ? { debounceMs: n.debounceMs } : {}),
-        ...(n.minTurnMs !== undefined ? { minTurnMs: n.minTurnMs } : {}),
-        ...(n.fetch ? { fetch: n.fetch } : {}),
+        ...(wp.subject ? { subject: wp.subject } : {}),
+        ...(wp.ttlSec !== undefined ? { ttlSec: wp.ttlSec } : {}),
+        ...(wp.allowInsecureEndpoints ? { allowInsecureEndpoints: true } : {}),
+        ...(wp.fetch ? { fetch: wp.fetch } : {}),
+        respond: (device, params) => relay.handle(device, 'approval.respond', params),
+      });
+      relay.webPush = webPush;
+      sinks.push(webPush);
+    }
+    if (sinks.length > 0) {
+      const debounceMs = n?.debounceMs ?? wp?.debounceMs;
+      const minTurnMs = n?.minTurnMs ?? wp?.minTurnMs;
+      pusher = new Pusher({
+        sinks,
+        ...(debounceMs !== undefined ? { debounceMs } : {}),
+        ...(minTurnMs !== undefined ? { minTurnMs } : {}),
         logger: logger.child({ component: 'push' }),
         state: {
           load: () => store.getMeta('push.usage'),
@@ -116,7 +153,6 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
       });
       const p = pusher;
       bus.tap((ev) => p.handle(ev));
-      logger.log('info', 'ntfy push enabled');
     }
 
     const http: Server = createServer((req, res) => {
@@ -143,7 +179,7 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
         if (req.method !== 'POST') return sendJson(res, 405, { error: { code: 'bad_request', message: 'use POST' } });
         try {
           const body = await readJson(req);
-          sendJson(res, 200, handler(body, req));
+          sendJson(res, 200, await handler(body, req));
         } catch (err) {
           sendError(res, err, logger);
         }
@@ -172,6 +208,11 @@ export async function startHub(opts: HubOptions): Promise<BizziHub> {
       '/api/auth/token': (body, req) => {
         const { token, expiresAt } = auth.token(body, clientKey(req));
         return { token, expiresAt };
+      },
+      // Approve / Deny from a Web Push notification (protocol hub.ts, PushActionRequest).
+      '/api/push/action': (body) => {
+        if (!webPush) throw new BizziError('not_found', 'Web Push is turned off on this hub');
+        return webPush.action(body);
       },
     };
 

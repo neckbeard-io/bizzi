@@ -49,7 +49,12 @@ export interface ClientHandle {
 
 export const CLOSE_REVOKED = 4403;
 
-const HUB_ONLY = new Set(['pairing.create', 'devices.list', 'device.revoke']);
+const HUB_ONLY = new Set(['pairing.create', 'devices.list', 'device.revoke', 'push.config', 'push.register', 'push.unregister', 'push.test']);
+
+/** Web Push methods (webpush-service.ts); absent when Web Push is off. */
+export interface WebPushHandler {
+  handle(device: DeviceRow, method: string, params: Record<string, unknown>, ctx: { baseUrl?: string }): Promise<unknown>;
+}
 
 export interface RelayOptions {
   store: HubStore;
@@ -75,6 +80,8 @@ export class Relay {
   /** Routes prompts across every online machine (`route.suggest`). */
   readonly router: Router;
   publicUrl?: string;
+  /** Web Push (`push.*`), set by the server when enabled. */
+  webPush?: WebPushHandler;
   readonly #links = new Map<string, LinkHandle>();
   readonly #clients = new Set<ClientHandle>();
   readonly #nodeCursors = new Map<string, number>();
@@ -420,6 +427,13 @@ export class Relay {
         this.bus.appendGlobal({ type: 'prefs.updated', data: { prefs } });
         return { prefs };
       }
+      // ---- Web Push (tech-choices.md D9): hub-local, never relayed.
+      case 'push.config':
+      case 'push.register':
+      case 'push.unregister':
+      case 'push.test':
+        if (!this.webPush) throw new BizziError('unsupported', 'Web Push is turned off on this hub');
+        return this.webPush.handle(device, method, p, ctx);
       case 'session.get': {
         if (typeof p.sessionId !== 'string') throw new BizziError('bad_request', 'sessionId is required');
         const cached = this.store.getSession(p.sessionId);

@@ -1,9 +1,10 @@
-// Push notifications via ntfy (docs/tech-choices.md D9): what needs you while you're away.
+// Push notifications (docs/tech-choices.md D9): what needs you while you're away.
 // approval.requested, question.asked, and turn.completed for turns longer than `minTurnMs`, debounced
 // per session so a burst becomes one notification. Also per-login usage (docs/usage.md §3.4): a plan
 // window crossing 80% and 95%, and a login becoming `limited`, each once per window reset.
+// `Pusher` decides what to send; sinks deliver it: ntfy (`NtfySink`) and Web Push (webpush-service.ts).
 
-import { GLOBAL_CHANNEL, type AccountUsage, type ChannelEvent, type Logger } from '@bizzi/protocol';
+import { GLOBAL_CHANNEL, type AccountUsage, type ApprovalDecisionKind, type ChannelEvent, type Logger } from '@bizzi/protocol';
 
 /** Plan-window thresholds (percent) that trigger a push. */
 export const USAGE_PUSH_THRESHOLDS = [80, 95] as const;
@@ -16,13 +17,41 @@ export interface PushStateStore {
   save(json: string): void;
 }
 
-export interface PushOptions {
+/** One notification, after debouncing; every sink gets the same one. */
+export interface PushNotification {
+  title: string;
+  body: string;
+  /** ntfy tags (emoji shortcodes). */
+  tags: string;
+  priority: 'high' | 'default';
+  /** Debounce key: `session:<id>` or `usage:<agent>\0<account>`. */
+  key: string;
+  sessionId?: string;
+  /** Set when the batch holds exactly one approval, so a sink can offer Approve / Deny. */
+  approval?: { sessionId: string; approvalId: string; options: ApprovalDecisionKind[] };
+}
+
+export interface PushSink {
+  /** Deliver; should not throw (log instead). */
+  send(n: PushNotification): Promise<void>;
+}
+
+export interface NtfySinkOptions {
   /** ntfy topic URL, e.g. https://ntfy.sh/my-bizzi-topic. */
   url: string;
   /** Optional ntfy access token (sent as a Bearer token). */
   token?: string;
   /** Public UI base URL for click-through links (`<publicUrl>/#/s/<sessionId>`). */
   publicUrl?: string;
+  fetch?: typeof fetch;
+  logger: Logger;
+}
+
+/** NtfyPusher's options: the pusher's plus one ntfy sink's. */
+export interface PushOptions extends Omit<PusherOptions, 'sinks'>, NtfySinkOptions {}
+
+export interface PusherOptions {
+  sinks: PushSink[];
   /** Collect events per session for this long before sending (default 5 s). */
   debounceMs?: number;
   /** Only notify about turns that ran at least this long (default 20 s). */
@@ -32,7 +61,6 @@ export interface PushOptions {
   logger: Logger;
   /** Human labels for a session: its title and machine name. */
   describe: (sessionId: string) => { session: string; machine?: string };
-  fetch?: typeof fetch;
   now?: () => number;
   /** Persist usage dedupe state (default: memory only). */
   state?: PushStateStore;
@@ -49,20 +77,50 @@ interface Note {
   title: string;
   body: string;
   tags: string;
+  approval?: { approvalId: string; options: ApprovalDecisionKind[] };
 }
 
-export class NtfyPusher {
-  readonly #o: PushOptions;
+/** Delivers to an ntfy topic: title, tags, priority and click-through as headers, the body as text. */
+export class NtfySink implements PushSink {
+  readonly #o: NtfySinkOptions;
   readonly #fetch: typeof fetch;
+
+  constructor(o: NtfySinkOptions) {
+    this.#o = o;
+    this.#fetch = o.fetch ?? fetch;
+  }
+
+  async send(n: PushNotification): Promise<void> {
+    const headers: Record<string, string> = {
+      Title: asciiHeader(n.title),
+      Tags: n.tags,
+      Priority: n.priority,
+      'Content-Type': 'text/plain; charset=utf-8',
+    };
+    if (this.#o.publicUrl) {
+      const base = this.#o.publicUrl.replace(/\/+$/, '');
+      headers.Click = n.sessionId !== undefined ? `${base}/#/s/${encodeURIComponent(n.sessionId)}` : `${base}/`;
+    }
+    if (this.#o.token) headers.Authorization = `Bearer ${this.#o.token}`;
+    try {
+      const res = await this.#fetch(this.#o.url, { method: 'POST', headers, body: n.body });
+      if (!res.ok) this.#o.logger.log('warn', 'ntfy push rejected', { status: res.status });
+    } catch (err) {
+      this.#o.logger.log('warn', 'ntfy push failed', { err: String(err) });
+    }
+  }
+}
+
+export class Pusher {
+  readonly #o: PusherOptions;
   readonly #now: () => number;
   readonly #turnStarts = new Map<string, number>();
   readonly #queue = new Map<string, { notes: Note[]; timer: NodeJS.Timeout; sessionId?: string }>();
   readonly #inflight = new Set<Promise<void>>();
   readonly #marks: Map<string, UsageMark>;
 
-  constructor(o: PushOptions) {
+  constructor(o: PusherOptions) {
     this.#o = o;
-    this.#fetch = o.fetch ?? fetch;
     this.#now = o.now ?? Date.now;
     this.#marks = new Map();
     try {
@@ -85,12 +143,19 @@ export class NtfyPusher {
       this.#turnStarts.set(`${sessionId}:${ev.data.turnId}`, ts);
       return;
     }
+    if (ev.type === 'approval.resolved') {
+      this.#dropApproval(`session:${sessionId}`, ev.data.approvalId);
+      return;
+    }
     if (ev.type !== 'approval.requested' && ev.type !== 'question.asked' && ev.type !== 'turn.completed') return;
     const fresh = Number.isFinite(ts) && this.#now() - ts <= (this.#o.maxAgeMs ?? 5 * 60_000);
     const label = () => this.#o.describe(sessionId);
     let note: Note | undefined;
     if (ev.type === 'approval.requested') {
-      if (fresh) note = { rank: 3, title: `Approval needed: ${label().session}`, body: ev.data.title, tags: 'warning' };
+      if (fresh) {
+        const approval = { approvalId: ev.data.approvalId, options: Array.isArray(ev.data.options) ? ev.data.options : [] };
+        note = { rank: 3, title: `Approval needed: ${label().session}`, body: ev.data.title, tags: 'warning', approval };
+      }
     } else if (ev.type === 'question.asked') {
       if (fresh) note = { rank: 2, title: `Question: ${label().session}`, body: ev.data.text, tags: 'question' };
     } else {
@@ -214,24 +279,33 @@ export class NtfyPusher {
     const machine = sessionId !== undefined ? this.#o.describe(sessionId).machine : undefined;
     const lines = q.notes.length === 1 ? [top.body] : q.notes.slice(-5).map((n) => `${n.title}: ${n.body}`);
     if (machine) lines.push(`on ${machine}`);
-    const headers: Record<string, string> = {
-      Title: asciiHeader(q.notes.length === 1 ? top.title : `${top.title} (+${q.notes.length - 1} more)`),
-      Tags: top.tags,
-      Priority: top.rank >= 2 ? 'high' : 'default',
-      'Content-Type': 'text/plain; charset=utf-8',
+    const n: PushNotification = {
+      title: q.notes.length === 1 ? top.title : `${top.title} (+${q.notes.length - 1} more)`,
+      body: lines.join('\n'),
+      tags: top.tags,
+      priority: top.rank >= 2 ? 'high' : 'default',
+      key,
     };
-    if (this.#o.publicUrl) {
-      const base = this.#o.publicUrl.replace(/\/+$/, '');
-      headers.Click = sessionId !== undefined ? `${base}/#/s/${encodeURIComponent(sessionId)}` : `${base}/`;
+    if (sessionId !== undefined) n.sessionId = sessionId;
+    const approvals = q.notes.filter((x) => x.approval);
+    if (sessionId !== undefined && approvals.length === 1) n.approval = { sessionId, ...approvals[0]!.approval! };
+    for (const sink of this.#o.sinks) {
+      const p: Promise<void> = sink
+        .send(n)
+        .catch((err: unknown) => this.#o.logger.log('warn', 'push failed', { err: String(err) }))
+        .finally(() => this.#inflight.delete(p));
+      this.#inflight.add(p);
     }
-    if (this.#o.token) headers.Authorization = `Bearer ${this.#o.token}`;
-    const p = this.#fetch(this.#o.url, { method: 'POST', headers, body: lines.join('\n') })
-      .then((res) => {
-        if (!res.ok) this.#o.logger.log('warn', 'ntfy push rejected', { status: res.status });
-      })
-      .catch((err: unknown) => this.#o.logger.log('warn', 'ntfy push failed', { err: String(err) }))
-      .finally(() => this.#inflight.delete(p));
-    this.#inflight.add(p);
+  }
+
+  /** An approval answered before its debounced push went out: don't announce it. */
+  #dropApproval(key: string, approvalId: string): void {
+    const q = this.#queue.get(key);
+    if (!q) return;
+    q.notes = q.notes.filter((n) => n.approval?.approvalId !== approvalId);
+    if (q.notes.length > 0) return;
+    clearTimeout(q.timer);
+    this.#queue.delete(key);
   }
 
   /** Send anything still queued and wait for in-flight requests. */
@@ -241,6 +315,13 @@ export class NtfyPusher {
       this.#flush(key);
     }
     await Promise.allSettled([...this.#inflight]);
+  }
+}
+
+/** A pusher with a single ntfy sink (the original ntfy-only API). */
+export class NtfyPusher extends Pusher {
+  constructor(o: PushOptions) {
+    super({ ...o, sinks: [new NtfySink(o)] });
   }
 }
 

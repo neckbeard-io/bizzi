@@ -22,6 +22,8 @@ services:
       BIZZI_PUBLIC_URL: ${BIZZI_PUBLIC_URL:-https://bizzi.example.com}
       BIZZI_NTFY_URL: ${BIZZI_NTFY_URL:-}       # optional push: https://ntfy.sh/<your-secret-topic>
       BIZZI_NTFY_TOKEN: ${BIZZI_NTFY_TOKEN:-}
+      BIZZI_VAPID_SUBJECT: ${BIZZI_VAPID_SUBJECT:-}   # Web Push contact (mailto:/https:)
+      BIZZI_WEBPUSH: ${BIZZI_WEBPUSH:-}               # 0 turns Web Push off
       PUID: ${PUID:-1000}
       PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}

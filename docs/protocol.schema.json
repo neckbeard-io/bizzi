@@ -605,6 +605,41 @@
       "result": {
         "$ref": "#/$defs/result:prefs.set"
       }
+    },
+    "push.config": {
+      "description": "The hub's VAPID public key (base64url), the `applicationServerKey` for `pushManager.subscribe`.",
+      "params": {
+        "$ref": "#/$defs/params:push.config"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.config"
+      }
+    },
+    "push.register": {
+      "description": "Register (or move to this device) a browser push subscription; replaces any row with the same endpoint.",
+      "params": {
+        "$ref": "#/$defs/params:push.register"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.register"
+      }
+    },
+    "push.unregister": {
+      "params": {
+        "$ref": "#/$defs/params:push.unregister"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.unregister"
+      }
+    },
+    "push.test": {
+      "description": "Send a test notification to this device's subscriptions.",
+      "params": {
+        "$ref": "#/$defs/params:push.test"
+      },
+      "result": {
+        "$ref": "#/$defs/result:push.test"
+      }
     }
   },
   "x-events": {
@@ -2560,7 +2595,11 @@
         "theme.save",
         "theme.delete",
         "prefs.get",
-        "prefs.set"
+        "prefs.set",
+        "push.config",
+        "push.register",
+        "push.unregister",
+        "push.test"
       ]
     },
     "NodeHelloMsg": {
@@ -2728,6 +2767,32 @@
       "required": [
         "text",
         "status"
+      ]
+    },
+    "PushActionRequest": {
+      "type": "object",
+      "properties": {
+        "token": {
+          "type": "string"
+        },
+        "decision": {
+          "$ref": "#/$defs/ApprovalDecisionKind"
+        }
+      },
+      "required": [
+        "token",
+        "decision"
+      ]
+    },
+    "PushActionResponse": {
+      "type": "object",
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      },
+      "required": [
+        "ok"
       ]
     },
     "QuestionAnswers": {
@@ -4122,6 +4187,82 @@
               "$ref": "#/$defs/params:prefs.set"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.config"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.config"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.register"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.register"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.unregister"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.unregister"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "push.test"
+            },
+            "params": {
+              "$ref": "#/$defs/params:push.test"
+            }
+          }
         }
       ]
     },
@@ -5152,6 +5293,106 @@
           "$ref": "#/$defs/DensityPref"
         }
       }
+    },
+    "WebPushPayload": {
+      "type": "object",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "tag": {
+          "description": "Notifications with the same tag replace each other (one per session, or per login for usage).",
+          "type": "string"
+        },
+        "url": {
+          "description": "Absolute click-through URL (`<ui>/#/s/<sessionId>`), or relative to the service worker scope.",
+          "type": "string"
+        },
+        "sessionId": {
+          "type": "string"
+        },
+        "urgent": {
+          "type": "boolean"
+        },
+        "approval": {
+          "description": "Present when the notification is about exactly one pending approval.",
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "approvalId": {
+              "type": "string"
+            },
+            "options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ApprovalDecisionKind"
+              }
+            },
+            "token": {
+              "type": "string"
+            },
+            "actionUrl": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "approvalId",
+            "options",
+            "token",
+            "actionUrl"
+          ]
+        }
+      },
+      "required": [
+        "v",
+        "title",
+        "body",
+        "tag",
+        "url"
+      ]
+    },
+    "WebPushSubscription": {
+      "description": "A browser push subscription, as `PushSubscription.toJSON()` returns it (keys base64url).",
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        },
+        "expirationTime": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "keys": {
+          "type": "object",
+          "properties": {
+            "p256dh": {
+              "type": "string"
+            },
+            "auth": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "p256dh",
+            "auth"
+          ]
+        }
+      },
+      "required": [
+        "endpoint",
+        "keys"
+      ]
     },
     "WidgetValue": {
       "description": "A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code.",
@@ -6259,6 +6500,37 @@
         "prefs"
       ]
     },
+    "params:push.config": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:push.register": {
+      "type": "object",
+      "properties": {
+        "subscription": {
+          "$ref": "#/$defs/WebPushSubscription"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "subscription"
+      ]
+    },
+    "params:push.test": {
+      "$ref": "#/$defs/Empty"
+    },
+    "params:push.unregister": {
+      "type": "object",
+      "properties": {
+        "endpoint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "endpoint"
+      ]
+    },
     "params:question.respond": {
       "type": "object",
       "properties": {
@@ -7223,6 +7495,46 @@
       "required": [
         "prefs"
       ]
+    },
+    "result:push.config": {
+      "type": "object",
+      "properties": {
+        "webPush": {
+          "type": "object",
+          "properties": {
+            "publicKey": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "publicKey"
+          ]
+        }
+      },
+      "required": [
+        "webPush"
+      ]
+    },
+    "result:push.register": {
+      "$ref": "#/$defs/Empty"
+    },
+    "result:push.test": {
+      "type": "object",
+      "properties": {
+        "sent": {
+          "type": "number"
+        },
+        "failed": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "sent",
+        "failed"
+      ]
+    },
+    "result:push.unregister": {
+      "$ref": "#/$defs/Empty"
     },
     "result:question.respond": {
       "$ref": "#/$defs/Empty"
