@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { inboxEqual, selectInbox, selectKnowledgeSuggestionCount, selectSessionPrompt, selectUnsupportedAgents, sessionMarkState, shallowEqual, waitingText } from '@bizzi/client';
+import { inboxEqual, pipelinesEqual, selectInbox, selectKnowledgeSuggestionCount, selectPipelineGates, selectSessionPrompt, selectUnsupportedAgents, sessionMarkState, shallowEqual, waitingText } from '@bizzi/client';
 import type { SessionInfo } from '@bizzi/protocol';
 import { useBizzi } from '../app/context.tsx';
 import { useIsWide } from '../app/hooks.ts';
@@ -12,6 +12,7 @@ import { AGENT_LABEL } from '../lib/states.ts';
 import { UsageChip } from './usage/Usage.tsx';
 import { KnowledgeInbox } from './knowledge/KnowledgeInbox.tsx';
 import { ApprovalCard, QuestionCard } from './session/items.tsx';
+import { PipelineGateCard } from './pipelines/PipelineGateCard.tsx';
 
 /** Pending approvals and questions across every session (and machine), waiting sessions, knowledge suggestions. */
 export function InboxView(): ReactNode {
@@ -26,6 +27,7 @@ export function InboxView(): ReactNode {
   const machines = useBizzi((s) => s.machines);
   const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
   const suggestions = useBizzi(selectKnowledgeSuggestionCount);
+  const gates = useBizzi(selectPipelineGates, pipelinesEqual);
 
   return (
     <Page header={<PageHeader title="Inbox" subtitle="Approvals, questions and knowledge suggestions waiting for you" actions={wide ? null : <UsageChip />} />}>
@@ -49,7 +51,14 @@ export function InboxView(): ReactNode {
           ))}
         </div>
       ) : null}
-      {entries.length === 0 && waiting.length === 0 && suggestions === 0 && unsupported.length === 0 ? (
+      {gates.length > 0 ? (
+        <div className="mb-4 flex flex-col gap-2">
+          {gates.map((p) => (
+            <PipelineGateCard key={p.id} pipeline={p} showTitle />
+          ))}
+        </div>
+      ) : null}
+      {entries.length === 0 && waiting.length === 0 && suggestions === 0 && unsupported.length === 0 && gates.length === 0 ? (
         <Empty icon="inbox" title="All clear">
           Nothing needs your attention.
         </Empty>

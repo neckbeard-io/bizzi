@@ -5,6 +5,7 @@ export * from './fanout.ts';
 export * from './hub.ts';
 export * from './identity.ts';
 export * from './native.ts';
+export * from './pipelines.ts';
 export * from './scheduler.ts';
 export * from './sidebar.ts';
 export * from './store.ts';

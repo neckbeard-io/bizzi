@@ -25,6 +25,7 @@ import type {
   MethodParams,
   MethodResult,
   OrchestrationSettings,
+  PipelineInfo,
   QuestionAnswers,
   RestartPolicy,
   RouteSuggestion,
@@ -106,6 +107,9 @@ export interface BizziState {
   widgets: Readonly<Record<string, WidgetValue>>;
   /** Repo state per workspace (`git.status`), loaded on demand for the sidebar. */
   gitStatus: Readonly<Record<string, GitSummary>>;
+  // ---- pipelines (docs/pipelines.md)
+  /** Pipeline runs by id, across machines (`pipelines.list` per machine, then `pipeline.*` events). */
+  pipelines: Readonly<Record<string, PipelineInfo>>;
 }
 
 /** What the sidebar shows of a workspace's `git.status` (spec §11.1 row 1 and row 3). */
@@ -274,6 +278,7 @@ export class BizziStore {
       usageState: 'loading',
       widgets: {},
       gitStatus: {},
+      pipelines: {},
     };
     this.hydrate();
     this.unsubs.push(
@@ -625,7 +630,57 @@ export class BizziStore {
         if (key in this.state.widgets) this.patch({ widgets: withoutKey(this.state.widgets, key) });
         return;
       }
+      case 'pipeline.updated':
+        this.putPipeline(ev.data.pipeline);
+        return;
+      case 'pipeline.removed':
+        if (ev.data.pipelineId in this.state.pipelines) this.patch({ pipelines: withoutKey(this.state.pipelines, ev.data.pipelineId) });
+        return;
     }
+  }
+
+  // ---------------------------------------------------------------- pipelines (docs/pipelines.md)
+
+  /** Replace one machine's pipeline runs with what it lists now. */
+  async loadPipelines(machineId?: string | null): Promise<void> {
+    const t = this.target(machineId);
+    const { pipelines } = await this.client.request('pipelines.list', t);
+    const rec: Record<string, PipelineInfo> = {};
+    for (const p of Object.values(this.state.pipelines)) if (t.machineId && p.machineId !== t.machineId) rec[p.id] = p;
+    for (const p of pipelines) rec[p.id] = p;
+    this.patch({ pipelines: rec });
+  }
+
+  /** Apply a run from a response or event; an older copy never replaces a newer one. */
+  putPipeline(p: PipelineInfo): void {
+    const prev = this.state.pipelines[p.id];
+    if (prev && prev.updatedAt > p.updatedAt) return;
+    this.patch({ pipelines: { ...this.state.pipelines, [p.id]: p } });
+  }
+
+  async startPipeline(params: MethodParams<'pipeline.start'>): Promise<PipelineInfo> {
+    const { pipeline } = await this.client.request('pipeline.start', params);
+    this.putPipeline(pipeline);
+    return pipeline;
+  }
+
+  async gatePipeline(p: Pick<PipelineInfo, 'id' | 'machineId'>, decision: 'approve' | 'reject', message?: string): Promise<PipelineInfo> {
+    const params: MethodParams<'pipeline.gate'> = { machineId: p.machineId, pipelineId: p.id, decision };
+    if (message?.trim()) params.message = message.trim();
+    const { pipeline } = await this.client.request('pipeline.gate', params);
+    this.putPipeline(pipeline);
+    return pipeline;
+  }
+
+  async cancelPipeline(p: Pick<PipelineInfo, 'id' | 'machineId'>): Promise<PipelineInfo> {
+    const { pipeline } = await this.client.request('pipeline.cancel', { machineId: p.machineId, pipelineId: p.id });
+    this.putPipeline(pipeline);
+    return pipeline;
+  }
+
+  async deletePipeline(p: Pick<PipelineInfo, 'id' | 'machineId'>): Promise<void> {
+    await this.client.request('pipeline.delete', { machineId: p.machineId, pipelineId: p.id });
+    if (p.id in this.state.pipelines) this.patch({ pipelines: withoutKey(this.state.pipelines, p.id) });
   }
 
   /** Newest observation per login wins; the machine lists are merged. */
@@ -713,6 +768,8 @@ export class BizziStore {
 
   /** Agents, workspaces and sessions of one machine. Failures are recorded in `machineErrors`; cached data stays. */
   async loadMachine(machineId: string): Promise<void> {
+    // Pipelines are optional (older nodes answer `unsupported`) and never mark the machine as failed.
+    this.loadPipelines(machineId).catch((e) => this.logger.log('debug', 'pipelines.list failed', { machineId, error: String(e) }));
     const results = await Promise.allSettled([this.loadAgents(machineId), this.loadWorkspaces(machineId), this.loadSessions({ machineId })]);
     const failed = results.find((r): r is PromiseRejectedResult => r.status === 'rejected');
     if (failed) this.setMachineError(machineId, failed.reason);

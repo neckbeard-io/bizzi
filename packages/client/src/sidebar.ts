@@ -471,6 +471,8 @@ export function workspaceTreeEqual(a: WorkspaceTreeRow[], b: WorkspaceTreeRow[])
 export function selectWaitingCount(s: BizziState): number {
   let n = 0;
   for (const x of Object.values(s.sessions)) if (sessionMarkState(s, x) === 'waiting') n++;
+  // Pipeline gates wait on you too (docs/pipelines.md).
+  for (const p of Object.values(s.pipelines ?? {})) if (p.status === 'waiting' && p.gate) n++;
   return n;
 }
 
