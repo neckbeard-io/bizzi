@@ -105,7 +105,8 @@ export type RestartPolicy = 'when-idle' | 'ask' | 'manual';
 /** spec §12.3: metered = pay per token · plan = subscription windows · budgetless = inference you own. */
 export type BillingClass = 'metered' | 'plan' | 'budgetless';
 
-export type WorkspaceKind = 'git' | 'dir' | 'worktree';
+/** `container`: agent sessions run inside a container on this machine (topology.md §7). */
+export type WorkspaceKind = 'git' | 'dir' | 'worktree' | 'container';
 
 export interface WorkspaceInfo {
   id: string;
@@ -119,6 +120,8 @@ export interface WorkspaceInfo {
   parentWorkspaceId?: string;
   /** kind 'worktree': the branch checked out in it. */
   branch?: string;
+  /** kind 'container': how its container is built and run (topology.md §7). */
+  container?: WorkspaceContainer;
   createdAt: string;
 }
 
@@ -647,6 +650,71 @@ export interface PipelineInfo {
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+// ---- container workspaces (topology.md §7)
+
+/** persistent: stopped when idle, restarted on the next session · ephemeral: removed when idle, recreated fresh. */
+export type ContainerLifecycle = 'persistent' | 'ephemeral';
+
+/** A shell command line (run with `sh -c`) or an argv. */
+export type ContainerCommand = string | string[];
+
+/** An extra bind mount. `source` is a path as the Docker daemon sees it (the dind sidecar's filesystem). */
+export interface ContainerMount {
+  source: string;
+  target: string;
+  readOnly?: boolean;
+}
+
+/**
+ * A container workspace's recipe. The workspace directory is bind-mounted at the same absolute path, so
+ * the agent's cwd and every path it prints match the machine's.
+ */
+export interface WorkspaceContainer {
+  /** Image the container runs (for `build`, the tag bizzi builds it as). */
+  image: string;
+  /** explicit: given at creation · devcontainer: from the repo's devcontainer.json · default: bizzi's workspace image. */
+  imageSource: 'explicit' | 'devcontainer' | 'default';
+  /** devcontainer.json `build`: built on first start. Paths are absolute on the machine. */
+  build?: { dockerfile: string; context: string; args?: Record<string, string> };
+  /** `bridge` (default), `none` (no network at all), or the name of a Docker network. */
+  network: string;
+  mounts?: ContainerMount[];
+  /** Fixed, non-secret environment set on the container (devcontainer.json `containerEnv`). */
+  env?: Record<string, string>;
+  /**
+   * Names of the node's environment variables forwarded into agent processes (agent credentials such as
+   * `CLAUDE_CODE_OAUTH_TOKEN`). Values are passed at exec time, never stored in the container's config.
+   */
+  passEnv?: string[];
+  /** User agents run as (`uid:gid` or a name); default: the node's own uid:gid. */
+  user?: string;
+  /** devcontainer.json `onCreateCommand`, `updateContentCommand`, `postCreateCommand`: run in order once after creation. */
+  postCreate?: ContainerCommand[];
+  lifecycle: ContainerLifecycle;
+  /** Minutes without a live session before the container is stopped (persistent) or removed (ephemeral). */
+  idleMinutes: number;
+}
+
+/** Docker's container states, plus `absent` (not created yet, or removed) and `unreachable` (no daemon). */
+export type ContainerState = 'absent' | 'created' | 'running' | 'paused' | 'restarting' | 'removing' | 'exited' | 'dead' | 'unreachable';
+
+export interface ContainerStatus {
+  workspaceId: string;
+  /** Container name, `bizzi-ws-<workspace id>`. */
+  name: string;
+  state: ContainerState;
+  image: string;
+  /** Docker's container id, when it exists. */
+  id?: string;
+  startedAt?: string;
+  /** Live (not ended or failed) sessions in the workspace. */
+  liveSessions: number;
+  /** When the idle timer stops or removes it, if it is running with no live session. */
+  idleUntil?: string;
+  /** Why the daemon couldn't answer (state `unreachable`). */
+  error?: string;
 }
 
 // ---- hub: devices and pairing

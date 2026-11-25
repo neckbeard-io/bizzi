@@ -539,39 +539,30 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
-    "route.record": {
-      "description": "Record a routed prompt (the labelled eval set). Returns it with its id and time.",
+    "container.create": {
+      "description": "A workspace of kind 'container' around a directory on the machine (adopted, or created with `create`). Nothing starts yet: the container is created and started by the first session. The image is `image`, else the repo's devcontainer.json, else bizzi's workspace image. `notes` lists devcontainer.json settings that were ignored.",
       "params": {
-        "$ref": "#/$defs/params:route.record"
+        "$ref": "#/$defs/params:container.create"
       },
       "result": {
-        "$ref": "#/$defs/result:route.record"
+        "$ref": "#/$defs/result:container.create"
       }
     },
-    "route.decisions": {
-      "description": "Recorded decisions, newest first; `overridden` filters; `before` (an id) pages. `total` counts the filter's matches.",
+    "container.status": {
       "params": {
-        "$ref": "#/$defs/params:route.decisions"
+        "$ref": "#/$defs/params:container.status"
       },
       "result": {
-        "$ref": "#/$defs/result:route.decisions"
+        "$ref": "#/$defs/result:container.status"
       }
     },
-    "route.rules.get": {
-      "description": "Routing rules (knowledge.md §9.3), tried in order; the first that matches applies. `set` replaces the list.",
+    "container.stop": {
+      "description": "Stop the container now. Refuses while sessions are live unless `force` (which ends their agents).",
       "params": {
-        "$ref": "#/$defs/params:route.rules.get"
+        "$ref": "#/$defs/params:container.stop"
       },
       "result": {
-        "$ref": "#/$defs/result:route.rules.get"
-      }
-    },
-    "route.rules.set": {
-      "params": {
-        "$ref": "#/$defs/params:route.rules.set"
-      },
-      "result": {
-        "$ref": "#/$defs/result:route.rules.set"
+        "$ref": "#/$defs/result:container.stop"
       }
     },
     "pairing.create": {
@@ -1472,6 +1463,106 @@
     },
     "ClientMsg": {
       "$ref": "#/$defs/RequestMsg"
+    },
+    "ContainerCommand": {
+      "description": "A shell command line (run with `sh -c`) or an argv.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "ContainerLifecycle": {
+      "description": "persistent: stopped when idle, restarted on the next session · ephemeral: removed when idle, recreated fresh.",
+      "type": "string",
+      "enum": [
+        "persistent",
+        "ephemeral"
+      ]
+    },
+    "ContainerMount": {
+      "description": "An extra bind mount. `source` is a path as the Docker daemon sees it (the dind sidecar's filesystem).",
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ]
+    },
+    "ContainerState": {
+      "description": "Docker's container states, plus `absent` (not created yet, or removed) and `unreachable` (no daemon).",
+      "type": "string",
+      "enum": [
+        "absent",
+        "created",
+        "running",
+        "paused",
+        "restarting",
+        "removing",
+        "exited",
+        "dead",
+        "unreachable"
+      ]
+    },
+    "ContainerStatus": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Container name, `bizzi-ws-<workspace id>`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ContainerState"
+        },
+        "image": {
+          "type": "string"
+        },
+        "id": {
+          "description": "Docker's container id, when it exists.",
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "liveSessions": {
+          "description": "Live (not ended or failed) sessions in the workspace.",
+          "type": "number"
+        },
+        "idleUntil": {
+          "description": "When the idle timer stops or removes it, if it is running with no live session.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the daemon couldn't answer (state `unreachable`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "name",
+        "state",
+        "image",
+        "liveSessions"
+      ]
     },
     "ContextBaseline": {
       "description": "Starting context learned per (agent, model, workspace) from the first `context.updated` of earlier sessions (usage.md §2): \"Codex starts at about 14k here\". `tokens` is the median of recent samples.",
@@ -2588,10 +2679,9 @@
         "knowledge.sync.push",
         "route.suggest",
         "route.score",
-        "route.record",
-        "route.decisions",
-        "route.rules.get",
-        "route.rules.set",
+        "container.create",
+        "container.status",
+        "container.stop",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -4022,10 +4112,10 @@
               "type": "string"
             },
             "method": {
-              "const": "route.record"
+              "const": "container.create"
             },
             "params": {
-              "$ref": "#/$defs/params:route.record"
+              "$ref": "#/$defs/params:container.create"
             }
           }
         },
@@ -4041,10 +4131,10 @@
               "type": "string"
             },
             "method": {
-              "const": "route.decisions"
+              "const": "container.status"
             },
             "params": {
-              "$ref": "#/$defs/params:route.decisions"
+              "$ref": "#/$defs/params:container.status"
             }
           }
         },
@@ -4060,29 +4150,10 @@
               "type": "string"
             },
             "method": {
-              "const": "route.rules.get"
+              "const": "container.stop"
             },
             "params": {
-              "$ref": "#/$defs/params:route.rules.get"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "id",
-            "method",
-            "params"
-          ],
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "method": {
-              "const": "route.rules.set"
-            },
-            "params": {
-              "$ref": "#/$defs/params:route.rules.set"
+              "$ref": "#/$defs/params:container.stop"
             }
           }
         },
@@ -4312,148 +4383,17 @@
         "probability"
       ]
     },
-    "RouteDecision": {
-      "allOf": [
-        {
-          "$ref": "#/$defs/RouteDecisionInput"
-        },
-        {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "at": {
-              "description": "ISO time recorded.",
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "at"
-          ]
-        }
-      ]
-    },
-    "RouteDecisionInput": {
-      "description": "One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set for comparing classifiers (spec §11.2 \"Choosing\"): `text` → `chosen`, with what was offered and by whom.",
-      "type": "object",
-      "properties": {
-        "text": {
-          "description": "The prompt as typed, routing tokens included.",
-          "type": "string"
-        },
-        "source": {
-          "type": "string",
-          "enum": [
-            "explicit",
-            "single",
-            "classifier",
-            "none",
-            "rule"
-          ]
-        },
-        "candidates": {
-          "description": "What the suggestion offered, best first (may be empty).",
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RouteCandidate"
-          }
-        },
-        "confidence": {
-          "type": "number"
-        },
-        "classifier": {
-          "type": "object",
-          "properties": {
-            "model": {
-              "type": "string"
-            },
-            "via": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "model"
-          ]
-        },
-        "rule": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "label": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "label"
-          ]
-        },
-        "chosen": {
-          "type": "object",
-          "properties": {
-            "machineId": {
-              "type": "string"
-            },
-            "workspaceId": {
-              "type": "string"
-            },
-            "label": {
-              "type": "string"
-            },
-            "agent": {
-              "$ref": "#/$defs/AgentKind"
-            }
-          },
-          "required": [
-            "machineId",
-            "workspaceId",
-            "label"
-          ]
-        },
-        "via": {
-          "description": "suggested: sent to the top candidate · picked: another offered candidate · other: a target that wasn't offered.",
-          "type": "string",
-          "enum": [
-            "suggested",
-            "picked",
-            "other"
-          ]
-        },
-        "overridden": {
-          "description": "`chosen` isn't the top candidate (false when nothing was offered).",
-          "type": "boolean"
-        },
-        "sessionId": {
-          "description": "The session started for it.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "text",
-        "source",
-        "candidates",
-        "confidence",
-        "chosen",
-        "via",
-        "overridden"
-      ]
-    },
     "RouteSuggestion": {
       "type": "object",
       "properties": {
         "source": {
-          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`) · rule: a routing rule (`route.rules.get`) left one target, or a few to pick from when no classifier can choose. Whenever `confident` is false the client asks.",
+          "description": "explicit: `@machine` / `#workspace` in the text (combinable) left one target, or a few the user must pick from (`confident` false, e.g. `#acme-shop` on two machines) · single: only one target exists · classifier: a logprob readout over the targets · none: nothing decided (no classifier, it failed, or the tokens can't be satisfied: see `note`). Whenever `confident` is false the client asks.",
           "type": "string",
           "enum": [
             "explicit",
             "single",
             "classifier",
-            "none",
-            "rule"
+            "none"
           ]
         },
         "candidates": {
@@ -4510,22 +4450,6 @@
         "note": {
           "description": "Why nothing was decided: no classifier, its error, several matches, or a token problem (\"vps is offline\", \"no workspace matches @mac-mini and #bizzi\").",
           "type": "string"
-        },
-        "rule": {
-          "description": "The routing rule that narrowed the targets (step 3), whatever then chose among them.",
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "label": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "id",
-            "label"
-          ]
         }
       },
       "required": [
@@ -4535,38 +4459,6 @@
         "confident",
         "text",
         "offered"
-      ]
-    },
-    "RoutingRule": {
-      "description": "A routing preference (knowledge.md §9.3), e.g. \"production, prod logs → machines tagged prod-access\". Matches when any of `match` appears in the prompt as a whole word or phrase, case-insensitive; a trailing `*` matches a word prefix (`prod*`). Exactly one of `tag`, `machineId`, `workspaceId` says where it goes.",
-      "type": "object",
-      "properties": {
-        "id": {
-          "type": "string"
-        },
-        "match": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          }
-        },
-        "tag": {
-          "type": "string"
-        },
-        "machineId": {
-          "type": "string"
-        },
-        "workspaceId": {
-          "type": "string"
-        },
-        "agent": {
-          "description": "Agent to use when the prompt names none with `/agent`.",
-          "$ref": "#/$defs/AgentKind"
-        }
-      },
-      "required": [
-        "id",
-        "match"
       ]
     },
     "SecretInfo": {
@@ -5533,6 +5425,96 @@
         "placement"
       ]
     },
+    "WorkspaceContainer": {
+      "description": "A container workspace's recipe. The workspace directory is bind-mounted at the same absolute path, so the agent's cwd and every path it prints match the machine's.",
+      "type": "object",
+      "properties": {
+        "image": {
+          "description": "Image the container runs (for `build`, the tag bizzi builds it as).",
+          "type": "string"
+        },
+        "imageSource": {
+          "description": "explicit: given at creation · devcontainer: from the repo's devcontainer.json · default: bizzi's workspace image.",
+          "type": "string",
+          "enum": [
+            "explicit",
+            "devcontainer",
+            "default"
+          ]
+        },
+        "build": {
+          "description": "devcontainer.json `build`: built on first start. Paths are absolute on the machine.",
+          "type": "object",
+          "properties": {
+            "dockerfile": {
+              "type": "string"
+            },
+            "context": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "dockerfile",
+            "context"
+          ]
+        },
+        "network": {
+          "description": "`bridge` (default), `none` (no network at all), or the name of a Docker network.",
+          "type": "string"
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContainerMount"
+          }
+        },
+        "env": {
+          "description": "Fixed, non-secret environment set on the container (devcontainer.json `containerEnv`).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "passEnv": {
+          "description": "Names of the node's environment variables forwarded into agent processes (agent credentials such as `CLAUDE_CODE_OAUTH_TOKEN`). Values are passed at exec time, never stored in the container's config.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "user": {
+          "description": "User agents run as (`uid:gid` or a name); default: the node's own uid:gid.",
+          "type": "string"
+        },
+        "postCreate": {
+          "description": "devcontainer.json `onCreateCommand`, `updateContentCommand`, `postCreateCommand`: run in order once after creation.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContainerCommand"
+          }
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/ContainerLifecycle"
+        },
+        "idleMinutes": {
+          "description": "Minutes without a live session before the container is stopped (persistent) or removed (ephemeral).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "image",
+        "imageSource",
+        "network",
+        "lifecycle",
+        "idleMinutes"
+      ]
+    },
     "WorkspaceInfo": {
       "type": "object",
       "properties": {
@@ -5563,6 +5545,10 @@
           "description": "kind 'worktree': the branch checked out in it.",
           "type": "string"
         },
+        "container": {
+          "description": "kind 'container': how its container is built and run (topology.md §7).",
+          "$ref": "#/$defs/WorkspaceContainer"
+        },
         "createdAt": {
           "type": "string"
         }
@@ -5577,11 +5563,13 @@
       ]
     },
     "WorkspaceKind": {
+      "description": "`container`: agent sessions run inside a container on this machine (topology.md §7).",
       "type": "string",
       "enum": [
         "git",
         "dir",
-        "worktree"
+        "worktree",
+        "container"
       ]
     },
     "global:account.usage": {
@@ -6008,6 +5996,84 @@
             }
           }
         }
+      ]
+    },
+    "params:container.create": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "create": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string"
+            },
+            "network": {
+              "description": "`bridge` (default), `none`, or a Docker network name.",
+              "type": "string"
+            },
+            "mounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContainerMount"
+              }
+            },
+            "passEnv": {
+              "description": "Replaces the default list of forwarded credential variables.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "user": {
+              "type": "string"
+            },
+            "lifecycle": {
+              "$ref": "#/$defs/ContainerLifecycle"
+            },
+            "idleMinutes": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "params:container.status": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:container.stop": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspaceId"
       ]
     },
     "params:device.revoke": {
@@ -6572,48 +6638,6 @@
       "required": [
         "sessionId",
         "questionId"
-      ]
-    },
-    "params:route.decisions": {
-      "type": "object",
-      "properties": {
-        "limit": {
-          "type": "number"
-        },
-        "before": {
-          "type": "string"
-        },
-        "overridden": {
-          "type": "boolean"
-        }
-      }
-    },
-    "params:route.record": {
-      "type": "object",
-      "properties": {
-        "decision": {
-          "$ref": "#/$defs/RouteDecisionInput"
-        }
-      },
-      "required": [
-        "decision"
-      ]
-    },
-    "params:route.rules.get": {
-      "$ref": "#/$defs/Empty"
-    },
-    "params:route.rules.set": {
-      "type": "object",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RoutingRule"
-          }
-        }
-      },
-      "required": [
-        "rules"
       ]
     },
     "params:route.score": {
@@ -7182,6 +7206,45 @@
         "baselines"
       ]
     },
+    "result:container.create": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workspace"
+      ]
+    },
+    "result:container.status": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "$ref": "#/$defs/ContainerStatus"
+        }
+      },
+      "required": [
+        "container"
+      ]
+    },
+    "result:container.stop": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "$ref": "#/$defs/ContainerStatus"
+        }
+      },
+      "required": [
+        "container"
+      ]
+    },
     "result:device.revoke": {
       "$ref": "#/$defs/Empty"
     },
@@ -7562,63 +7625,6 @@
     },
     "result:question.respond": {
       "$ref": "#/$defs/Empty"
-    },
-    "result:route.decisions": {
-      "type": "object",
-      "properties": {
-        "decisions": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RouteDecision"
-          }
-        },
-        "total": {
-          "type": "number"
-        }
-      },
-      "required": [
-        "decisions",
-        "total"
-      ]
-    },
-    "result:route.record": {
-      "type": "object",
-      "properties": {
-        "decision": {
-          "$ref": "#/$defs/RouteDecision"
-        }
-      },
-      "required": [
-        "decision"
-      ]
-    },
-    "result:route.rules.get": {
-      "type": "object",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RoutingRule"
-          }
-        }
-      },
-      "required": [
-        "rules"
-      ]
-    },
-    "result:route.rules.set": {
-      "type": "object",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RoutingRule"
-          }
-        }
-      },
-      "required": [
-        "rules"
-      ]
     },
     "result:route.score": {
       "type": "object",

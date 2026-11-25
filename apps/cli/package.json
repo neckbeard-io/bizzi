@@ -15,6 +15,7 @@
     "@bizzi/adapter-claude": "*",
     "@bizzi/adapter-codex": "*",
     "@bizzi/adapter-opencode": "*",
+    "@bizzi/containers": "*",
     "@bizzi/core": "*",
     "@bizzi/hub": "*",
     "@bizzi/knowledge": "*",

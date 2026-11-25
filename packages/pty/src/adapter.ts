@@ -254,20 +254,38 @@ export class TerminalAdapter implements AgentAdapter {
       logger.log('warn', 'ignoring unrecognised resumeRef', { resumeRef: opts.resumeRef });
     }
 
-    const { binary, plan } = this.#resolveLaunch(opts, nativeRef);
+    const launch = this.#resolveLaunch(opts, nativeRef);
+    const { plan } = launch;
     if (plan.ignored?.length) logger.log('info', 'start options not supported in terminal mode', { ignored: plan.ignored });
-    const env = buildPtyEnv(opts.env, this.#opts.baseEnv, this.spec.unsetEnv);
+    let binary = launch.binary;
+    let args = plan.args;
+    let cwd = opts.cwd;
+    let env = buildPtyEnv(opts.env, this.#opts.baseEnv, this.spec.unsetEnv);
+    if (opts.launcher) {
+      // Container workspaces (topology.md §7): e.g. `docker exec -it … <container> <binary> <args>`.
+      const run = opts.launcher.wrap({ command: binary, args, cwd, env, tty: true });
+      binary = run.command;
+      args = run.args;
+      cwd = run.cwd;
+      env = Object.fromEntries(Object.entries(run.env).filter((e): e is [string, string] => e[1] !== undefined));
+    }
     const cols = clampSize(opts.cols, DEFAULT_COLS);
     const rows = clampSize(opts.rows, DEFAULT_ROWS);
-    logger.log('info', 'starting terminal session', { binary, args: plan.args, cwd: opts.cwd, supervised: !!sup });
+    logger.log('info', 'starting terminal session', {
+      binary,
+      args,
+      cwd,
+      supervised: !!sup,
+      ...(opts.launcher ? { launcher: opts.launcher.label } : {}),
+    });
 
     if (sup) {
       const runtimeDir = sup.runtimeDir ?? defaultRuntimeDir();
       const id = await spawnSupervisor({
         runtimeDir,
         command: binary,
-        args: plan.args,
-        cwd: opts.cwd,
+        args,
+        cwd,
         env,
         cols,
         rows,
@@ -299,8 +317,8 @@ export class TerminalAdapter implements AgentAdapter {
     try {
       host = TerminalHost.spawn({
         command: binary,
-        args: plan.args,
-        cwd: opts.cwd,
+        args,
+        cwd,
         env,
         baseEnv: {},
         cols,
@@ -326,7 +344,12 @@ export class TerminalAdapter implements AgentAdapter {
   #resolveLaunch(opts: StartSessionOptions, nativeRef: string | undefined): { binary: string; plan: LaunchPlan } {
     const command = opts.command?.length ? opts.command : undefined;
     if (!command) {
-      const binary = this.spec.resolveBinary(this.#lookup());
+      // Through a launcher the binary is looked up inside the target, by name.
+      if (opts.launcher && this.spec.launcherCommand) {
+        const lc = this.spec.launcherCommand;
+        return { binary: lc.command, plan: { ...this.spec.buildLaunch(opts, nativeRef), args: [...lc.args] } };
+      }
+      const binary = opts.launcher ? this.spec.binaryName : this.spec.resolveBinary(this.#lookup());
       if (!binary) throw new BizziError('agent_unavailable', `${this.spec.binaryName} not found`);
       return { binary, plan: this.spec.buildLaunch(opts, nativeRef) };
     }
@@ -337,7 +360,7 @@ export class TerminalAdapter implements AgentAdapter {
     const lookup = { path: opts.env?.PATH ?? this.#opts.path, extraDirs: this.#opts.extraDirs };
     // `./bin/x` or `sub/x` are relative to the session's cwd; bare names are looked up on PATH.
     const target = !isAbsolute(name) && name.includes('/') ? resolvePath(opts.cwd, name) : name;
-    const binary = findBinary(target, lookup);
+    const binary = opts.launcher ? target : findBinary(target, lookup);
     if (!binary) throw new BizziError('agent_unavailable', `${name} not found`);
     const ignored = (['model', 'permissionMode', 'effort', 'systemPromptAppend', 'mcpServers'] as const).filter((k) => {
       const v = opts[k];

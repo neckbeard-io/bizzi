@@ -14,7 +14,7 @@ import {
 import type { GetAccountResponse, InitializeParams } from './codex-types.ts';
 import { codexVersion, findCodex } from './locate.ts';
 import { PERMISSION_MODE_NAMES } from './permissions.ts';
-import { AppServerProcess, describeExit } from './process.ts';
+import { AppServerProcess, describeExit, type SpawnSpec } from './process.ts';
 import { CodexSession } from './session.ts';
 
 export const ADAPTER_VERSION = '0.0.1';
@@ -184,18 +184,26 @@ export class CodexAdapter implements AgentAdapter {
     if (opts.mode !== 'structured') {
       throw new BizziError('unsupported', `the codex adapter only supports structured mode (got '${opts.mode}')`);
     }
-    const path = opts.executable ?? (await this.#codexPath());
-    if (!path) throw new BizziError('agent_unavailable', 'codex executable not found');
     const logger = ctx.logger.child({ agent: 'codex', sessionId: opts.sessionId });
-    if (opts.executable) logger.log('info', 'starting a pinned codex executable', { path });
+    let spawn: SpawnSpec;
+    if (opts.launcher) {
+      // Container workspaces (topology.md §7): the codex installed inside the target, not this machine's.
+      spawn = opts.launcher.wrap({ command: 'codex', args: ['app-server', ...(this.#opts.extraArgs ?? [])], cwd: opts.cwd, env: this.#env(opts.env) });
+      logger.log('info', 'starting codex through a launcher', { launcher: opts.launcher.label });
+    } else {
+      const path = opts.executable ?? (await this.#codexPath());
+      if (!path) throw new BizziError('agent_unavailable', 'codex executable not found');
+      if (opts.executable) logger.log('info', 'starting a pinned codex executable', { path });
+      spawn = {
+        command: path,
+        args: [...(this.#opts.codexArgsPrefix ?? []), 'app-server', ...(this.#opts.extraArgs ?? [])],
+        cwd: opts.cwd,
+        env: this.#env(opts.env),
+      };
+    }
     const session = await CodexSession.start(
       {
-        spawn: {
-          command: path,
-          args: [...(this.#opts.codexArgsPrefix ?? []), 'app-server', ...(this.#opts.extraArgs ?? [])],
-          cwd: opts.cwd,
-          env: this.#env(opts.env),
-        },
+        spawn,
         clientInfo: { name: 'bizzi', version: ADAPTER_VERSION },
         requestTimeoutMs: this.#opts.requestTimeoutMs ?? 60_000,
         interruptTimeoutMs: this.#opts.interruptTimeoutMs ?? 15_000,

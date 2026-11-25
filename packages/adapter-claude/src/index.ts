@@ -1,4 +1,4 @@
-export { ClaudeAdapter, createAdapters, toSdkMcpServers } from './adapter.ts';
+export { ClaudeAdapter, claudeLaunchArgs, createAdapters, launchThrough, toSdkMcpServers } from './adapter.ts';
 export type { ClaudeAdapterOptions, ClaudeStartSessionOptions } from './adapter.ts';
 export { ClaudeSession } from './session.ts';
 export { findClaudeBinary, probeClaude } from './probe.ts';

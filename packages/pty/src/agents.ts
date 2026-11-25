@@ -37,6 +37,8 @@ export interface TerminalAgentSpec {
   formatFile?(path: string): string;
   /** Probe notes (verification status etc.). */
   notes?: string[];
+  /** Through a launcher (container workspaces): run this instead of `binaryName` + buildLaunch's args. */
+  launcherCommand?: { command: string; args: string[] };
 }
 
 function ignoredOpts(opts: StartSessionOptions, keys: (keyof StartSessionOptions)[]): string[] {
@@ -78,6 +80,10 @@ export function shellSpec(override?: ShellCommand): TerminalAgentSpec {
     },
     capabilities: { resume: false },
     notes: ['terminal mode: the login shell ($SHELL -l, fallback /bin/bash)'],
+    // Inside a container: bash when the image has it, else sh.
+    ...(override
+      ? {}
+      : { launcherCommand: { command: 'sh', args: ['-c', 'if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi'] } }),
   };
 }
 

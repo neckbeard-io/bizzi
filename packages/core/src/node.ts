@@ -145,6 +145,10 @@ const UNIMPLEMENTED = [
   'route.decisions',
   'route.rules.get',
   'route.rules.set',
+  // ---- container workspaces (topology.md §7): @bizzi/containers
+  'container.create',
+  'container.status',
+  'container.stop',
 ] as const satisfies readonly DispatchMethod[];
 
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */
@@ -187,6 +191,8 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'pipeline.gate',
   'pipeline.cancel',
   'pipeline.delete',
+  // ---- container workspaces (topology.md §7)
+  'container.create',
 ] satisfies DispatchMethod[]);
 
 const DISPOSE_TIMEOUT_MS = 10_000;
