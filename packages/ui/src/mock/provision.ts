@@ -4,16 +4,16 @@ import type { AgentKind, AgentListing, InstallAction, InstallPlan, InstallStep, 
 import { AGENTS, MACHINE, MINI, MINI_AGENTS, SERVER, SERVER_AGENTS } from './fixtures.ts';
 import type { MockHost, MockModule } from './host.ts';
 
-const LATEST: Record<Exclude<AgentKind, 'shell'>, string> = { claude: '2.4.3', codex: '0.99.1', opencode: '2.1.0', agy: '0.9.2' };
+const LATEST: Record<Exclude<AgentKind, 'shell' | 'api'>, string> = { claude: '2.4.3', codex: '0.99.1', opencode: '2.1.0', agy: '0.9.2' };
 
-const BIN_PATH: Record<Exclude<AgentKind, 'shell'>, (m: MachineInfo) => string> = {
+const BIN_PATH: Record<Exclude<AgentKind, 'shell' | 'api'>, (m: MachineInfo) => string> = {
   claude: (m) => (m.os === 'darwin' ? '/Users/dev/.local/bin/claude' : '/home/dev/.local/bin/claude'),
   codex: (m) => (m.os === 'darwin' ? '/opt/homebrew/bin/codex' : '/home/dev/.bizzi/node/bin/codex'),
   opencode: (m) => (m.os === 'darwin' ? '/Users/dev/.opencode/bin/opencode' : '/home/dev/.opencode/bin/opencode'),
   agy: (m) => (m.os === 'darwin' ? '/opt/homebrew/bin/agy' : '/home/dev/.local/bin/agy'),
 };
 
-const ACCOUNT: Record<Exclude<AgentKind, 'shell'>, string> = {
+const ACCOUNT: Record<Exclude<AgentKind, 'shell' | 'api'>, string> = {
   claude: 'dev@example.com (Max)',
   codex: 'dev@example.com (ChatGPT Plus)',
   opencode: 'dev@example.com',
@@ -29,7 +29,7 @@ const step = (id: string, title: string, command?: string, requiresSudo?: boolea
 
 /** Recipes per agent × action × OS (see docs/spec.md §7). */
 export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo, method?: string, current?: AgentListing): InstallPlan {
-  if (agent === 'shell') throw new BizziError('unsupported', 'the shell is built in; nothing to install');
+  if (agent === 'shell' || agent === 'api') throw new BizziError('unsupported', `${agent === 'api' ? 'API chat' : 'the shell'} is built in; nothing to install`);
   const mac = m.os === 'darwin';
   const plan = (method: string, steps: InstallStep[], notes?: string[]): InstallPlan => (notes ? { target: agent, action, method, steps, notes } : { target: agent, action, method, steps });
   switch (agent) {
@@ -150,7 +150,7 @@ const STEP_MESSAGES: Record<string, string> = {
 
 interface LoginRun {
   machineId: string;
-  agent: Exclude<AgentKind, 'shell'>;
+  agent: Exclude<AgentKind, 'shell' | 'api'>;
   line: string;
   done: boolean;
 }
@@ -227,7 +227,7 @@ export class MockProvision implements MockModule {
       }
       case 'agent.login': {
         const agent = this.agentParam(params);
-        if (agent === 'shell') throw new BizziError('unsupported', 'the shell has no login');
+        if (agent === 'shell' || agent === 'api') throw new BizziError('unsupported', `${agent === 'api' ? 'API chat uses API keys (secrets), not a' : 'the shell has no'} login`);
         if (!this.listing(m.id, agent)?.installed) throw new BizziError('agent_unavailable', `${agent} is not installed on ${m.name}`);
         const session = this.startLogin(m.id, agent, undefined, 800);
         return { session: { ...session } };
@@ -317,7 +317,7 @@ export class MockProvision implements MockModule {
       if (detail) this.progress(jobId, agent, { stage: s.title, message: detail, step: i + 1, total });
     }
     await this.host.sleep(stepMs * 0.4);
-    const a = agent as Exclude<AgentKind, 'shell'>;
+    const a = agent as Exclude<AgentKind, 'shell' | 'api'>;
     if (action === 'uninstall') {
       this.patchListing(m.id, agent, (l) => ({ agent: l.agent, installed: false, auth: 'missing', latestVersion: LATEST[a] }));
     } else if (action === 'migrate') {
@@ -349,7 +349,7 @@ export class MockProvision implements MockModule {
   }
 
   /** A login flow as a terminal session that prints a URL + code and waits for the code to be pasted. */
-  private startLogin(machineId: string, agent: Exclude<AgentKind, 'shell'>, fixedId: string | undefined, promptDelayMs: number): ReturnType<MockHost['createSession']> {
+  private startLogin(machineId: string, agent: Exclude<AgentKind, 'shell' | 'api'>, fixedId: string | undefined, promptDelayMs: number): ReturnType<MockHost['createSession']> {
     const host = this.host;
     const ws = host.workspaces().find((w) => w.machineId === machineId);
     const init: Parameters<MockHost['createSession']>[0] = { machineId, workspaceId: ws?.id ?? 'w_acme', agent, mode: 'terminal', title: `${agent} login`, status: 'running' };

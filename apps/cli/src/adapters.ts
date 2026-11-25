@@ -1,7 +1,7 @@
 import type { AgentAdapter, Logger } from '@bizzi/protocol';
 
 /** Adapter packages probed at startup, in priority order (first match wins per agent + mode). */
-export const ADAPTER_PACKAGES = ['@bizzi/adapter-claude', '@bizzi/adapter-codex', '@bizzi/adapter-opencode', '@bizzi/pty'];
+export const ADAPTER_PACKAGES = ['@bizzi/adapter-claude', '@bizzi/adapter-codex', '@bizzi/adapter-opencode', '@bizzi/pty', '@bizzi/adapter-api'];
 
 /**
  * Passed to every adapter package's `createAdapters()`. Packages take what they know and ignore the

@@ -179,6 +179,8 @@ export function clampPermission(o: {
   /** Modes the helper's adapter accepts (capabilities.permissionModes); empty = no restriction. */
   available?: readonly string[];
 }): ClampResult {
+  // API chat (spec §6.5) has no tools, so it is read-only under any parent.
+  if (o.agent === 'api') return o.requested ? { note: `api has no permission modes (no tools); ignored ${o.requested}` } : {};
   const parentLevel = permissionLevel(o.parentAgent, o.parentMode) ?? 1;
   const order = PERMISSION_LEVELS[o.agent];
   if (!order) {

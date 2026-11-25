@@ -1111,7 +1111,8 @@
         "codex",
         "opencode",
         "agy",
-        "shell"
+        "shell",
+        "api"
       ]
     },
     "AgentListing": {

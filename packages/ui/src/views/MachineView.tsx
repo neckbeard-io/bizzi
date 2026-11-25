@@ -374,7 +374,7 @@ function AgentCard(props: { machineId: string; online: boolean; agent: AgentList
           {pendingUpdatesLabel(a.staleSessions)}
         </div>
       ) : null}
-      {a.installed && a.agent !== 'shell' ? <PolicySelects machineId={machineId} agent={a} disabled={!online} /> : null}
+      {a.installed && a.agent !== 'shell' && a.agent !== 'api' ? <PolicySelects machineId={machineId} agent={a} disabled={!online} /> : null}
       {a.notes?.length ? (
         <ul className="mt-2 list-disc pl-4 text-xs text-muted">
           {a.notes.map((n) => (
