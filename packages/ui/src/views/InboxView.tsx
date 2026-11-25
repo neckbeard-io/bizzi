@@ -1,11 +1,26 @@
 import type { ReactNode } from 'react';
-import { inboxEqual, pipelinesEqual, selectInbox, selectKnowledgeSuggestionCount, selectPipelineGates, selectSessionPrompt, selectUnsupportedAgents, sessionMarkState, shallowEqual, waitingText } from '@bizzi/client';
+import {
+  inboxEqual,
+  pipelinesEqual,
+  restartPromptsEqual,
+  selectInbox,
+  selectKnowledgeSuggestionCount,
+  selectPipelineGates,
+  selectRestartPrompts,
+  selectSessionPrompt,
+  selectUnsupportedAgents,
+  sessionMarkState,
+  shallowEqual,
+  waitingText,
+  type RestartPrompt,
+} from '@bizzi/client';
 import type { SessionInfo } from '@bizzi/protocol';
-import { useBizzi } from '../app/context.tsx';
-import { useIsWide } from '../app/hooks.ts';
+import { useBizzi, useStore } from '../app/context.tsx';
+import { useAction, useIsWide } from '../app/hooks.ts';
+import { useMachineOnline } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
-import { Card, Empty, StatusBadge } from '../components/ui.tsx';
+import { Button, Card, Empty, ErrorText, StatusBadge } from '../components/ui.tsx';
 import { formatRelative } from '../lib/format.ts';
 import { routeHref } from '../lib/router.ts';
 import { AGENT_LABEL } from '../lib/states.ts';
@@ -28,9 +43,10 @@ export function InboxView(): ReactNode {
   const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
   const suggestions = useBizzi(selectKnowledgeSuggestionCount);
   const gates = useBizzi(selectPipelineGates, pipelinesEqual);
+  const restarts = useBizzi(selectRestartPrompts, restartPromptsEqual);
 
   return (
-    <Page header={<PageHeader title="Inbox" subtitle="Approvals, questions and knowledge suggestions waiting for you" actions={wide ? null : <UsageChip />} />}>
+    <Page header={<PageHeader title="Inbox" subtitle="Approvals, questions, restarts and knowledge suggestions waiting for you" actions={wide ? null : <UsageChip />} />}>
       {unsupported.length > 0 ? (
         <div className="mb-4 flex flex-col gap-2">
           {unsupported.map(({ machineId, agent }) => (
@@ -58,7 +74,14 @@ export function InboxView(): ReactNode {
           ))}
         </div>
       ) : null}
-      {entries.length === 0 && waiting.length === 0 && suggestions === 0 && unsupported.length === 0 && gates.length === 0 ? (
+      {restarts.length > 0 ? (
+        <div className="mb-4 flex flex-col gap-2">
+          {restarts.map((r) => (
+            <RestartPromptCard key={r.session.id} prompt={r} machineName={multiMachine ? (machines[r.session.machineId]?.name ?? r.session.machineId) : undefined} />
+          ))}
+        </div>
+      ) : null}
+      {entries.length === 0 && waiting.length === 0 && suggestions === 0 && unsupported.length === 0 && gates.length === 0 && restarts.length === 0 ? (
         <Empty icon="inbox" title="All clear">
           Nothing needs your attention.
         </Empty>
@@ -102,6 +125,32 @@ export function InboxView(): ReactNode {
 
 function unsupportedEqual(a: ReturnType<typeof selectUnsupportedAgents>, b: ReturnType<typeof selectUnsupportedAgents>): boolean {
   return a.length === b.length && a.every((x, i) => x.agent === b[i]?.agent && x.machineId === b[i]?.machineId);
+}
+
+/** Restart policy `ask` (updates.md §6): a newer agent version is installed; restart this session onto it? */
+function RestartPromptCard(props: { prompt: RestartPrompt; machineName?: string | undefined }): ReactNode {
+  const { session: s, running, installed } = props.prompt;
+  const store = useStore();
+  const online = useMachineOnline(s.machineId);
+  const restarting = useBizzi((st) => st.timelines[s.id]?.restartItemId != null);
+  const restart = useAction(() => store.restartSession(s.id));
+  return (
+    <Card className="flex items-start gap-2.5 p-3">
+      <Icon name="refresh" size={16} className="mt-0.5 shrink-0 text-accent-text" />
+      <div className="min-w-0 flex-1">
+        <a href={routeHref({ name: 'session', sessionId: s.id, tab: 'chat' })} className="block truncate text-sm font-medium hover:underline">
+          {s.title ?? s.id}
+        </a>
+        <div className="truncate text-xs text-muted">
+          {AGENT_LABEL[s.agent]} {running} · {installed} installed{props.machineName ? ` on ${props.machineName}` : ''}. Restarts at the next safe point and resumes.
+        </div>
+        {restart.error ? <ErrorText error={restart.error} className="py-0.5 text-xs" /> : null}
+      </div>
+      <Button size="sm" variant="ghost" icon="refresh" busy={restart.busy || restarting} disabled={!online} onClick={() => void restart.run()}>
+        {restarting ? 'Restarting' : `Restart on ${installed}`}
+      </Button>
+    </Card>
+  );
 }
 
 function WaitingRow(props: { session: SessionInfo }): ReactNode {

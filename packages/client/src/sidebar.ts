@@ -483,6 +483,39 @@ export function selectUnsupportedAgents(s: BizziState): { machineId: string; age
   return out;
 }
 
+// ---- restart policy `ask` (updates.md §6)
+
+/** A live session on an older agent process whose machine asks before restarting it (inbox item). */
+export interface RestartPrompt {
+  session: SessionInfo;
+  /** What the session's process runs and what is installed now. */
+  running: string;
+  installed: string;
+}
+
+/**
+ * Sessions waiting for you to restart them onto a new agent version: restart policy `ask`, the
+ * session's process older than the installed version (the version chip's rule), not ended or failed.
+ */
+export function selectRestartPrompts(s: BizziState): RestartPrompt[] {
+  const out: RestartPrompt[] = [];
+  for (const x of Object.values(s.sessions)) {
+    const running = x.agentVersion;
+    if (!running) continue;
+    const listing = s.agents[x.machineId]?.find((a) => a.agent === x.agent);
+    if (!listing || listing.restartPolicy !== 'ask' || !listing.installed || !listing.version || listing.version === running) continue;
+    const status = selectSessionStatus(s, x.id);
+    if (status === 'ended' || status === 'failed') continue;
+    out.push({ session: x, running, installed: listing.version });
+  }
+  out.sort((a, b) => (a.session.updatedAt < b.session.updatedAt ? 1 : a.session.updatedAt > b.session.updatedAt ? -1 : 0));
+  return out;
+}
+
+export function restartPromptsEqual(a: readonly RestartPrompt[], b: readonly RestartPrompt[]): boolean {
+  return a.length === b.length && a.every((x, i) => x.session === b[i]?.session && x.installed === b[i]?.installed && x.running === b[i]?.running);
+}
+
 /**
  * Phone layout: more than three marks collapse to counts per state (`⚠1 ◐2 ●3`), in mark order.
  * Returns null when the marks fit.

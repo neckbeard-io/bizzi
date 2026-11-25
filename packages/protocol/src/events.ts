@@ -124,7 +124,11 @@ export interface SessionEventMap {
   'account.usage': AccountUsage;
   /** The agent process is being replaced at a safe point (updates.md §5). The bizzi session carries on. */
   'session.restarting': { fromVersion?: string; toVersion?: string; reason?: string };
-  'session.restarted': { fromVersion?: string; toVersion?: string; ok: boolean; error?: string };
+  /**
+   * `ok: false` with `fallbackVersion`: the new version failed to start and the session resumed on
+   * the previous version (`fallbackVersion`) instead; it keeps running and stays stale.
+   */
+  'session.restarted': { fromVersion?: string; toVersion?: string; ok: boolean; error?: string; fallbackVersion?: string };
   'subagent.started': { subagentId: string; name?: string; description?: string; parentToolId?: string };
   'subagent.completed': { subagentId: string; status: 'ok' | 'error' | 'cancelled' };
   /** Terminal-mode output. */

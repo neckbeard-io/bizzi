@@ -41,6 +41,11 @@ const [opencode] = createAdapters({ defaultAgent: 'build' });
   - Shutdown (`dispose()` stops every session, then the server; idempotent): SIGTERM, then SIGKILL
     after 6 s. The server is also stopped 10 minutes after the last
     session stops (`idleShutdownMs`), and when the process exits.
+  - Restart onto a new version (`sharedProcess: 'owned'`, `recycle()`, updates.md §3): the core
+    stops every session on the server at a safe point, `recycle()` stops the server, and each
+    session resumes on a fresh `opencode serve` from the installed binary. Sessions report the
+    server's own `/api/info` version (`agentVersion()`), which can lag the installed CLI. With
+    `serverUrl` the server is `external` and never recycled.
 - **ACP fallback:** `opencode acp` speaks the Agent Client Protocol over stdio. It isn't used here.
   If the HTTP API drifts badly, a generic ACP adapter can drive it, but it lacks forms, runtime MCP
   and instruction entries.

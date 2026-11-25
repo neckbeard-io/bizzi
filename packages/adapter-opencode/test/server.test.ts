@@ -113,6 +113,33 @@ describe('private server lifecycle', () => {
     await assert.rejects(adapter.start({ sessionId: 's6', mode: 'structured', cwd }, () => {}, ctx), /did not start within/);
   });
 
+  test('recycle replaces the private server; sessions report the version it runs (updates.md §3)', async () => {
+    const env: Record<string, string> = { FAKE_OPENCODE_VERSION: '2.0.25' };
+    const adapter = makeAdapter({ env });
+    assert.equal(adapter.sharedProcess, 'owned');
+    const s1 = await adapter.start({ sessionId: 'r1', mode: 'structured', cwd }, () => {}, ctx);
+    assert.equal(s1.agentVersion?.(), '2.0.25');
+    const pid1 = adapter.server.pid;
+    await assert.rejects(adapter.recycle(), (e: unknown) => e instanceof BizziError && e.code === 'conflict');
+    assert.equal(adapter.server.pid, pid1, 'a live session keeps the server');
+
+    await s1.stop();
+    env.FAKE_OPENCODE_VERSION = '2.2.6'; // the CLI was updated meanwhile
+    await adapter.recycle();
+    assert.equal(adapter.server.state, 'stopped');
+    await until(() => !alive(pid1), 5_000, 'old server exit');
+    const s2 = await adapter.start({ sessionId: 'r2', mode: 'structured', cwd }, () => {}, ctx);
+    assert.notEqual(adapter.server.pid, pid1);
+    assert.equal(s2.agentVersion?.(), '2.2.6');
+    await s2.stop();
+  });
+
+  test('an attached server is external and never recycled', async () => {
+    const adapter = makeAdapter({ serverUrl: 'http://127.0.0.1:9', serverPassword: 'x' });
+    assert.equal(adapter.sharedProcess, 'external');
+    await assert.rejects(adapter.recycle(), (e: unknown) => e instanceof BizziError && e.code === 'unsupported');
+  });
+
   test('idle shutdown stops the server after the last session', async () => {
     const adapter = makeAdapter({ idleShutdownMs: 100 });
     const s = await adapter.start({ sessionId: 's7', mode: 'structured', cwd }, () => {}, ctx);

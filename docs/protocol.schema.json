@@ -807,6 +807,7 @@
         }
       },
       "session.restarted": {
+        "description": "`ok: false` with `fallbackVersion`: the new version failed to start and the session resumed on the previous version (`fallbackVersion`) instead; it keeps running and stays stale.",
         "data": {
           "$ref": "#/$defs/session:session.restarted"
         }
@@ -8729,6 +8730,9 @@
           "type": "boolean"
         },
         "error": {
+          "type": "string"
+        },
+        "fallbackVersion": {
           "type": "string"
         }
       },

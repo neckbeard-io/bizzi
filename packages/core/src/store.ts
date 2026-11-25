@@ -31,6 +31,12 @@ export interface SessionState {
    * it existed at spawn. Gone from disk later = the process is stale.
    */
   agentPath?: string;
+  /**
+   * The agent process was running when the node went down (bizzi restarted or updated, updates.md
+   * §7). The next start resumes through the restart sequence (verify, divider) and clears it.
+   * `fromVersion`: the version that process ran.
+   */
+  nodeRestarted?: { fromVersion?: string };
 }
 
 export interface SessionRow {

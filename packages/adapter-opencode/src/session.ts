@@ -180,6 +180,11 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     return this.#ref;
   }
 
+  /** What the shared server reports it runs (`/api/info`), which can lag the installed CLI. */
+  agentVersion(): string | undefined {
+    return this.#server.version;
+  }
+
   get directory(): string {
     return this.#dir;
   }

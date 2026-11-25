@@ -89,6 +89,8 @@ export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<st
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly agent = 'claude' as const;
+  /** StartSessionOptions.executable is honoured (restart fallback onto the previous version, updates.md §5). */
+  readonly acceptsExecutable = true;
   readonly #opts: ClaudeAdapterOptions;
   readonly #sessions = new Set<ClaudeSession>();
 
@@ -136,8 +138,10 @@ export class ClaudeAdapter implements AgentAdapter {
     const sessionUuid = opts.resumeRef && !fork ? undefined : randomUUID();
     const ref = sessionUuid ?? opts.resumeRef;
 
-    let executable: string | undefined;
-    if (this.#opts.claudePath !== null) {
+    let executable: string | undefined = opts.executable;
+    if (executable) {
+      log.log('info', 'starting a pinned claude executable', { path: executable });
+    } else if (this.#opts.claudePath !== null) {
       const found = await findClaudeBinary({ claudePath: this.#opts.claudePath, searchDirs: this.#opts.searchDirs });
       executable = found?.path;
       if (!found) log.log('info', 'no installed claude binary found; using the SDK-bundled one');

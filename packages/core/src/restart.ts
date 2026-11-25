@@ -9,27 +9,16 @@
 //
 // Triggers: every completed probe (the updates extension re-probes when install paths change), and
 // every `session.updated` (a session reaching a safe point).
+//
+// A shared server (bizzi's private `opencode serve`, `AgentAdapter.sharedProcess: 'owned'`) is one
+// restart unit: it restarts once every session on it is at a safe point, and all of them resume on
+// the new server (Sessions.restartGroup). Someone else's server (`external`) is never restarted.
 
 import { existsSync } from 'node:fs';
-import {
-  BizziError,
-  GLOBAL_CHANNEL,
-  type AgentKind,
-  type AgentListing,
-  type Logger,
-  type RestartPolicy,
-} from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, type AgentKind, type AgentListing, type Logger, type RestartPolicy } from '@bizzi/protocol';
 import type { AdapterRegistry } from './agents.ts';
 import type { EventBus } from './bus.ts';
 import type { Sessions } from './sessions.ts';
-
-/**
- * Agents whose restart unit is a shared server rather than one process per session (updates.md §3):
- * bizzi's private `opencode serve` is shared by every OpenCode session on the node. Replacing one
- * session's adapter session doesn't replace the server, so these are reported stale but never
- * restarted per session.
- */
-export const SHARED_SERVER_AGENTS: readonly AgentKind[] = ['opencode'];
 
 /**
  * Identifies an install as a restart sees it (version, real path, login state). A restart that
@@ -68,14 +57,11 @@ export interface RestartsDeps {
   registry: AdapterRegistry;
   bus: EventBus;
   logger: Logger;
-  /** Default SHARED_SERVER_AGENTS. */
-  sharedServerAgents?: readonly AgentKind[];
 }
 
 export class Restarts {
   readonly #d: RestartsDeps;
   readonly #log: Logger;
-  readonly #shared: ReadonlySet<AgentKind>;
   /** Sessions with a `session.restart` waiting for a safe point. */
   readonly #requested = new Set<string>();
   readonly #scheduled = new Set<string>();
@@ -86,7 +72,6 @@ export class Restarts {
   constructor(deps: RestartsDeps) {
     this.#d = deps;
     this.#log = deps.logger.child({ component: 'restarts' });
-    this.#shared = new Set(deps.sharedServerAgents ?? SHARED_SERVER_AGENTS);
     this.#off.push(
       deps.bus.on(GLOBAL_CHANNEL, (ev) => {
         if (ev.type === 'session.updated') this.#schedule(ev.data.session.id);
@@ -122,14 +107,11 @@ export class Restarts {
    * `session.restart`: restart the agent process on the installed version at the next safe point
    * (now, if the session is at one). Returns once the request is accepted; progress shows as
    * `session.restarting` / `session.restarted`. A session whose agent isn't running needs nothing:
-   * its next start runs the installed version.
+   * its next start runs the installed version. On a shared server every session on it restarts.
    */
   request(id: string): void {
     const { session } = this.#d.sessions.get(id);
     if (session.status === 'ended') throw new BizziError('conflict', 'session has ended');
-    if (this.#shared.has(session.agent)) {
-      throw new BizziError('unsupported', `${session.agent} sessions share one agent server; restart the server instead (not supported yet)`);
-    }
     const blocker = this.#d.sessions.restartBlocker(id);
     if (blocker) throw new BizziError('unsupported', `cannot restart: ${blocker}`);
     if (!this.#d.sessions.agentProcess(id).running) return;
@@ -177,12 +159,18 @@ export class Restarts {
 
   #consider(id: string): void {
     const s = this.#d.sessions;
-    if (this.#closed || this.#running.has(id) || !s.has(id) || s.draining || s.isRestarting(id)) return;
-    const manual = this.#requested.has(id);
+    if (this.#closed || !s.has(id) || s.draining) return;
     const proc = s.agentProcess(id);
+    // One restart unit: this session, or every running session on its shared server.
+    const ids = proc.running ? s.restartGroup(id) : [id];
+    if (ids.some((m) => this.#running.has(m) || s.isRestarting(m))) return;
+    const manual = ids.some((m) => this.#requested.has(m));
+    const clear = () => {
+      for (const m of ids) this.#requested.delete(m);
+    };
     if (!proc.running) {
       // Nothing to replace: the next start runs the installed version.
-      this.#requested.delete(id);
+      clear();
       return;
     }
     const { session } = s.get(id);
@@ -190,20 +178,21 @@ export class Restarts {
     if (manual) {
       reason = 'restart requested';
     } else {
-      const why = this.stale(id);
-      if (!why || this.#shared.has(session.agent) || this.policy(session.agent) !== 'when-idle') return;
+      const why = ids.map((m) => this.stale(m)).find((w) => w !== undefined);
+      if (!why || this.policy(session.agent) !== 'when-idle') return;
       // No automatic retries on an install a restart already failed on.
-      if (proc.restartFailedFor !== undefined && proc.restartFailedFor === installKey(this.#d.registry.lastProbe(session.agent))) return;
+      const key = installKey(this.#d.registry.lastProbe(session.agent));
+      if (ids.some((m) => s.agentProcess(m).restartFailedFor === key)) return;
       reason = `update detected: ${why}`;
     }
     if (s.restartBlocker(id)) {
-      this.#requested.delete(id);
+      clear();
       return;
     }
     // Not at a safe point: the next session.updated (turn completed, approval answered…) looks again.
     if (s.unsafeReason(id)) return;
-    this.#requested.delete(id);
-    this.#log.log('info', 'restarting agent process', { sessionId: id, agent: session.agent, reason });
+    clear();
+    this.#log.log('info', 'restarting agent process', { sessionId: id, agent: session.agent, reason, sessions: ids.length });
     const p = s
       .restartAgent(id, { reason })
       .then(
@@ -213,8 +202,8 @@ export class Restarts {
         (err: unknown) => this.#log.log('warn', 'agent restart refused', { sessionId: id, err }),
       )
       .finally(() => {
-        this.#running.delete(id);
+        for (const m of ids) if (this.#running.get(m) === p) this.#running.delete(m);
       });
-    this.#running.set(id, p);
+    for (const m of ids) this.#running.set(m, p);
   }
 }

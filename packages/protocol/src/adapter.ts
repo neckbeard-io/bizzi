@@ -39,6 +39,12 @@ export interface StartSessionOptions {
   /** Terminal mode: initial size. */
   cols?: number;
   rows?: number;
+  /**
+   * Run this executable instead of the adapter's own choice. Set only by the core's restart
+   * fallback onto the previous version (updates.md §5), and only for adapters with
+   * `acceptsExecutable`.
+   */
+  executable?: string;
 }
 
 /** Adapters push normalized events through this; the core assigns seq/ts and persists. */
@@ -74,6 +80,11 @@ export interface AdapterSession {
   resizeTerminal?(cols: number, rows: number): void;
   /** Stop the agent process and release resources. Idempotent. */
   stop(): Promise<void>;
+  /**
+   * Version of the agent process actually serving this session, when the adapter can ask it
+   * (OpenCode: the shared server's `/api/info`). The core prefers it over the probe's version.
+   */
+  agentVersion?(): string | undefined;
 }
 
 export interface AgentAdapter {
@@ -84,4 +95,19 @@ export interface AgentAdapter {
   start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession>;
   /** Release shared resources (e.g. a per-node agent server) when the node shuts down. */
   dispose?(): Promise<void>;
+  // ---- restarts onto a new agent version (updates.md §3, §5)
+  /**
+   * One agent process serves every session of this adapter instead of one per session
+   * (updates.md §3). `owned`: bizzi started it and `recycle()` replaces it, so a restart covers
+   * every session on it at once. `external`: someone else's server (the user's background
+   * service); bizzi never restarts it.
+   */
+  readonly sharedProcess?: 'owned' | 'external';
+  /**
+   * `sharedProcess: 'owned'`: stop the shared process so the next start runs the installed binary.
+   * The core calls it only after stopping every session on it.
+   */
+  recycle?(): Promise<void>;
+  /** start() honours StartSessionOptions.executable (restart fallback onto the previous version). */
+  readonly acceptsExecutable?: boolean;
 }

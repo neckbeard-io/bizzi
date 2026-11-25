@@ -78,17 +78,20 @@ function ItemView(props: { sessionId: string; item: TimelineItem }): ReactNode {
 /** Divider: "restarted on 2.1.322" (updates.md §5); the bizzi session and its seq carry on. */
 function RestartRow(props: { item: RestartItem }): ReactNode {
   const r = props.item;
+  const fellBack = r.state === 'failed' && r.fallbackVersion !== undefined;
   const text =
     r.state === 'restarting'
       ? `restarting${r.toVersion ? ` on ${r.toVersion}` : ''}…`
       : r.state === 'ok'
         ? `restarted on ${r.toVersion ?? 'the installed version'}`
-        : `restart failed${r.error ? `: ${r.error}` : ''}`;
+        : fellBack
+          ? `${r.toVersion ?? 'the new version'} did not start; resumed on ${r.fallbackVersion}`
+          : `restart failed${r.error ? `: ${r.error}` : ''}`;
   return (
-    <div className={cx('flex items-center gap-3 text-xs', r.state === 'failed' ? 'text-err' : 'text-muted')} role="separator">
+    <div className={cx('flex items-center gap-3 text-xs', fellBack ? 'text-warn' : r.state === 'failed' ? 'text-err' : 'text-muted')} role="separator">
       <span className="h-px flex-1 bg-border" />
       {r.state === 'restarting' ? <Spinner size={11} /> : <Icon name="refresh" size={12} />}
-      <span title={r.fromVersion ? `from ${r.fromVersion}${r.reason ? ` · ${r.reason}` : ''}` : r.reason}>{text}</span>
+      <span title={fellBack ? r.error : r.fromVersion ? `from ${r.fromVersion}${r.reason ? ` · ${r.reason}` : ''}` : r.reason}>{text}</span>
       <span className="h-px flex-1 bg-border" />
     </div>
   );
