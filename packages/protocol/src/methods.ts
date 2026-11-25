@@ -3,6 +3,9 @@ import type {
   AccountUsage,
   AgentKind,
   AgentProbe,
+  ContainerLifecycle,
+  ContainerMount,
+  ContainerStatus,
   ContextBaseline,
   ApprovalDecision,
   DeviceInfo,
@@ -344,6 +347,34 @@ export interface Methods {
     params: MachineTarget & { text: string; options: string[] };
     result: { probabilities: number[]; letterMass: number; ms: number; model: string };
   };
+
+  // ---- container workspaces (topology.md §7)
+  /**
+   * A workspace of kind 'container' around a directory on the machine (adopted, or created with
+   * `create`). Nothing starts yet: the container is created and started by the first session. The image
+   * is `image`, else the repo's devcontainer.json, else bizzi's workspace image. `notes` lists
+   * devcontainer.json settings that were ignored.
+   */
+  'container.create': {
+    params: MachineTarget & {
+      path: string;
+      name?: string;
+      create?: boolean;
+      image?: string;
+      /** `bridge` (default), `none`, or a Docker network name. */
+      network?: string;
+      mounts?: ContainerMount[];
+      /** Replaces the default list of forwarded credential variables. */
+      passEnv?: string[];
+      user?: string;
+      lifecycle?: ContainerLifecycle;
+      idleMinutes?: number;
+    };
+    result: { workspace: WorkspaceInfo; notes?: string[] };
+  };
+  'container.status': { params: { workspaceId: string }; result: { container: ContainerStatus } };
+  /** Stop the container now. Refuses while sessions are live unless `force` (which ends their agents). */
+  'container.stop': { params: { workspaceId: string; force?: boolean }; result: { container: ContainerStatus } };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)
   /** Create a one-time pairing code for a new device or node. */

@@ -39,6 +39,44 @@ export interface StartSessionOptions {
   /** Terminal mode: initial size. */
   cols?: number;
   rows?: number;
+  /** Run the agent process somewhere other than this machine's shell (container workspaces). */
+  launcher?: ProcessLauncher;
+}
+
+// ---- process launchers (topology.md §7)
+
+/** A process an adapter is about to spawn, as the agent should see it. */
+export interface LaunchSpec {
+  /** Bare command name, resolved inside the target (e.g. `codex`, not a host path). */
+  command: string;
+  args: string[];
+  /** The agent's working directory inside the target. */
+  cwd: string;
+  /** The full environment the adapter would have used; the launcher decides what crosses over. */
+  env: Record<string, string | undefined>;
+  /** Allocate a terminal (terminal mode). */
+  tty?: boolean;
+}
+
+/** What to spawn on this machine instead (e.g. `docker exec -i … <container> codex app-server`). */
+export interface LaunchCommand {
+  command: string;
+  args: string[];
+  /** Host-side working directory for the spawned process. */
+  cwd: string;
+  env: Record<string, string | undefined>;
+}
+
+/**
+ * Runs agent processes inside another environment. Adapters that support it call `wrap` right before
+ * spawning; the rest refuse to start with `unsupported` when one is set.
+ */
+export interface ProcessLauncher {
+  /** For logs and errors, e.g. `container bizzi-ws-w_123`. */
+  readonly label: string;
+  wrap(spec: LaunchSpec): LaunchCommand;
+  /** Rewrite (or drop) MCP servers the node injects, which may not be reachable from inside. */
+  mapMcpServers?(servers: Record<string, McpServerSpec>): Record<string, McpServerSpec>;
 }
 
 /** Adapters push normalized events through this; the core assigns seq/ts and persists. */

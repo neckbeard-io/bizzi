@@ -200,6 +200,10 @@ export class OpenCodeAdapter implements AgentAdapter {
     if (opts.mode !== 'structured') {
       throw new BizziError('unsupported', 'the OpenCode adapter only supports structured mode (use the pty adapter for the TUI)');
     }
+    if (opts.launcher) {
+      // One `opencode serve` per node, reached over HTTP: it can't run inside a container workspace yet.
+      throw new BizziError('unsupported', `OpenCode sessions can't run in ${opts.launcher.label} yet; use a terminal session instead`);
+    }
     const log = ctx.logger.child({ adapter: 'opencode', sessionId: opts.sessionId });
     clearTimeout(this.#idleTimer);
     let client: OpenCodeClient;

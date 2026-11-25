@@ -77,9 +77,18 @@ hub revokes the node's previous key automatically. To revoke a device, use *Devi
   `docker compose up -d node`.
 - **A Mac or any non-container install:** `bizzi pair https://bizzi.example.com <node code>` once,
   then `bizzi serve` (it connects with the saved credential), or `bizzi serve --connect <url>`.
-- **Container workspaces:** `docker compose --profile containers up -d` starts a `dind` sidecar.
-  Uncomment the `DOCKER_*` variables and the `dind-certs` mount in the `node` service. The node
-  never gets the host's Docker socket.
+- **Container workspaces** ([topology.md](../docs/topology.md) §7): set `BIZZI_DOCKER_HOST=tcp://dind:2376`
+  in `.env`, then `docker compose --profile containers up -d`. The `dind` sidecar is the node's own
+  Docker daemon (TLS, client certs on the `dind-certs` volume); the node never gets the host's Docker
+  socket, and agents never see any daemon. dind mounts the workspaces directory at the same
+  `/workspaces` path as the node, so a workspace is bind-mounted into its container by that path.
+  `container.create { path, image?, network?, lifecycle?, idleMinutes? }` makes a workspace of kind
+  `container`; its first session builds `bizzi/workspace:latest` (`packages/containers/image`, Claude Code
+  + Codex) into dind unless the repo has a `devcontainer.json` or you gave an image. Agent logins: put a
+  long-lived token in the agent's secrets (`agent.setSecret`, e.g. `CLAUDE_CODE_OAUTH_TOKEN` from
+  `claude setup-token`, or `OPENAI_API_KEY`) or in the node's environment; they are passed per `docker
+  exec`, never stored in the container. If the node can't read `/certs/client/key.pem`, make it readable
+  for `PUID` (dind creates it as root).
 - **Upgrades:** `docker compose pull && docker compose up -d` (or `--build`). On SIGTERM the node
   drains for up to `stop_grace_period` (2 min). Events produced while the hub is down or restarting
   stay in the node's log and are uploaded when the link comes back, with no gaps or duplicates.

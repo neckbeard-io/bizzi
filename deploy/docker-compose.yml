@@ -58,15 +58,19 @@ services:
       PUID: ${PUID:-1000}                   # run as your host user, so bind-mounted files stay yours
       PGID: ${PGID:-1000}
       TZ: ${TZ:-UTC}
-      # With `--profile containers`, uncomment to use the dind sidecar's Docker daemon:
-      # DOCKER_HOST: tcp://dind:2376
-      # DOCKER_TLS_VERIFY: "1"
-      # DOCKER_CERT_PATH: /certs/client
+      # Container workspaces (topology.md §7): with `--profile containers` set BIZZI_DOCKER_HOST=tcp://dind:2376
+      # in .env. Only the node's docker CLI uses these; agents never see a Docker daemon.
+      BIZZI_DOCKER_HOST: ${BIZZI_DOCKER_HOST:-}
+      BIZZI_DOCKER_TLS_VERIFY: "1"
+      BIZZI_DOCKER_CERT_PATH: /certs/client
+      BIZZI_CONTAINER_IMAGE: ${BIZZI_CONTAINER_IMAGE:-}   # default bizzi/workspace:latest, built on first use
+      # Agent logins inside container workspaces: the node forwards CLAUDE_CODE_OAUTH_TOKEN, ANTHROPIC_API_KEY,
+      # OPENAI_API_KEY and CODEX_API_KEY when set here, or per agent via the secrets store (README).
     volumes:
       - node-data:/data                     # node sqlite (event log = outbox), hub-credential.json
       - node-home:/home/bizzi               # ADE installs + logins (~/.claude, ~/.codex, ...)
       - ${BIZZI_WORKSPACES:-/srv/bizzi/workspaces}:/workspaces   # visible and editable on the host
-      # - dind-certs:/certs:ro              # with `--profile containers`
+      - dind-certs:/certs:ro                # dind's TLS client certs (empty without the profile)
     shm_size: 1gb                           # headless browsers
     networks: [internal]
 
@@ -80,7 +84,9 @@ services:
       DOCKER_TLS_CERTDIR: /certs
     volumes:
       - dind-certs:/certs
-      - dind-data:/var/lib/docker
+      - dind-data:/var/lib/docker           # images and containers of container workspaces
+      # Same path as in the node: a workspace is bind-mounted into its container by its /workspaces/… path.
+      - ${BIZZI_WORKSPACES:-/srv/bizzi/workspaces}:/workspaces
     networks: [internal]
 
 volumes:

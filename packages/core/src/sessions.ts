@@ -40,14 +40,14 @@ import { installKey, precheckProblem } from './restart.ts';
 import type { SessionState, Store } from './store.ts';
 import type { Workspaces } from './workspaces.ts';
 
-export type PrepareStartResult = Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend'>>;
+export type PrepareStartResult = Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend' | 'launcher'>>;
 
 /** Extra start options contributed by the host (knowledge injection, env, …). */
 export type PrepareStart = (session: SessionInfo, workspace: WorkspaceInfo) => PrepareStartResult | Promise<PrepareStartResult>;
 
 /**
  * Run several hooks in order and merge their results: env and mcpServers are merged (later wins on a
- * key clash), systemPromptAppend texts are joined with a blank line.
+ * key clash), systemPromptAppend texts are joined with a blank line, the last launcher wins.
  */
 export function composePrepareStart(hooks: readonly PrepareStart[] | (() => readonly PrepareStart[])): PrepareStart {
   return async (session, workspace) => {
@@ -60,6 +60,7 @@ export function composePrepareStart(hooks: readonly PrepareStart[] | (() => read
       if (r.env) out.env = { ...out.env, ...r.env };
       if (r.mcpServers) out.mcpServers = { ...out.mcpServers, ...r.mcpServers };
       if (r.systemPromptAppend?.trim()) prompts.push(r.systemPromptAppend.trim());
+      if (r.launcher) out.launcher = r.launcher;
     }
     if (prompts.length > 0) out.systemPromptAppend = prompts.join('\n\n');
     return out;
@@ -941,6 +942,12 @@ export class Sessions {
       if (rt.state.command) opts.command = [...rt.state.command];
       if (rt.state.cols) opts.cols = rt.state.cols;
       if (rt.state.rows) opts.rows = rt.state.rows;
+      // Container workspaces (topology.md §7): host-side MCP servers may not be reachable from inside.
+      if (opts.launcher?.mapMcpServers && opts.mcpServers) {
+        const mapped = opts.launcher.mapMcpServers(opts.mcpServers);
+        if (Object.keys(mapped).length > 0) opts.mcpServers = mapped;
+        else delete opts.mcpServers;
+      }
       return adapter.start(opts, (body) => this.#onAdapterEvent(rt, gen, body), { logger });
     };
 

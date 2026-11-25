@@ -539,6 +539,32 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
+    "container.create": {
+      "description": "A workspace of kind 'container' around a directory on the machine (adopted, or created with `create`). Nothing starts yet: the container is created and started by the first session. The image is `image`, else the repo's devcontainer.json, else bizzi's workspace image. `notes` lists devcontainer.json settings that were ignored.",
+      "params": {
+        "$ref": "#/$defs/params:container.create"
+      },
+      "result": {
+        "$ref": "#/$defs/result:container.create"
+      }
+    },
+    "container.status": {
+      "params": {
+        "$ref": "#/$defs/params:container.status"
+      },
+      "result": {
+        "$ref": "#/$defs/result:container.status"
+      }
+    },
+    "container.stop": {
+      "description": "Stop the container now. Refuses while sessions are live unless `force` (which ends their agents).",
+      "params": {
+        "$ref": "#/$defs/params:container.stop"
+      },
+      "result": {
+        "$ref": "#/$defs/result:container.stop"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -1437,6 +1463,106 @@
     },
     "ClientMsg": {
       "$ref": "#/$defs/RequestMsg"
+    },
+    "ContainerCommand": {
+      "description": "A shell command line (run with `sh -c`) or an argv.",
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "ContainerLifecycle": {
+      "description": "persistent: stopped when idle, restarted on the next session · ephemeral: removed when idle, recreated fresh.",
+      "type": "string",
+      "enum": [
+        "persistent",
+        "ephemeral"
+      ]
+    },
+    "ContainerMount": {
+      "description": "An extra bind mount. `source` is a path as the Docker daemon sees it (the dind sidecar's filesystem).",
+      "type": "object",
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "readOnly": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source",
+        "target"
+      ]
+    },
+    "ContainerState": {
+      "description": "Docker's container states, plus `absent` (not created yet, or removed) and `unreachable` (no daemon).",
+      "type": "string",
+      "enum": [
+        "absent",
+        "created",
+        "running",
+        "paused",
+        "restarting",
+        "removing",
+        "exited",
+        "dead",
+        "unreachable"
+      ]
+    },
+    "ContainerStatus": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "name": {
+          "description": "Container name, `bizzi-ws-<workspace id>`.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ContainerState"
+        },
+        "image": {
+          "type": "string"
+        },
+        "id": {
+          "description": "Docker's container id, when it exists.",
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "liveSessions": {
+          "description": "Live (not ended or failed) sessions in the workspace.",
+          "type": "number"
+        },
+        "idleUntil": {
+          "description": "When the idle timer stops or removes it, if it is running with no live session.",
+          "type": "string"
+        },
+        "error": {
+          "description": "Why the daemon couldn't answer (state `unreachable`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId",
+        "name",
+        "state",
+        "image",
+        "liveSessions"
+      ]
     },
     "ContextBaseline": {
       "description": "Starting context learned per (agent, model, workspace) from the first `context.updated` of earlier sessions (usage.md §2): \"Codex starts at about 14k here\". `tokens` is the median of recent samples.",
@@ -2553,6 +2679,9 @@
         "knowledge.sync.push",
         "route.suggest",
         "route.score",
+        "container.create",
+        "container.status",
+        "container.stop",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -3983,6 +4112,63 @@
               "type": "string"
             },
             "method": {
+              "const": "container.create"
+            },
+            "params": {
+              "$ref": "#/$defs/params:container.create"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "container.status"
+            },
+            "params": {
+              "$ref": "#/$defs/params:container.status"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "container.stop"
+            },
+            "params": {
+              "$ref": "#/$defs/params:container.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "pairing.create"
             },
             "params": {
@@ -5239,6 +5425,96 @@
         "placement"
       ]
     },
+    "WorkspaceContainer": {
+      "description": "A container workspace's recipe. The workspace directory is bind-mounted at the same absolute path, so the agent's cwd and every path it prints match the machine's.",
+      "type": "object",
+      "properties": {
+        "image": {
+          "description": "Image the container runs (for `build`, the tag bizzi builds it as).",
+          "type": "string"
+        },
+        "imageSource": {
+          "description": "explicit: given at creation · devcontainer: from the repo's devcontainer.json · default: bizzi's workspace image.",
+          "type": "string",
+          "enum": [
+            "explicit",
+            "devcontainer",
+            "default"
+          ]
+        },
+        "build": {
+          "description": "devcontainer.json `build`: built on first start. Paths are absolute on the machine.",
+          "type": "object",
+          "properties": {
+            "dockerfile": {
+              "type": "string"
+            },
+            "context": {
+              "type": "string"
+            },
+            "args": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "dockerfile",
+            "context"
+          ]
+        },
+        "network": {
+          "description": "`bridge` (default), `none` (no network at all), or the name of a Docker network.",
+          "type": "string"
+        },
+        "mounts": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContainerMount"
+          }
+        },
+        "env": {
+          "description": "Fixed, non-secret environment set on the container (devcontainer.json `containerEnv`).",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "passEnv": {
+          "description": "Names of the node's environment variables forwarded into agent processes (agent credentials such as `CLAUDE_CODE_OAUTH_TOKEN`). Values are passed at exec time, never stored in the container's config.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "user": {
+          "description": "User agents run as (`uid:gid` or a name); default: the node's own uid:gid.",
+          "type": "string"
+        },
+        "postCreate": {
+          "description": "devcontainer.json `onCreateCommand`, `updateContentCommand`, `postCreateCommand`: run in order once after creation.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContainerCommand"
+          }
+        },
+        "lifecycle": {
+          "$ref": "#/$defs/ContainerLifecycle"
+        },
+        "idleMinutes": {
+          "description": "Minutes without a live session before the container is stopped (persistent) or removed (ephemeral).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "image",
+        "imageSource",
+        "network",
+        "lifecycle",
+        "idleMinutes"
+      ]
+    },
     "WorkspaceInfo": {
       "type": "object",
       "properties": {
@@ -5269,6 +5545,10 @@
           "description": "kind 'worktree': the branch checked out in it.",
           "type": "string"
         },
+        "container": {
+          "description": "kind 'container': how its container is built and run (topology.md §7).",
+          "$ref": "#/$defs/WorkspaceContainer"
+        },
         "createdAt": {
           "type": "string"
         }
@@ -5283,11 +5563,13 @@
       ]
     },
     "WorkspaceKind": {
+      "description": "`container`: agent sessions run inside a container on this machine (topology.md §7).",
       "type": "string",
       "enum": [
         "git",
         "dir",
-        "worktree"
+        "worktree",
+        "container"
       ]
     },
     "global:account.usage": {
@@ -5714,6 +5996,84 @@
             }
           }
         }
+      ]
+    },
+    "params:container.create": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "create": {
+              "type": "boolean"
+            },
+            "image": {
+              "type": "string"
+            },
+            "network": {
+              "description": "`bridge` (default), `none`, or a Docker network name.",
+              "type": "string"
+            },
+            "mounts": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ContainerMount"
+              }
+            },
+            "passEnv": {
+              "description": "Replaces the default list of forwarded credential variables.",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "user": {
+              "type": "string"
+            },
+            "lifecycle": {
+              "$ref": "#/$defs/ContainerLifecycle"
+            },
+            "idleMinutes": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "path"
+          ]
+        }
+      ]
+    },
+    "params:container.status": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:container.stop": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "force": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "workspaceId"
       ]
     },
     "params:device.revoke": {
@@ -6844,6 +7204,45 @@
       },
       "required": [
         "baselines"
+      ]
+    },
+    "result:container.create": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        },
+        "notes": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "workspace"
+      ]
+    },
+    "result:container.status": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "$ref": "#/$defs/ContainerStatus"
+        }
+      },
+      "required": [
+        "container"
+      ]
+    },
+    "result:container.stop": {
+      "type": "object",
+      "properties": {
+        "container": {
+          "$ref": "#/$defs/ContainerStatus"
+        }
+      },
+      "required": [
+        "container"
       ]
     },
     "result:device.revoke": {

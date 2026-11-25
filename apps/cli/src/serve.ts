@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
+import { createContainersExtension } from '@bizzi/containers';
 import { createRoutingExtension, routerOptionsFromEnv, type RouterOptions } from '@bizzi/routing';
 import { loadAdapters } from './adapters.ts';
 import { createKnowledgeRuntime } from './knowledge.ts';
@@ -121,7 +122,9 @@ export async function serve(argv: string[], version: string): Promise<void> {
     throw new UsageError((err as Error).message);
   }
   const routing = createRoutingExtension({ ...routerOpts, logger: logger.child({ component: 'router' }) });
-  const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : []), routing];
+  // ---- container workspaces (topology.md §7): only with a configured daemon (BIZZI_DOCKER_HOST, …)
+  const containers = createContainersExtension({ logger: logger.child({ component: 'containers' }) });
+  const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : []), routing, containers];
 
   const node = await createNode({
     dataDir,

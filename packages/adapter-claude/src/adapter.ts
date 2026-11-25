@@ -1,4 +1,6 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
 import { BizziError, NO_CAPABILITIES } from '@bizzi/protocol';
 import type {
   AdapterContext,
@@ -8,10 +10,11 @@ import type {
   AgentProbe,
   EmitFn,
   McpServerSpec,
+  ProcessLauncher,
   SessionMode,
   StartSessionOptions,
 } from '@bizzi/protocol';
-import type { McpServerConfig, Options, SettingSource } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerConfig, Options, SettingSource, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { EFFORT_LEVELS, PERMISSION_MODES, isEffort, isPermissionMode } from './mapping.ts';
 import { findClaudeBinary, probeClaude } from './probe.ts';
 import { ClaudeSession } from './session.ts';
@@ -137,7 +140,9 @@ export class ClaudeAdapter implements AgentAdapter {
     const ref = sessionUuid ?? opts.resumeRef;
 
     let executable: string | undefined;
-    if (this.#opts.claudePath !== null) {
+    // Container workspaces (topology.md §7): the `claude` installed inside the target runs instead.
+    if (opts.launcher) executable = 'claude';
+    else if (this.#opts.claudePath !== null) {
       const found = await findClaudeBinary({ claudePath: this.#opts.claudePath, searchDirs: this.#opts.searchDirs });
       executable = found?.path;
       if (!found) log.log('info', 'no installed claude binary found; using the SDK-bundled one');
@@ -177,6 +182,7 @@ export class ClaudeAdapter implements AgentAdapter {
       stderr: (d) => session.onStderr(d),
       ...(allowBypass ? { allowDangerouslySkipPermissions: true } : {}),
       ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
+      ...(opts.launcher ? { spawnClaudeCodeProcess: launchThrough(opts.launcher, opts.cwd, (d) => session.onStderr(d)) } : {}),
       ...(opts.model ? { model: opts.model } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(effort ? { effort } : {}),
@@ -210,6 +216,35 @@ export class ClaudeAdapter implements AgentAdapter {
     this.#sessions.clear();
     await Promise.allSettled(sessions.map((s) => s.stop()));
   }
+}
+
+/**
+ * The SDK's command for the target: a JS entry point run by a host runtime (`node …/cli.js --flags`)
+ * becomes `claude --flags`; a native binary path becomes `claude`.
+ */
+export function claudeLaunchArgs(command: string, args: readonly string[]): { command: string; args: string[] } {
+  const runtime = /^(node|bun|deno)(\.exe)?$/i.test(basename(command));
+  const rest = runtime && args.length > 0 && /\.[cm]?js$/i.test(args[0]!) ? args.slice(1) : [...args];
+  return { command: 'claude', args: rest };
+}
+
+/** `spawnClaudeCodeProcess` that runs Claude Code through a launcher (e.g. `docker exec`). */
+export function launchThrough(launcher: ProcessLauncher, cwd: string, onStderr: (d: string) => void): (o: SpawnOptions) => SpawnedProcess {
+  return (o) => {
+    const { command, args } = claudeLaunchArgs(o.command, o.args);
+    const run = launcher.wrap({ command, args, cwd: o.cwd ?? cwd, env: o.env });
+    const child = spawn(run.command, run.args, {
+      cwd: run.cwd,
+      env: run.env as NodeJS.ProcessEnv,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      signal: o.signal,
+    });
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (d: string) => onStderr(d));
+    // Spawn failures reach the SDK through its own 'error' listener; this one only keeps them handled.
+    child.on('error', () => {});
+    return child;
+  };
 }
 
 async function loadSdkQuery(): Promise<QueryFn> {

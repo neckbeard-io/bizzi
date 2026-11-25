@@ -1,7 +1,7 @@
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { BizziError, GLOBAL_CHANNEL, newId, type WorkspaceInfo } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, newId, type WorkspaceContainer, type WorkspaceInfo } from '@bizzi/protocol';
 import type { EventBus } from './bus.ts';
 import { branchExists, dirtyPaths, gitToplevel, isInsideGitRepo, isValidBranchName, runGit } from './git.ts';
 import type { Store } from './store.ts';
@@ -36,8 +36,12 @@ export class Workspaces {
     return ws;
   }
 
-  /** Adopt an existing directory (or create it when `create`). Adopting a known path returns the existing workspace. */
-  async create(opts: { path: string; name?: string; create?: boolean }): Promise<WorkspaceInfo> {
+  /**
+   * Adopt an existing directory (or create it when `create`). Adopting a known path returns the existing
+   * workspace. With `container` the workspace is of kind 'container' (topology.md §7); a directory is one
+   * workspace, so a container workspace of a directory that is already a host workspace is a conflict.
+   */
+  async create(opts: { path: string; name?: string; create?: boolean; container?: WorkspaceContainer }): Promise<WorkspaceInfo> {
     const raw = expandHome(opts.path);
     if (!isAbsolute(raw)) throw new BizziError('bad_request', 'path must be absolute');
     const abs = resolve(raw);
@@ -51,6 +55,11 @@ export class Workspaces {
     const real = await realpath(abs);
 
     const existing = this.list().find((w) => w.path === real);
+    if (existing && opts.container && existing.kind !== 'container') {
+      throw new BizziError('conflict', `${real} is already the workspace ${existing.name} (${existing.kind}); remove it first or use another directory`, {
+        workspaceId: existing.id,
+      });
+    }
     if (existing) return existing;
 
     const ws: WorkspaceInfo = {
@@ -58,9 +67,10 @@ export class Workspaces {
       machineId: this.#machineId,
       name: opts.name?.trim() || basename(real) || real,
       path: real,
-      kind: (await isInsideGitRepo(real)) ? 'git' : 'dir',
+      kind: opts.container ? 'container' : (await isInsideGitRepo(real)) ? 'git' : 'dir',
       createdAt: new Date().toISOString(),
     };
+    if (opts.container) ws.container = opts.container;
     this.#store.putWorkspace(ws);
     this.#byId.set(ws.id, ws);
     this.#bus.append(GLOBAL_CHANNEL, { type: 'workspace.created', data: { workspace: ws } });

@@ -130,7 +130,14 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       </Disclosure>
       <div className="mt-8 flex flex-wrap items-center gap-2 border-t border-border pt-4 text-xs text-muted">
         <span className="flex-1">
-          {ws.kind === 'git' ? 'Git repository' : ws.kind === 'worktree' ? `Worktree of ${ws.branch ?? 'a branch'}` : 'Directory'} · added {formatRelative(ws.createdAt)}
+          {ws.kind === 'git'
+            ? 'Git repository'
+            : ws.kind === 'worktree'
+              ? `Worktree of ${ws.branch ?? 'a branch'}`
+              : ws.kind === 'container'
+                ? `Container${ws.container ? ` (${ws.container.image})` : ''}`
+                : 'Directory'}{' '}
+          · added {formatRelative(ws.createdAt)}
         </span>
         {ws.kind === 'worktree' ? (
           <Button
