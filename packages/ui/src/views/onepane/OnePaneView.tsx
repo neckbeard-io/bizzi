@@ -124,8 +124,9 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   const caps = useBizzi((s) => (sessionId ? (s.capabilities[sessionId] ?? null) : null));
   const activeTurn = useBizzi((s) => (sessionId ? (s.timelines[sessionId]?.activeTurnId ?? null) : null));
 
-  const [text, setText] = useState('');
-  const [caret, setCaret] = useState(0);
+  // `#/ask?text=…` prefills the composer (launchers, share targets); nothing is sent until you press Enter.
+  const [text, setText] = useState(() => prefillFromHash(window.location.hash));
+  const [caret, setCaret] = useState(() => text.length);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
   const [suggested, setSuggested] = useState<Suggested>(null);
@@ -359,6 +360,11 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   );
 }
 
+function prefillFromHash(hash: string): string {
+  const i = hash.indexOf('?');
+  return i < 0 ? '' : (new URLSearchParams(hash.slice(i + 1)).get('text') ?? '').slice(0, 4000);
+}
+
 /** When the router can't answer (an older server, an error), the prompt still goes where the user picks. */
 function fallbackSuggestion(text: string): RouteSuggestion {
   return { source: 'none', candidates: [], confidence: 0, confident: false, text, offered: 0, note: 'routing unavailable' };
@@ -471,15 +477,21 @@ function AgentChoice(props: { agent: ReturnType<typeof chooseAgent> | null; agen
   const installed = (props.agents ?? []).filter((x) => x.installed && ROUTABLE_AGENTS.includes(x.agent)).map((x) => x.agent);
   if (installed.length < 2) return <span className="text-fg">· {AGENT_LABEL[a.agent]}</span>;
   return (
-    <label className="inline-flex items-center gap-1 text-fg">
+    <label className="relative inline-flex items-center gap-1 text-fg" title="Agent: change it here or with /agent">
       <span aria-hidden>·</span>
-      <select aria-label="Agent" value={a.agent} onChange={(e) => props.onAgent(e.target.value as AgentKind)} className="rounded border border-transparent bg-transparent py-0 pr-1 text-xs hover:border-border focus:border-accent focus:outline-none">
+      <select
+        aria-label="Agent"
+        value={a.agent}
+        onChange={(e) => props.onAgent(e.target.value as AgentKind)}
+        className="cursor-pointer appearance-none rounded border border-transparent bg-transparent py-0 pr-4 pl-1 text-xs hover:border-border focus:border-accent focus:outline-none"
+      >
         {installed.map((k) => (
           <option key={k} value={k}>
             {AGENT_LABEL[k]}
           </option>
         ))}
       </select>
+      <Icon name="chevronDown" size={11} className="pointer-events-none absolute right-0.5 text-muted" />
     </label>
   );
 }
