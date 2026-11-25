@@ -53,6 +53,7 @@ import type { MockHost, MockModule } from './host.ts';
 import { MockFs } from './fs.ts';
 import { MockKnowledge } from './knowledge.ts';
 import { MockProvision } from './provision.ts';
+import { MockRouting } from './routing.ts';
 import { MockThemes } from './themes.ts';
 import { MockUsage } from './usage.ts';
 
@@ -125,7 +126,7 @@ export class MockCore implements MockHost {
     this.provision = new MockProvision(this);
     this.usageModule = new MockUsage(this, { live: this.autoplay && this.speed > 0 });
     this.fs = new MockFs(this);
-    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule, this.fs];
+    this.modules = [this.provision, new MockKnowledge(this), new MockThemes(this), this.usageModule, this.fs, new MockRouting(this)];
   }
 
   /** Stop background timers (tests). */
