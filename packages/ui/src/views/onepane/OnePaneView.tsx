@@ -455,7 +455,7 @@ function TargetLine(props: {
       {showChoices ? (
         <div className="flex flex-wrap items-center gap-1.5">
           {choices.map((c, i) => (
-            <Button key={c.workspaceId} size="sm" variant={i === 0 ? 'primary' : 'secondary'} onClick={() => props.onPick(c)} title={c.probability < 1 ? `${Math.round(c.probability * 100)}%` : undefined}>
+            <Button key={c.workspaceId} size="sm" variant={i === 0 ? 'primary' : 'secondary'} disabled={pending} onClick={() => props.onPick(c)} title={c.probability < 1 ? `${Math.round(c.probability * 100)}%` : undefined}>
               {c.label}
               {s.source === 'classifier' ? <span className="opacity-70">{Math.round(c.probability * 100)}%</span> : null}
             </Button>
@@ -465,7 +465,7 @@ function TargetLine(props: {
           </Button>
         </div>
       ) : null}
-      {showChoices && otherOpen ? <OtherPicker others={props.others.filter((o) => !choices.some((c) => c.workspaceId === o.workspaceId))} onPick={props.onPickOther} /> : null}
+      {showChoices && otherOpen ? <OtherPicker others={props.others.filter((o) => !choices.some((c) => c.workspaceId === o.workspaceId))} onPick={props.onPickOther} disabled={pending} /> : null}
     </div>
   );
 }
@@ -496,7 +496,7 @@ function AgentChoice(props: { agent: ReturnType<typeof chooseAgent> | null; agen
   );
 }
 
-function OtherPicker(props: { others: RouteCandidate[]; onPick: (c: RouteCandidate) => void }): ReactNode {
+function OtherPicker(props: { others: RouteCandidate[]; onPick: (c: RouteCandidate) => void; disabled?: boolean }): ReactNode {
   const [q, setQ] = useState('');
   const shown = props.others.filter((o) => o.label.toLowerCase().includes(q.trim().toLowerCase())).slice(0, 30);
   return (
@@ -504,7 +504,7 @@ function OtherPicker(props: { others: RouteCandidate[]; onPick: (c: RouteCandida
       <Input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Any workspace on an online machine…" className="h-8" aria-label="Filter workspaces" />
       <div className="scrollbar-thin mt-1.5 max-h-48 overflow-y-auto">
         {shown.map((o) => (
-          <button key={o.workspaceId} type="button" className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-panel-2" onClick={() => props.onPick(o)}>
+          <button key={o.workspaceId} type="button" disabled={props.disabled} className="block w-full truncate rounded px-2 py-1 text-left text-sm hover:bg-panel-2 disabled:opacity-50" onClick={() => props.onPick(o)}>
             {o.label}
           </button>
         ))}
