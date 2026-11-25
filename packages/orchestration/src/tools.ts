@@ -19,13 +19,16 @@ export const SERVER_INSTRUCTIONS = [
     'session_wait until "done" → session_read for a structured summary (final message, changed files, tool counts, ' +
     'stop reason). Ask session_read for detail "diff" (one file) or "full" only when the summary is not enough.',
   'Helpers count against limits (depth, concurrency, budget). Stop helpers you no longer need with session_stop. ' +
-    "A helper's approvals and questions go to the user, not to you; session_wait tells you when it is waiting on them.",
+    "A helper's approvals and questions go to the user; session_wait tells you when it is waiting on them. If the user " +
+    'opted in (parentAnswersApprovals), session_wait also lists them with what you may do, and session_answer answers ' +
+    'them: allow only what you could do yourself without asking, inside the helper\'s workspace; deny anything. The user ' +
+    'can still answer first; then session_answer says it was already answered.',
 ].join('\n');
 
 /** Short note appended to the system prompt of sessions that get these tools. */
 export const TOOLS_NOTE =
   'You can start helper sessions with the bizzi-agents MCP tools (session_start, session_wait, session_read, ' +
-  'session_send, session_stop, sessions_list): any installed agent on this machine, optionally in a git worktree ' +
+  'session_send, session_answer, session_stop, sessions_list): any installed agent on this machine, optionally in a git worktree ' +
   '(`worktree: "<branch>"`). Give helpers self-contained prompts, read their structured results instead of asking for ' +
   'transcripts, and stop them when done.';
 
@@ -168,6 +171,8 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
         'Block until a helper reaches a state, then return only the state and a one-line reason. until: "done" = its ' +
         'turn finished or it ended (keeps waiting while the user answers its approvals); "idle" = it stopped working ' +
         '(finished, or waiting on the user); "waiting" = it needs the user (approval, question, budget); "ended". ' +
+        'When you may answer its approvals (parentAnswersApprovals), "done" also returns for a new one you may answer, ' +
+        'and `pending` lists them for session_answer. ' +
         `On timeout (default ${DEFAULT_WAIT_MS / 1000}s) reached is false; call again.`,
       inputSchema: {
         sessionId: sessionIdSchema,
@@ -179,7 +184,48 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
       try {
         const ms = args.timeout !== undefined ? Math.round(args.timeout * 1000) : DEFAULT_WAIT_MS;
         const r = await orch.wait(callerId, args.sessionId, args.until ?? 'done', ms, extra.signal);
-        return text(`${r.state}${r.reached ? '' : ' (not yet)'}: ${r.reason}`, { ...r });
+        const lines = [`${r.state}${r.reached ? '' : ' (not yet)'}: ${r.reason}`];
+        for (const p of r.pending ?? []) {
+          lines.push(`- ${p.type} ${p.id}: ${p.title} — you may ${p.parentMay.join(' or ')}${p.note ? ` (${p.note})` : ''}`);
+        }
+        return text(lines.join('\n'), { ...r });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  // ---- parent answers approvals (spec §12.5)
+  server.registerTool(
+    'session_answer',
+    {
+      title: "Answer a helper's approval or question",
+      description:
+        'Only when the user opted in (parentAnswersApprovals): answer one of your helper\'s pending approvals ' +
+        '(decision "allow" or "deny") or questions (answers keyed by question id, or cancel). Ids come from ' +
+        "session_wait's `pending` or session_read's waitingOn.items. You may allow only what your own permission mode " +
+        "does without asking, inside the helper's workspace, while it is within budget; allow_always and edited input " +
+        'stay with the user. The user sees every approval too: whoever answers first wins, and a late answer returns ' +
+        'answered: false with who answered.',
+      inputSchema: {
+        sessionId: sessionIdSchema,
+        id: z.string().min(1).describe('approvalId or questionId.'),
+        decision: z.enum(['allow', 'deny']).optional().describe('Approvals.'),
+        message: z.string().optional().describe('Approvals: a note to the helper (e.g. why it was denied).'),
+        answers: z.record(z.string(), z.union([z.string(), z.array(z.string())])).optional().describe('Questions: answers keyed by question id.'),
+        cancel: z.boolean().optional().describe('Questions: decline to answer.'),
+      },
+    },
+    async (args) => {
+      try {
+        const r = await orch.answer(callerId, args.sessionId, {
+          id: args.id,
+          ...(args.decision ? { decision: args.decision } : {}),
+          ...(args.message !== undefined ? { message: args.message } : {}),
+          ...(args.answers ? { answers: args.answers } : {}),
+          ...(args.cancel !== undefined ? { cancel: args.cancel } : {}),
+        });
+        return text(r.message, { ...r });
       } catch (err) {
         return errorResult(err);
       }

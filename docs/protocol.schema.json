@@ -690,6 +690,7 @@
         }
       },
       "approval.resolved": {
+        "description": "`by`: who resolved it. Adapters set it for resolutions that didn't come from approval.respond ('bizzi', 'agent', …); the core stamps 'user' (approval.respond) or 'parent' (the helper's parent session through the bizzi-agents tools, spec §12.5) with `bySessionId`.",
         "data": {
           "$ref": "#/$defs/session:approval.resolved"
         }
@@ -701,6 +702,7 @@
         }
       },
       "question.resolved": {
+        "description": "`by` / `bySessionId`: as for approval.resolved.",
         "data": {
           "$ref": "#/$defs/session:question.resolved"
         }
@@ -4957,6 +4959,10 @@
           "description": "Highest seq viewed on any device (spec §4); \"done, not yet seen\" = idle with lastSeq > seenThrough.",
           "type": "number"
         },
+        "parentAnswersApprovals": {
+          "description": "Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals.",
+          "type": "boolean"
+        },
         "createdAt": {
           "type": "string"
         },
@@ -7541,6 +7547,9 @@
         },
         "by": {
           "type": "string"
+        },
+        "bySessionId": {
+          "type": "string"
         }
       },
       "required": [
@@ -7747,6 +7756,12 @@
         },
         "cancelled": {
           "type": "boolean"
+        },
+        "by": {
+          "type": "string"
+        },
+        "bySessionId": {
+          "type": "string"
         }
       },
       "required": [

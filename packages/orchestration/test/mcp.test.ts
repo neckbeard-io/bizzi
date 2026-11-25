@@ -104,7 +104,7 @@ test('bizzi-agents MCP: Claude asks Codex to review in a worktree, waits, reads 
   const { session: parent, workspace, client } = await parentWithClient(t, h, { permissionMode: 'acceptEdits' });
 
   const tools = (await client.listTools()).tools.map((x) => x.name).sort();
-  assert.deepEqual(tools, ['session_interrupt', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list']);
+  assert.deepEqual(tools, ['session_answer', 'session_interrupt', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list']);
 
   const started = await call(client, 'session_start', {
     agent: 'codex',
@@ -285,4 +285,40 @@ test('bizzi-agents: the fake agent calls the tools itself with its own token (/m
   const missing = await run('/mcp nope sessions_list');
   assert.equal(missing.status, 'error');
   assert.match(missing.error, /no such MCP server/);
+});
+
+test('bizzi-agents: session_answer with parentAnswersApprovals (spec §12.5)', async (t) => {
+  const h = await harness(t);
+  const { session: parent, workspace, client } = await parentWithClient(t, h, { permissionMode: 'acceptEdits' });
+  // Off: the parent sees no pending list and cannot answer.
+  const off = await call(client, 'session_start', { agent: 'claude', prompt: '/approve-edit a.ts', permissionMode: 'default' });
+  const offId = off.structuredContent?.sessionId as string;
+  const offWait = await call(client, 'session_wait', { sessionId: offId, until: 'waiting', timeout: 5 });
+  assert.equal(offWait.structuredContent?.pending, undefined);
+  const offApproval = h.node.sessions.pending(offId).approvals[0]!.approvalId;
+  const refused = await call(client, 'session_answer', { sessionId: offId, id: offApproval, decision: 'allow' });
+  assert.equal(refused.isError, true);
+  assert.match(textOf(refused), /conflict: .*without parentAnswersApprovals/);
+  await call(client, 'session_stop', { sessionId: offId });
+
+  await h.node.call('orchestration.settings.set', { workspaceId: workspace.id, settings: { parentAnswersApprovals: true } });
+  const started = await call(client, 'session_start', { agent: 'claude', prompt: '/approve-edit a.ts', permissionMode: 'default', worktree: 'answers/a' });
+  const helperId = started.structuredContent?.sessionId as string;
+  assert.match(textOf(started), /session_answer/);
+  const waited = await call(client, 'session_wait', { sessionId: helperId, until: 'done', timeout: 5 });
+  const pending = waited.structuredContent?.pending as { id: string; parentMay: string[] }[];
+  assert.equal(pending.length, 1);
+  assert.deepEqual(pending[0]!.parentMay, ['allow', 'deny']);
+  assert.match(textOf(waited), new RegExp(`- approval ${pending[0]!.id}: Run edit a.ts\\? — you may allow or deny`));
+  const answered = await call(client, 'session_answer', { sessionId: helperId, id: pending[0]!.id, decision: 'allow' });
+  assert.equal(answered.isError, undefined, textOf(answered));
+  assert.equal(answered.structuredContent?.answered, true);
+  const done = await call(client, 'session_wait', { sessionId: helperId, until: 'done', timeout: 5 });
+  assert.equal(done.structuredContent?.state, 'idle');
+  const resolved = h.node.bus.replay(`session:${helperId}`, 0).find((e) => e.type === 'approval.resolved');
+  assert.deepEqual(resolved?.data, { approvalId: pending[0]!.id, decision: 'allow', by: 'parent', bySessionId: parent.id });
+  const late = await call(client, 'session_answer', { sessionId: helperId, id: pending[0]!.id, decision: 'deny' });
+  assert.equal(late.isError, undefined);
+  assert.equal(late.structuredContent?.answered, false);
+  assert.match(textOf(late), /Already answered by parent session/);
 });

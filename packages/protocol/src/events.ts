@@ -101,14 +101,20 @@ export interface SessionEventMap {
   'file.changed': { path: string; change: 'created' | 'modified' | 'deleted'; diff?: string };
   'plan.updated': { items: PlanItem[] };
   'approval.requested': ApprovalRequest;
-  'approval.resolved': { approvalId: string; decision: ApprovalResolution; by?: string };
+  /**
+   * `by`: who resolved it. Adapters set it for resolutions that didn't come from approval.respond
+   * ('bizzi', 'agent', …); the core stamps 'user' (approval.respond) or 'parent' (the helper's parent
+   * session through the bizzi-agents tools, spec §12.5) with `bySessionId`.
+   */
+  'approval.resolved': { approvalId: string; decision: ApprovalResolution; by?: string; bySessionId?: string };
   /**
    * The agent asks the user something (Claude AskUserQuestion, Codex requestUserInput, MCP elicitation…).
    * `text`/`options` summarize the first question for simple clients; `questions` carries the full form.
    * Answer with `question.respond`.
    */
   'question.asked': { questionId: string; text: string; options?: string[]; questions?: QuestionItem[] };
-  'question.resolved': { questionId: string; answers?: QuestionAnswers; cancelled?: boolean };
+  /** `by` / `bySessionId`: as for approval.resolved. */
+  'question.resolved': { questionId: string; answers?: QuestionAnswers; cancelled?: boolean; by?: string; bySessionId?: string };
   'usage.updated': Usage;
   /** Current context-window occupancy (usage.md §1.2). Agents without data never emit it. */
   'context.updated': ContextUsage;

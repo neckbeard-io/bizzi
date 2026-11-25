@@ -85,6 +85,8 @@ export interface ApprovalItem extends ItemBase {
   status: 'pending' | 'resolved' | 'expired';
   decision?: ApprovalResolution;
   by?: string;
+  /** by 'parent': the parent session that answered (spec §12.5). */
+  bySessionId?: string;
 }
 
 export interface QuestionItem extends ItemBase {
@@ -97,6 +99,9 @@ export interface QuestionItem extends ItemBase {
   questions?: QuestionSpec[];
   status: 'pending' | 'answered' | 'cancelled';
   answers?: QuestionAnswers;
+  /** 'user' or 'parent' on helpers whose parent may answer (spec §12.5). */
+  by?: string;
+  bySessionId?: string;
 }
 
 export interface FileChangeItem extends ItemBase {
@@ -501,6 +506,7 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (prev && prev.kind === 'approval') {
         const next: ApprovalItem = { ...prev, status: 'resolved', decision: ev.data.decision };
         if (ev.data.by !== undefined) next.by = ev.data.by;
+        if (ev.data.bySessionId !== undefined) next.bySessionId = ev.data.bySessionId;
         d.put(next);
         if (prev.request.toolId) {
           const tool = d.get(`tool:${prev.request.toolId}`);
@@ -531,6 +537,8 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (prev && prev.kind === 'question') {
         const next: QuestionItem = { ...prev, status: ev.data.cancelled ? 'cancelled' : 'answered' };
         if (ev.data.answers !== undefined) next.answers = ev.data.answers;
+        if (ev.data.by !== undefined) next.by = ev.data.by;
+        if (ev.data.bySessionId !== undefined) next.bySessionId = ev.data.bySessionId;
         d.put(next);
       }
       tl.pendingQuestions = without(tl.pendingQuestions, ev.data.questionId);

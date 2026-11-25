@@ -4,16 +4,23 @@
 // The MCP transport lives in @bizzi/orchestration; everything that decides what a helper may do is here
 // so it applies however the request arrives.
 
+import { existsSync, realpathSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import {
   BizziError,
   DEFAULT_ORCHESTRATION_SETTINGS,
   GLOBAL_CHANNEL,
   sessionChannel,
   type AgentKind,
+  type ApprovalDecisionKind,
+  type ApprovalKind,
+  type ApprovalRequest,
   type ChannelEvent,
   type InputBlock,
   type Logger,
   type OrchestrationSettings,
+  type QuestionAnswers,
+  type QuestionItem,
   type SessionBudget,
   type SessionInfo,
   type SessionMode,
@@ -247,7 +254,58 @@ export interface WaitResult {
   /** The `until` condition was met (false: timed out). */
   reached: boolean;
   reason: string;
+  /** With parentAnswersApprovals: what the helper waits on and what the parent may answer (session_answer). */
+  pending?: PendingItem[];
 }
+
+// ---- parent answers approvals (spec §12.5)
+
+/** A pending approval or question of a helper, as its parent sees it. */
+export interface PendingItem {
+  type: 'approval' | 'question';
+  /** approvalId / questionId: pass to session_answer. */
+  id: string;
+  kind?: ApprovalKind;
+  /** Approval title, or the question's text. */
+  title: string;
+  description?: string;
+  /** Approvals: the tool input as JSON (truncated). */
+  input?: string;
+  options?: string[];
+  questions?: QuestionItem[];
+  /** What the parent may do: approvals 'allow' / 'deny'; questions 'answer' / 'cancel'. */
+  parentMay: string[];
+  /** Why the parent may not allow it (allowing stays with the user). */
+  note?: string;
+}
+
+export interface AnswerRequest {
+  /** An approvalId or questionId from PendingItem.id. */
+  id: string;
+  /** Approvals: allow or deny (allow_always and edited input are the user's). */
+  decision?: ApprovalDecisionKind;
+  message?: string;
+  editedInput?: unknown;
+  /** Questions: answers keyed by question id, or cancel. */
+  answers?: QuestionAnswers;
+  cancel?: boolean;
+}
+
+export interface AnswerResult {
+  sessionId: string;
+  id: string;
+  answered: boolean;
+  /** Set when someone else (usually the user) answered first: how and by whom. */
+  alreadyAnswered?: { outcome: string; by?: string; bySessionId?: string };
+  message: string;
+}
+
+/** The parent's own level needed to allow each approval kind (PERMISSION_LEVELS scale). */
+const ALLOW_LEVEL: Record<ApprovalKind, number> = { read: 0, edit: 2, write: 2, plan: 2, shell: 3, mcp: 3, web: 3, other: 3 };
+const LEVEL_NEEDS = ['may read', 'may act after asking', 'edits without asking', 'runs unrestricted'];
+const PATH_KEYS = new Set(['file_path', 'filePath', 'filepath', 'path', 'notebook_path', 'notebookPath', 'cwd', 'grantRoot', 'directory', 'dir']);
+const PATH_LIST_KEYS = new Set(['paths', 'files', 'resources']);
+const MAX_INPUT_CHARS = 2000;
 
 export interface ReadOptions {
   /** Only events after this seq (the `cursor` of an earlier read). Default 0. */
@@ -278,7 +336,7 @@ export interface ReadResult {
   finalMessage?: string;
   changedFiles: ChangedFile[];
   tools: { total: number; byKind: Record<string, number>; failed: number; denied: number };
-  waitingOn?: { approvals: string[]; questions: string[]; budget?: string };
+  waitingOn?: { approvals: string[]; questions: string[]; budget?: string; items?: PendingItem[] };
   usage: Spent;
   /** detail 'full': the transcript in order (oldest entries dropped first to fit). */
   transcript?: string[];
@@ -320,6 +378,8 @@ export class Orchestrator {
   readonly #queue: Queued[] = [];
   #pumping = false;
   readonly #off: () => void;
+  /** Items session_wait already reported, per helper: `done` doesn't return early for them twice. */
+  readonly #reported = new Map<string, Set<string>>();
 
   constructor(deps: OrchestratorDeps) {
     this.#d = deps;
@@ -327,12 +387,15 @@ export class Orchestrator {
     this.#log = deps.logger.child({ component: 'orchestration' });
     this.#off = deps.bus.on(GLOBAL_CHANNEL, (ev) => {
       if (this.#queue.length > 0 && (ev.type === 'session.updated' || ev.type === 'session.removed')) setImmediate(() => this.#pump());
+      if (ev.type === 'session.removed') this.#reported.delete(ev.data.sessionId);
+      else if (ev.type === 'session.updated' && TERMINAL.includes(ev.data.session.status)) this.#reported.delete(ev.data.session.id);
     });
   }
 
   close(): void {
     this.#off();
     this.#queue.length = 0;
+    this.#reported.clear();
   }
 
   /** Helpers started by `parentId`. */
@@ -408,11 +471,13 @@ export class Orchestrator {
     if (req.effort) params.effort = req.effort;
     params.title = req.title?.trim() || titleFrom(req.prompt);
     if (req.budget) params.budget = req.budget;
+    if (settings.parentAnswersApprovals) notes.push('you may answer some of its approvals and questions with session_answer; the user can still answer first');
     const session = await sessions.create(params, {
       spawnedBy: parentId,
       scope,
       depth,
       ...(queued ? { queued: true, queuedReason: `queued: ${limit}` } : {}),
+      ...(settings.parentAnswersApprovals ? { parentAnswersApprovals: true } : {}),
     });
     if (queued) {
       this.#queue.push({ sessionId: session.id, parentId, prompt: req.prompt });
@@ -450,7 +515,11 @@ export class Orchestrator {
     const ms = Math.max(0, Math.min(timeoutMs, MAX_WAIT_MS));
     const check = (): WaitResult | undefined => {
       if (!this.#d.sessions.has(helperId)) return { sessionId: helperId, state: 'ended', reached: true, reason: 'the helper was deleted' };
-      return this.#reached(helperId, until) ? this.#waitResult(helperId, true) : undefined;
+      const items = this.pendingFor(parentId, helperId);
+      // `done` also returns for something new the parent may answer, so it can unblock its helper.
+      const fresh = items?.some((i) => (i.parentMay.includes('allow') || i.parentMay.includes('answer')) && !this.#reported.get(helperId)?.has(i.id));
+      if (!this.#reached(helperId, until) && !(until === 'done' && fresh)) return undefined;
+      return this.#withPending(this.#waitResult(helperId, true, undefined, undefined, items), items);
     };
     const now = check();
     if (now) return now;
@@ -478,7 +547,7 @@ export class Orchestrator {
       const offSession = this.#d.bus.on(sessionChannel(helperId), recheck);
       const timer = setTimeout(() => {
         const r = check();
-        finish(r ?? this.#waitResult(helperId, false, ms));
+        finish(r ?? this.#withPending(this.#waitResult(helperId, false, ms), this.pendingFor(parentId, helperId)));
       }, ms);
       const onAbort = () => finish(this.#d.sessions.has(helperId) ? this.#waitResult(helperId, false, ms, 'the wait was cancelled') : { sessionId: helperId, state: 'ended', reached: true, reason: 'the helper was deleted' });
       signal?.addEventListener('abort', onAbort, { once: true });
@@ -549,10 +618,12 @@ export class Orchestrator {
     }
     out.changedFiles = [...files].map(([path, change]) => ({ path, change, diffRef: path }));
     if (pending.approvals.length || pending.questions.length || pending.budget) {
+      const items = this.pendingFor(parentId, helperId);
       out.waitingOn = {
         approvals: pending.approvals.map((a) => a.title || a.kind),
         questions: pending.questions.map((q) => q.text),
         ...(pending.budget ? { budget: pending.budget } : {}),
+        ...(items?.length ? { items } : {}),
       };
     }
 
@@ -597,6 +668,140 @@ export class Orchestrator {
       out.truncated = true;
     }
     return out;
+  }
+
+  // ---- parent answers approvals (spec §12.5) ----------------------------------------------------------
+
+  /**
+   * The helper's pending approvals and questions with what the parent may do about each, or undefined
+   * when the parent may not answer for this helper at all (the default: they go to the user).
+   */
+  pendingFor(parentId: string, helperId: string): PendingItem[] | undefined {
+    const helper = this.assertHelper(parentId, helperId);
+    const parent = this.#d.sessions.get(parentId).session;
+    if (this.#gate(parent, helper)) return undefined;
+    const pending = this.#d.sessions.pending(helperId);
+    const items: PendingItem[] = [];
+    for (const a of pending.approvals) {
+      const allow = this.#mayAllow(parent, helper, a);
+      const item: PendingItem = { type: 'approval', id: a.approvalId, kind: a.kind, title: a.title || a.kind, parentMay: allow.ok ? ['allow', 'deny'] : ['deny'] };
+      if (a.description) item.description = a.description;
+      if (a.input !== undefined) item.input = truncate(safeJson(a.input), MAX_INPUT_CHARS).text;
+      if (!allow.ok) item.note = allow.why;
+      items.push(item);
+    }
+    for (const q of pending.questions) {
+      const item: PendingItem = { type: 'question', id: q.questionId, title: q.text, parentMay: ['answer', 'cancel'] };
+      if (q.options) item.options = q.options;
+      if (q.questions) item.questions = q.questions;
+      items.push(item);
+    }
+    return items;
+  }
+
+  /**
+   * Answer one of the helper's approvals or questions as its parent (the spec §12.2 opt-in). The user
+   * can still answer first; then this returns `answered: false` with `alreadyAnswered` instead of
+   * failing. What the parent may never decide (allow_always, edited input, an allow outside the
+   * helper's workspace, beyond the parent's own permission level, or while the helper is over budget)
+   * stays with the user and fails with `conflict`.
+   */
+  async answer(parentId: string, helperId: string, req: AnswerRequest): Promise<AnswerResult> {
+    const helper = this.assertHelper(parentId, helperId);
+    const parent = this.#d.sessions.get(parentId).session;
+    if (!req || typeof req.id !== 'string' || !req.id) throw new BizziError('bad_request', 'id (an approvalId or questionId) is required');
+    const gate = this.#gate(parent, helper);
+    if (gate) throw new BizziError('conflict', gate, { goesToUser: true });
+    const sessions = this.#d.sessions;
+    const pending = sessions.pending(helperId);
+    const approval = pending.approvals.find((a) => a.approvalId === req.id);
+    const question = approval ? undefined : pending.questions.find((q) => q.questionId === req.id);
+    const responder = { by: 'parent' as const, sessionId: parentId };
+    try {
+      if (approval) {
+        const decision = req.decision;
+        if (decision === 'allow_always') {
+          throw new BizziError('conflict', 'allow_always saves a rule beyond this helper; only the user can choose it. Use allow or deny.', { goesToUser: true });
+        }
+        if (decision !== 'allow' && decision !== 'deny') throw new BizziError('bad_request', "decision must be 'allow' or 'deny' for an approval");
+        if (req.editedInput !== undefined) throw new BizziError('conflict', "only the user can edit an approval's input", { goesToUser: true });
+        if (req.answers !== undefined || req.cancel !== undefined) throw new BizziError('bad_request', `${req.id} is an approval: pass decision, not answers or cancel`);
+        if (decision === 'allow') {
+          const allow = this.#mayAllow(parent, helper, approval);
+          if (!allow.ok) throw new BizziError('conflict', `${allow.why}; allowing it stays with the user (you may deny it)`, { goesToUser: true });
+        }
+        const params: Parameters<Sessions['respondApproval']>[0] = { sessionId: helperId, approvalId: approval.approvalId, decision };
+        if (req.message !== undefined) params.message = req.message;
+        await sessions.respondApproval(params, responder);
+        this.#log.log('info', 'parent answered a helper approval', { parentId, sessionId: helperId, approvalId: approval.approvalId, decision });
+        return { sessionId: helperId, id: req.id, answered: true, message: `${decision === 'allow' ? 'Allowed' : 'Denied'}: ${oneLine(approval.title || approval.kind)}` };
+      }
+      if (question) {
+        if (req.decision !== undefined) throw new BizziError('bad_request', `${req.id} is a question: pass answers or cancel, not decision`);
+        if (req.cancel !== true && req.answers === undefined) throw new BizziError('bad_request', 'answers or cancel is required');
+        const params: Parameters<Sessions['respondQuestion']>[0] = { sessionId: helperId, questionId: question.questionId };
+        if (req.cancel === true) params.cancel = true;
+        else params.answers = req.answers!;
+        await sessions.respondQuestion(params, responder);
+        this.#log.log('info', 'parent answered a helper question', { parentId, sessionId: helperId, questionId: question.questionId, cancel: req.cancel === true });
+        return { sessionId: helperId, id: req.id, answered: true, message: req.cancel === true ? 'Declined the question.' : 'Answered.' };
+      }
+      const r = sessions.resolution(helperId, req.id);
+      if (r) return alreadyAnswered(helperId, req.id, r);
+      throw new BizziError('not_found', `${helper.id} has no pending approval or question ${req.id}`);
+    } catch (err) {
+      const data = err instanceof BizziError ? (err.data as { alreadyAnswered?: boolean; outcome?: string; by?: string; bySessionId?: string } | undefined) : undefined;
+      if (!data?.alreadyAnswered) throw err;
+      const r: { outcome: string; by?: string; bySessionId?: string } = { outcome: data.outcome ?? 'answered' };
+      if (data.by) r.by = data.by;
+      if (data.bySessionId) r.bySessionId = data.bySessionId;
+      return alreadyAnswered(helperId, req.id, r);
+    }
+  }
+
+  /** Why the parent may not answer for this helper at all, or undefined when it may (within #mayAllow). */
+  #gate(parent: SessionInfo, helper: SessionInfo): string | undefined {
+    if (!helper.parentAnswersApprovals) return 'this helper was started without parentAnswersApprovals; the user answers its approvals and questions';
+    if (!this.settings.effective(parent.workspaceId).parentAnswersApprovals) return 'parentAnswersApprovals is off for this workspace now; the user answers';
+    if (TERMINAL.includes(parent.status)) return 'the calling session has ended';
+    return undefined;
+  }
+
+  /**
+   * Whether the parent may allow an approval on the user's behalf: only what its own permission mode
+   * does without asking, only inside the helper's workspace, and only while the helper is within
+   * budget. Deny is always the parent's to choose once it may answer at all.
+   */
+  #mayAllow(parent: SessionInfo, helper: SessionInfo, a: ApprovalRequest): { ok: true } | { ok: false; why: string } {
+    const over = this.#d.sessions.overBudget(helper.id);
+    if (over) return { ok: false, why: `the helper is over its budget (${over})` };
+    const need = ALLOW_LEVEL[a.kind] ?? 3;
+    const level = permissionLevel(parent.agent, parent.permissionMode) ?? 1;
+    if (level < need) {
+      return { ok: false, why: `allowing a ${a.kind} approval needs a parent that ${LEVEL_NEEDS[need]} itself, and yours (${parent.permissionMode ?? 'default'}) doesn't` };
+    }
+    let root: string;
+    try {
+      root = this.#d.workspaces.get(helper.workspaceId).path;
+    } catch {
+      return { ok: false, why: "the helper's workspace is gone" };
+    }
+    const paths = approvalPaths(a.input);
+    if (paths.length === 0 && (a.kind === 'read' || a.kind === 'edit' || a.kind === 'write')) {
+      return { ok: false, why: 'bizzi cannot tell which files it touches' };
+    }
+    const outside = paths.find((p) => !isInside(root, p));
+    if (outside !== undefined) return { ok: false, why: `${outside} is outside the helper's workspace (${root})` };
+    return { ok: true };
+  }
+
+  /** Attach pending items and remember them as reported to the parent. */
+  #withPending(r: WaitResult, items: PendingItem[] | undefined): WaitResult {
+    if (!items?.length) return r;
+    let seen = this.#reported.get(r.sessionId);
+    if (!seen) this.#reported.set(r.sessionId, (seen = new Set()));
+    for (const i of items) seen.add(i.id);
+    return { ...r, pending: items };
   }
 
   // --- internals -------------------------------------------------------------------------------------
@@ -679,17 +884,25 @@ export class Orchestrator {
     }
   }
 
-  #waitResult(id: string, reached: boolean, waitedMs?: number, why?: string): WaitResult {
+  #waitResult(id: string, reached: boolean, waitedMs?: number, why?: string, items?: PendingItem[]): WaitResult {
     const s = this.#d.sessions.get(id).session;
     if (!reached) {
       return { sessionId: id, state: s.status, reached, reason: why ?? `still ${s.status} after ${Math.round((waitedMs ?? 0) / 1000)}s; wait again or read progress` };
     }
-    return { sessionId: id, state: s.status, reached, reason: this.#reason(id, s) };
+    return { sessionId: id, state: s.status, reached, reason: this.#reason(id, s, items) };
   }
 
-  #reason(id: string, s: SessionInfo): string {
+  #reason(id: string, s: SessionInfo, items?: PendingItem[]): string {
     const pending = this.#d.sessions.pending(id);
     if (pending.budget) return pending.budget;
+    const first = items?.[0];
+    if (first) {
+      if (first.parentMay.includes('allow') || first.parentMay.includes('answer')) {
+        const what = first.type === 'approval' ? 'approval' : 'an answer';
+        return `waiting for ${what} (${first.id}); you may answer it with session_answer, or leave it to the user: ${oneLine(first.title)}`;
+      }
+      return `waiting for the user to approve: ${oneLine(first.title)} (you may only deny it: ${first.note ?? 'not yours to allow'})`;
+    }
     if (pending.approvals.length) return `waiting for the user to approve: ${oneLine(pending.approvals[0]!.title || pending.approvals[0]!.kind)}`;
     if (pending.questions.length) return `waiting for the user to answer: ${oneLine(pending.questions[0]!.text)}`;
     const recent = this.#recent(id);
@@ -717,6 +930,76 @@ export class Orchestrator {
       }
     }
     return out;
+  }
+}
+
+function alreadyAnswered(sessionId: string, id: string, r: { outcome: string; by?: string; bySessionId?: string }): AnswerResult {
+  const who = r.by === 'user' ? 'the user' : r.by === 'parent' ? (r.bySessionId ? `parent session ${r.bySessionId}` : 'the parent') : r.by;
+  const message =
+    r.outcome === 'in_flight'
+      ? `Already being answered by ${who ?? 'someone else'}.`
+      : r.outcome === 'cancelled' && !who
+        ? 'Already resolved: it was cancelled.'
+        : `Already answered${who ? ` by ${who}` : ''}: ${r.outcome}.`;
+  return { sessionId, id, answered: false, alreadyAnswered: { ...r }, message };
+}
+
+function safeJson(v: unknown): string {
+  try {
+    return typeof v === 'string' ? v : (JSON.stringify(v) ?? String(v));
+  } catch {
+    return String(v);
+  }
+}
+
+/**
+ * Every path-like value in an approval's tool input (Claude file_path / path / notebook_path, Codex
+ * changes[].path / fileChanges keys / cwd / grantRoot, OpenCode filePath / resources). Over-collects on
+ * purpose: an extra path can only make the parent's allow stricter.
+ */
+export function approvalPaths(input: unknown): string[] {
+  const out: string[] = [];
+  const walk = (v: unknown, depth: number) => {
+    if (depth > 5 || v === null || typeof v !== 'object') return;
+    if (Array.isArray(v)) {
+      for (const x of v) walk(x, depth + 1);
+      return;
+    }
+    for (const [k, x] of Object.entries(v as Record<string, unknown>)) {
+      if (PATH_KEYS.has(k) && typeof x === 'string' && x) out.push(x);
+      else if (PATH_LIST_KEYS.has(k) && Array.isArray(x)) {
+        for (const y of x) if (typeof y === 'string' && y) out.push(y);
+      } else if (k === 'fileChanges' && x && typeof x === 'object' && !Array.isArray(x)) out.push(...Object.keys(x));
+      walk(x, depth + 1);
+    }
+  };
+  walk(input, 0);
+  return [...new Set(out)];
+}
+
+/** `p` (relative to `root`; symlinks resolved as far as the path exists) is `root` or below it. `~` paths never are. */
+export function isInside(root: string, p: string): boolean {
+  if (p.startsWith('~')) return false;
+  const rootReal = realish(root);
+  const target = realish(isAbsolute(p) ? p : resolve(rootReal, p));
+  const rel = relative(rootReal, target);
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+}
+
+/** realpath of the longest existing prefix, plus the rest. */
+function realish(p: string): string {
+  let cur = resolve(p);
+  const rest: string[] = [];
+  while (!existsSync(cur)) {
+    const up = dirname(cur);
+    if (up === cur) return resolve(p);
+    rest.unshift(basename(cur));
+    cur = up;
+  }
+  try {
+    return join(realpathSync(cur), ...rest);
+  } catch {
+    return resolve(p);
   }
 }
 

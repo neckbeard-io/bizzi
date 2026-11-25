@@ -3,6 +3,7 @@
 // Default script, driven by the first text block of the input:
 //   /tool <command>     a shell tool call that runs without approval
 //   /approve <command>  a shell tool call that asks for approval first
+//   /approve-edit <path>  an edit of <path> (input { file_path }) that asks for approval first
 //   /ask <question>     asks a question (question.asked) and echoes the answer
 //   /slow <ms>          stream text for roughly <ms> milliseconds
 //   /fail <message>     the turn ends with stopReason 'error'
@@ -482,6 +483,8 @@ export const defaultScript: FakeScript = (input) => {
       return [{ type: 'tool', title: arg || 'true' }, { type: 'text', text: 'done' }];
     case '/approve':
       return [{ type: 'text', text: 'I need to run a command.' }, { type: 'tool', title: arg || 'true', approval: true }, { type: 'text', text: 'done' }];
+    case '/approve-edit':
+      return [{ type: 'tool', title: `edit ${arg}`, kind: 'edit', name: 'Edit', input: { file_path: arg }, approval: true }, { type: 'text', text: 'done' }];
     case '/ask':
       return [{ type: 'question', text: arg || 'Continue?' }, { type: 'text', text: 'done' }];
     case '/slow': {

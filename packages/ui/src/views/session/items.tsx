@@ -288,6 +288,7 @@ export function ApprovalCard(props: { sessionId: string; item: ApprovalItem; com
         {!pending ? (
           <Badge tone={a.status === 'expired' || a.decision === 'cancelled' ? 'neutral' : a.decision === 'deny' ? 'err' : 'ok'} title={a.decision === 'cancelled' ? 'The turn ended or the node restarted before anyone decided' : undefined}>
             {a.status === 'expired' ? 'expired' : a.decision ? DECISION_LABEL[a.decision] : 'resolved'}
+            {a.by === 'parent' ? ' by parent' : ''}
           </Badge>
         ) : (
           <Badge tone="warn">{req.kind}</Badge>
@@ -379,7 +380,7 @@ export function QuestionCard(props: { sessionId: string; item: QuestionItem }): 
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <Icon name="question" size={16} className="shrink-0 text-info" />
         <span className="min-w-0 flex-1 text-sm font-medium">{specs.length > 1 ? `${specs.length} questions from the agent` : 'The agent asks'}</span>
-        {pending ? <Badge tone="info">waiting for you</Badge> : q.status === 'cancelled' ? <Badge>declined</Badge> : <Badge tone="ok">answered</Badge>}
+        {pending ? <Badge tone="info">waiting for you</Badge> : q.status === 'cancelled' ? <Badge>declined{q.by === 'parent' ? ' by parent' : ''}</Badge> : <Badge tone="ok">answered{q.by === 'parent' ? ' by parent' : ''}</Badge>}
       </div>
       <div className="flex flex-col gap-3 px-3 py-2.5">
         {specs.map((spec) => (

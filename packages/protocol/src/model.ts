@@ -151,6 +151,9 @@ export interface SessionInfo {
   group?: string;
   /** Highest seq viewed on any device (spec §4); "done, not yet seen" = idle with lastSeq > seenThrough. */
   seenThrough?: number;
+  // ---- parent answers approvals (spec §12.5)
+  /** Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals. */
+  parentAnswersApprovals?: boolean;
   createdAt: string;
   updatedAt: string;
   lastSeq: number;

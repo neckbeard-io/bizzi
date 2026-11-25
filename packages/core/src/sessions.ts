@@ -74,7 +74,22 @@ export interface HelperOptions {
   /** Register the session but don't start it until `startQueued` (concurrency limit, spec §12.2). */
   queued?: boolean;
   queuedReason?: string;
+  /** The parent may answer some of this helper's approvals and questions (spec §12.5). */
+  parentAnswersApprovals?: boolean;
 }
+
+/** Who answers an approval or question: you (approval.respond / question.respond) or the helper's parent. */
+export type Responder = { by: 'user' } | { by: 'parent'; sessionId: string };
+
+/** How an approval or question was resolved, kept so a late second answer gets "already answered". */
+export interface Resolution {
+  /** allow / allow_always / deny / cancelled for approvals; answered / cancelled for questions. */
+  outcome: string;
+  by?: string;
+  bySessionId?: string;
+}
+
+const RESOLUTIONS_KEPT = 200;
 
 /**
  * Environment variables that mean an agent runs on a pay-per-token key (spec §12.3), or on a plan.
@@ -168,6 +183,10 @@ interface Runtime {
   answering: Set<string>;
   /** Approval / question ids the core cancelled this turn; a late adapter resolution is dropped. */
   cancelled: Set<string>;
+  /** Who is answering each approval / question in flight; stamped on its resolved event. */
+  responders: Map<string, Responder>;
+  /** Recently resolved approvals / questions (bounded), for a clear "already answered". */
+  resolutions: Map<string, Resolution>;
   /** True while #cancelPending runs: per-event status fallback is skipped (the caller settles). */
   settling: boolean;
   interruptTimer?: NodeJS.Timeout;
@@ -192,6 +211,8 @@ function newRuntime(info: SessionInfo, state: SessionState, adapter: AgentAdapte
     pendingQuestions: new Map(),
     answering: new Set(),
     cancelled: new Set(),
+    responders: new Map(),
+    resolutions: new Map(),
     settling: false,
     deleted: false,
   };
@@ -428,6 +449,7 @@ export class Sessions {
       info.spawnedBy = helper.spawnedBy;
       info.scope = helper.scope;
       info.depth = helper.depth;
+      if (helper.parentAnswersApprovals) info.parentAnswersApprovals = true;
     }
     const rt = newRuntime(info, {}, adapter);
     if (p.cols) rt.state.cols = p.cols;
@@ -706,10 +728,15 @@ export class Sessions {
     );
   }
 
-  async respondApproval(p: MethodParams<'approval.respond'>): Promise<void> {
+  /**
+   * Answer a pending approval. `responder` defaults to you; the helper's parent passes its own (the
+   * Orchestrator checks what it may answer). Whoever answers first wins; the other gets `not_found`
+   * (or `conflict` while the first answer is still being delivered) with `data.alreadyAnswered`.
+   */
+  async respondApproval(p: MethodParams<'approval.respond'>, responder: Responder = { by: 'user' }): Promise<void> {
     const rt = this.#get(p.sessionId);
     const req = rt.pendingApprovals.get(p.approvalId);
-    if (!req) throw new BizziError('not_found', `no pending approval ${p.approvalId}`);
+    if (!req) throw this.#notPending(rt, 'approval', p.approvalId);
     if (!DECISIONS.includes(p.decision)) throw new BizziError('bad_request', `invalid decision ${String(p.decision)}`);
     if (req.options.length > 0 && !req.options.includes(p.decision)) {
       throw new BizziError('bad_request', `decision ${p.decision} is not offered (${req.options.join(', ')})`);
@@ -718,26 +745,42 @@ export class Sessions {
       throw new BizziError('bad_request', 'this approval does not accept edited input');
     }
     if (p.message !== undefined && typeof p.message !== 'string') throw new BizziError('bad_request', 'message must be a string');
-    if (rt.responding.has(p.approvalId)) throw new BizziError('conflict', 'approval is already being answered');
+    if (rt.responding.has(p.approvalId)) throw inFlight(rt, 'approval', p.approvalId);
     if (!rt.handle) throw new BizziError('conflict', 'the agent is not running');
     const decision: ApprovalDecision = { decision: p.decision };
     if (p.message !== undefined) decision.message = p.message;
     if (p.editedInput !== undefined) decision.editedInput = p.editedInput;
     rt.responding.add(p.approvalId);
+    rt.responders.set(p.approvalId, responder);
     try {
       await rt.handle.respondApproval(p.approvalId, decision);
     } catch (err) {
       rt.responding.delete(p.approvalId);
+      rt.responders.delete(p.approvalId);
       throw toBizziError(err, 'internal');
     }
   }
 
+  /** How a recently resolved approval or question ended, if it is still remembered. */
+  resolution(id: string, itemId: string): Resolution | undefined {
+    return this.#get(id).resolutions.get(itemId);
+  }
+
+  /** not_found; with `data.alreadyAnswered` and who answered when it was answered recently. */
+  #notPending(rt: Runtime, what: 'approval' | 'question', itemId: string): BizziError {
+    const r = rt.resolutions.get(itemId);
+    if (!r) return new BizziError('not_found', `no pending ${what} ${itemId}`);
+    const who = r.by === 'parent' ? `the parent session${r.bySessionId ? ` ${r.bySessionId}` : ''}` : 'the user';
+    // Still not_found (nothing pending to answer), with who was first.
+    return new BizziError('not_found', `${what} ${itemId} was already answered by ${who} (${r.outcome})`, { alreadyAnswered: true, ...r });
+  }
+
   /** Answer (or, with `cancel`, decline) a pending `question.asked`. */
-  async respondQuestion(p: MethodParams<'question.respond'>): Promise<void> {
+  async respondQuestion(p: MethodParams<'question.respond'>, responder: Responder = { by: 'user' }): Promise<void> {
     const rt = this.#get(p.sessionId);
     if (typeof p.questionId !== 'string') throw new BizziError('bad_request', 'questionId must be a string');
     const q = rt.pendingQuestions.get(p.questionId);
-    if (!q) throw new BizziError('not_found', `no pending question ${p.questionId}`);
+    if (!q) throw this.#notPending(rt, 'question', p.questionId);
     if (!rt.handle) throw new BizziError('conflict', 'the agent is not running');
     if (!rt.handle.respondQuestion) throw new BizziError('unsupported', 'this agent cannot answer questions');
     let answers: QuestionAnswers | undefined;
@@ -745,12 +788,14 @@ export class Sessions {
       if (p.answers === undefined) throw new BizziError('bad_request', 'answers or cancel is required');
       answers = validateAnswers(p.answers, q);
     }
-    if (rt.answering.has(p.questionId)) throw new BizziError('conflict', 'question is already being answered');
+    if (rt.answering.has(p.questionId)) throw inFlight(rt, 'question', p.questionId);
     rt.answering.add(p.questionId);
+    rt.responders.set(p.questionId, responder);
     try {
       await rt.handle.respondQuestion(p.questionId, answers);
     } catch (err) {
       rt.answering.delete(p.questionId);
+      rt.responders.delete(p.questionId);
       throw toBizziError(err, 'internal');
     }
   }
@@ -1231,9 +1276,36 @@ export class Sessions {
     this.#append(rt, body);
   }
 
+  /**
+   * On helpers the parent may answer for (spec §12.5), stamp who answered (the responder recorded by
+   * respondApproval / respondQuestion) unless the adapter already said, and remember it so a late second
+   * answer learns who was first. Other sessions only have you answering; their events stay as they were.
+   */
+  #stampResolution(rt: Runtime, body: Extract<SessionEventBody, { type: 'approval.resolved' | 'question.resolved' }>): SessionEventBody {
+    const itemId = body.type === 'approval.resolved' ? body.data.approvalId : body.data.questionId;
+    const pending = body.type === 'approval.resolved' ? rt.pendingApprovals.has(itemId) : rt.pendingQuestions.has(itemId);
+    if (!pending) return body;
+    const responder = rt.responders.get(itemId);
+    rt.responders.delete(itemId);
+    // A core cancellation (turn ended, node restart) isn't anyone's answer.
+    const coreCancel = body.type === 'approval.resolved' && body.data.decision === 'cancelled';
+    if (!responder || coreCancel || body.data.by !== undefined) return body;
+    if (responder.by === 'user' && !rt.info.parentAnswersApprovals) return body;
+    const stamp = responder.by === 'parent' ? { by: 'parent', bySessionId: responder.sessionId } : { by: 'user' };
+    const out: SessionEventBody =
+      body.type === 'approval.resolved' ? { type: body.type, data: { ...body.data, ...stamp } } : { type: body.type, data: { ...body.data, ...stamp } };
+    const outcome = body.type === 'approval.resolved' ? body.data.decision : body.data.cancelled ? 'cancelled' : 'answered';
+    const r: Resolution = { outcome, by: stamp.by };
+    if (responder.by === 'parent') r.bySessionId = responder.sessionId;
+    rt.resolutions.set(itemId, r);
+    if (rt.resolutions.size > RESOLUTIONS_KEPT) rt.resolutions.delete(rt.resolutions.keys().next().value!);
+    return out;
+  }
+
   /** Append to the session channel and update derived state (status, info, pending approvals/questions). */
   #append(rt: Runtime, body: SessionEventBody): void {
     if (rt.deleted) return;
+    if (body.type === 'approval.resolved' || body.type === 'question.resolved') body = this.#stampResolution(rt, body);
     if (body.type === 'turn.completed') {
       // Exactly one turn.completed per turnId: duplicates and unknown turns are dropped.
       if (body.data.turnId !== rt.state.currentTurnId) return;
@@ -1263,6 +1335,7 @@ export class Sessions {
       case 'turn.completed':
         rt.state.currentTurnId = undefined;
         rt.state.spent = addTurn(rt.state.spent ?? zeroSpent(), body.data.usage as Usage | undefined, info.billing);
+        rt.responders.clear();
         rt.pendingApprovals.clear();
         rt.responding.clear();
         rt.pendingQuestions.clear();
@@ -1488,6 +1561,18 @@ export function validateCommand(command: unknown): asserts command is string[] {
     throw new BizziError('bad_request', 'command must be a non-empty array of strings');
   }
   if (command[0] === '') throw new BizziError('bad_request', 'command[0] must be a program name');
+}
+
+/** A second answer while the first is still being delivered to the agent. */
+function inFlight(rt: Runtime, what: 'approval' | 'question', itemId: string): BizziError {
+  const r = rt.responders.get(itemId);
+  const who = r?.by === 'parent' ? `the parent session ${r.sessionId}` : r?.by === 'user' ? 'the user' : 'someone else';
+  return new BizziError('conflict', `${what} ${itemId} is already being answered by ${who}`, {
+    alreadyAnswered: true,
+    outcome: 'in_flight',
+    ...(r ? { by: r.by } : {}),
+    ...(r?.by === 'parent' ? { bySessionId: r.sessionId } : {}),
+  });
 }
 
 function validateAnswers(answers: unknown, q: QuestionAsked): QuestionAnswers {

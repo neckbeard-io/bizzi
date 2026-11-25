@@ -3,8 +3,9 @@
 // Covers worktree.create/remove on a git workspace, a shell session with session.markSeen seen by a
 // second device, a command widget dropped at runtime (widget.updated via the hub) that feeds usage.list
 // through billing.account, hub-stored themes, orchestration settings, agents.list decorations, and the
-// bizzi-agents MCP endpoint called by a (fake) structured agent with its own session token, and the
-// workspace picker (fs.browse / fs.complete / fs.suggest).
+// bizzi-agents MCP endpoint called by a (fake) structured agent with its own session token, a parent
+// answering its helper's approvals (parentAnswersApprovals) while the user's late answer is refused, and
+// the workspace picker (fs.browse / fs.complete / fs.suggest).
 //
 //   node scripts/smoke-v12.ts            # or: npm run smoke:v12
 
@@ -52,6 +53,13 @@ function mcpResult(events: any[]): any {
   const done = events.find((e) => e.type === 'tool.completed');
   check(done, 'the fake agent called the MCP tool');
   check(done.data.status === 'ok', `MCP tool ok (${done.data.status}: ${done.data.error ?? done.data.output})`);
+  return JSON.parse(done.data.output);
+}
+
+/** Like mcpResult, but the tool may report an error (isError). */
+function mcpAny(events: any[]): any {
+  const done = events.find((e) => e.type === 'tool.completed');
+  check(done?.data.output, `the fake agent called the MCP tool (${JSON.stringify(done?.data).slice(0, 200)})`);
   return JSON.parse(done.data.output);
 }
 
@@ -256,6 +264,50 @@ try {
     return session.status === 'ended' || session.status === 'failed';
   }, 'child helper stopped with its parent');
   step('session.stop on the parent cascades to its child helper');
+
+  // ---- parentAnswersApprovals: the parent answers its helper's approval; the user sees it and loses the race
+  await a.call('orchestration.settings.set', { workspaceId: ws.id, settings: { parentAnswersApprovals: true } });
+  const { session: boss } = await a.call('session.create', { workspaceId: ws.id, agent: 'claude', permissionMode: 'acceptEdits' });
+  await a.call('subscribe', { ch: `session:${boss.id}`, since: 0 });
+  const editStart = mcpResult(
+    await turn(a, boss.id, '/mcp bizzi-agents session_start {"agent":"claude","prompt":"/approve-edit README.md","permissionMode":"default","title":"smoke editor"}'),
+  );
+  const editorId: string = editStart.structuredContent?.sessionId;
+  check(editorId && editStart.structuredContent?.notes?.some((n: string) => n.includes('session_answer')), `session_start notes the opt-in (${JSON.stringify(editStart.structuredContent)})`);
+  const editorCh = `session:${editorId}`;
+  const inboxSees = b.next((e) => e.ch === editorCh && e.type === 'approval.requested', 'device B sees the helper approval');
+  await b.call('subscribe', { ch: editorCh, since: 0 });
+  const askEv = await inboxSees;
+  const editWait = mcpResult(await turn(a, boss.id, `/mcp bizzi-agents session_wait {"sessionId":"${editorId}","until":"done","timeout":20}`));
+  const item = editWait.structuredContent?.pending?.[0];
+  check(item?.id === askEv.data.approvalId && item.parentMay.includes('allow'), `session_wait lists the approval for the parent (${JSON.stringify(editWait.structuredContent)})`);
+  const byParent = b.next((e) => e.ch === editorCh && e.type === 'approval.resolved', 'approval.resolved on device B');
+  const answered = mcpResult(await turn(a, boss.id, `/mcp bizzi-agents session_answer {"sessionId":"${editorId}","id":"${item.id}","decision":"allow"}`));
+  check(answered.structuredContent?.answered === true, `session_answer allowed (${JSON.stringify(answered.structuredContent)})`);
+  const resolvedEv = await byParent;
+  check(resolvedEv.data.by === 'parent' && resolvedEv.data.bySessionId === boss.id, `event log records the parent answered (${JSON.stringify(resolvedEv.data)})`);
+  let lateUser = '';
+  try {
+    await b.call('approval.respond', { sessionId: editorId, approvalId: item.id, decision: 'deny' });
+  } catch (err) {
+    lateUser = `${(err as any).code} ${(err as Error).message}`;
+  }
+  check(/^not_found .*already answered by the parent session/.test(lateUser), `the user's late answer says who was first (got ${lateUser || 'success'})`);
+  step(`parentAnswersApprovals: ${boss.id} allowed ${item.id} on ${editorId}; device B saw it and got "${lateUser.replace(/^\S+ /, '')}"`);
+
+  // Outside the helper's workspace the parent may only deny; the user answers first and the parent is told.
+  const outStart = mcpResult(await turn(a, boss.id, '/mcp bizzi-agents session_start {"agent":"claude","prompt":"/approve-edit /etc/hosts","permissionMode":"default"}'));
+  const outsideId: string = outStart.structuredContent?.sessionId;
+  const outWait = mcpResult(await turn(a, boss.id, `/mcp bizzi-agents session_wait {"sessionId":"${outsideId}","until":"waiting","timeout":20}`));
+  const outItem = outWait.structuredContent?.pending?.[0];
+  check(outItem && JSON.stringify(outItem.parentMay) === '["deny"]' && /outside/.test(outItem.note), `outside path: deny only (${JSON.stringify(outItem)})`);
+  const refusedAllow = mcpAny(await turn(a, boss.id, `/mcp bizzi-agents session_answer {"sessionId":"${outsideId}","id":"${outItem.id}","decision":"allow"}`));
+  check(refusedAllow.isError === true && /stays with the user/.test(JSON.stringify(refusedAllow)), `parent allow refused (${JSON.stringify(refusedAllow).slice(0, 200)})`);
+  await b.call('approval.respond', { sessionId: outsideId, approvalId: outItem.id, decision: 'allow' });
+  const tooLate = mcpResult(await turn(a, boss.id, `/mcp bizzi-agents session_answer {"sessionId":"${outsideId}","id":"${outItem.id}","decision":"deny"}`));
+  check(tooLate.structuredContent?.answered === false && tooLate.structuredContent?.alreadyAnswered?.by === 'user', `parent told the user was first (${JSON.stringify(tooLate.structuredContent)})`);
+  step(`outside the workspace: parent allow refused; the user allowed; parent told "${tooLate.structuredContent.message}"`);
+  await a.call('session.stop', { sessionId: boss.id });
 
   // ---- everything both devices sent and received matches docs/protocol.schema.json
   const schema = JSON.parse(readFileSync(new URL('../docs/protocol.schema.json', import.meta.url), 'utf8'));

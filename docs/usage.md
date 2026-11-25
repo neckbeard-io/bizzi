@@ -46,7 +46,7 @@ Helpers (spec §12.1) and fan-out create two context costs and, on metered or pl
 **Parent context.** What a helper returns lands in the parent's window.
 
 - `session_read` returns a structured summary by default (final message, changed files with diff refs, tool counts, stop reason), not the transcript, and takes `maxTokens` (default about 4k). The parent asks for more explicitly (`detail: "full"`, a specific file's diff).
-- `session_wait` returns only the state and a one-line reason.
+- `session_wait` returns only the state and a one-line reason, plus, when the parent may answer its helper's approvals (spec §12.5), the pending items (approval input truncated to about 2k characters).
 
 **Helper context.** Each helper starts fresh: its system prompt, tools and rules, plus the brief.
 
