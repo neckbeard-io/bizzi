@@ -35,6 +35,7 @@ import type {
   LoginMode,
   MachineInfo,
   MachineRole,
+  ModelOption,
   OrchestrationSettings,
   PipelineInfo,
   PipelineSpec,
@@ -124,6 +125,12 @@ export interface Methods {
     result: { machine: MachineInfo };
   };
   'agents.list': { params: MachineTarget & { refresh?: boolean }; result: { agents: AgentListing[] } };
+  /**
+   * The models an agent offers on this machine (from the agent itself where it can say; its
+   * capability's fixed list otherwise). Cached per agent version; `refresh` asks again. An empty list
+   * means the agent can't list them: clients fall back to a free-text model field.
+   */
+  'agents.models': { params: MachineTarget & { agent: AgentKind; refresh?: boolean }; result: { models: ModelOption[] } };
 
   'workspaces.list': { params: MachineTarget; result: { workspaces: WorkspaceInfo[] } };
   /** Adopt an existing directory, or create it when `create` is true. */

@@ -220,6 +220,15 @@ async function handle(m: Msg): Promise<void> {
           rateLimitUpsell: null,
         },
       });
+    case 'model/list': {
+      const row = (model: string, extra: Record<string, unknown>) => ({
+        id: model, model, displayName: model.toUpperCase(), description: `${model} model`, hidden: false, isDefault: false,
+        supportedReasoningEfforts: [{ reasoningEffort: 'low', description: '' }, { reasoningEffort: 'high', description: '' }], ...extra,
+      });
+      // Two pages, with a hidden model on the first.
+      if (!m.params?.cursor) return send({ id, result: { data: [row('gpt-a', { isDefault: true }), row('gpt-hidden', { hidden: true })], nextCursor: 'p2' } });
+      return send({ id, result: { data: [row('gpt-b', { supportedReasoningEfforts: [] })], nextCursor: null } });
+    }
     case 'config/read':
       if (!process.env.FAKE_COMPACT_LIMIT) return send({ id, error: { code: -32601, message: 'method not found: config/read' } });
       return send({ id, result: { config: { model_auto_compact_token_limit: Number(process.env.FAKE_COMPACT_LIMIT) }, origins: {}, layers: null } });

@@ -3,7 +3,18 @@
 // SQLite database.
 
 import { DatabaseSync } from 'node:sqlite';
-import { BizziError, ulid, type DensityPref, type ThemeFile, type UserPrefs } from '@bizzi/protocol';
+import {
+  AGENT_KINDS,
+  BizziError,
+  MAX_AGENT_PROFILES,
+  ulid,
+  type AgentKind,
+  type AgentProfile,
+  type DensityPref,
+  type SessionMode,
+  type ThemeFile,
+  type UserPrefs,
+} from '@bizzi/protocol';
 import type { NodeExtension } from './node.ts';
 import { asParams, optString, type Params } from './params.ts';
 
@@ -47,6 +58,54 @@ export function parseUserPrefsPatch(params: unknown): Partial<UserPrefs> {
     if (!DENSITIES.includes(r.density as DensityPref)) throw new BizziError('bad_request', `prefs.density must be one of ${DENSITIES.join(', ')}`);
     out.density = r.density as DensityPref;
   }
+  if (r.agentProfiles !== undefined) out.agentProfiles = parseAgentProfiles(r.agentProfiles);
+  if (r.preferredProfiles !== undefined) {
+    const pp = r.preferredProfiles;
+    if (pp === null || typeof pp !== 'object' || Array.isArray(pp)) throw new BizziError('bad_request', 'prefs.preferredProfiles must be an object');
+    const next: Record<string, string> = {};
+    for (const [agent, id] of Object.entries(pp as Record<string, unknown>)) {
+      if (!AGENT_KINDS.includes(agent as AgentKind)) continue;
+      if (typeof id !== 'string' || !PROFILE_ID_RE.test(id)) throw new BizziError('bad_request', `prefs.preferredProfiles.${agent} must be a profile id`);
+      next[agent as AgentKind] = id;
+    }
+    out.preferredProfiles = next;
+  }
+  return out;
+}
+
+const PROFILE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
+const MAX_PROFILE_NAME = 80;
+const MAX_PROFILE_FIELD = 200;
+const MODES: readonly SessionMode[] = ['structured', 'terminal'];
+
+/** Validate the whole `agentProfiles` list (it replaces the stored one). Unknown agents are dropped. */
+function parseAgentProfiles(raw: unknown): AgentProfile[] {
+  if (!Array.isArray(raw)) throw new BizziError('bad_request', 'prefs.agentProfiles must be an array');
+  if (raw.length > MAX_AGENT_PROFILES) throw new BizziError('bad_request', `at most ${MAX_AGENT_PROFILES} agent profiles`);
+  const out: AgentProfile[] = [];
+  const ids = new Set<string>();
+  for (const item of raw) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) throw new BizziError('bad_request', 'an agent profile must be an object');
+    const r = item as Record<string, unknown>;
+    if (!AGENT_KINDS.includes(r.agent as AgentKind)) continue;
+    if (typeof r.id !== 'string' || !PROFILE_ID_RE.test(r.id)) throw new BizziError('bad_request', 'agent profile id is invalid');
+    if (ids.has(r.id)) throw new BizziError('bad_request', `duplicate agent profile id ${r.id}`);
+    const name = typeof r.name === 'string' ? r.name.trim() : '';
+    if (!name || name.length > MAX_PROFILE_NAME) throw new BizziError('bad_request', `agent profile name must be 1-${MAX_PROFILE_NAME} characters`);
+    const p: AgentProfile = { id: r.id, agent: r.agent as AgentKind, name };
+    if (r.mode !== undefined) {
+      if (!MODES.includes(r.mode as SessionMode)) throw new BizziError('bad_request', `agent profile mode must be one of ${MODES.join(', ')}`);
+      p.mode = r.mode as SessionMode;
+    }
+    for (const key of ['model', 'permissionMode', 'effort'] as const) {
+      const v = r[key];
+      if (v === undefined || v === '') continue;
+      if (typeof v !== 'string' || v.length > MAX_PROFILE_FIELD) throw new BizziError('bad_request', `agent profile ${key} must be a string`);
+      p[key] = v.trim();
+    }
+    ids.add(p.id);
+    out.push(p);
+  }
   return out;
 }
 
@@ -55,6 +114,8 @@ export function mergeUserPrefs(current: UserPrefs, patch: Partial<UserPrefs>): U
   const next: UserPrefs = { ...current };
   if (patch.themeId !== undefined) next.themeId = patch.themeId;
   if (patch.density !== undefined) next.density = patch.density;
+  if (patch.agentProfiles !== undefined) next.agentProfiles = patch.agentProfiles.map((p) => ({ ...p }));
+  if (patch.preferredProfiles !== undefined) next.preferredProfiles = { ...patch.preferredProfiles };
   return next;
 }
 

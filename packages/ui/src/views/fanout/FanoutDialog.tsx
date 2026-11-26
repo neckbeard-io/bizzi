@@ -20,6 +20,7 @@ import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { Badge, Button, ErrorText, Field, IconButton, Input, Modal, Select, Textarea, cx } from '../../components/ui.tsx';
+import { ModelPicker } from '../../components/ModelPicker.tsx';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL } from '../../lib/states.ts';
 
 const MAX_RUNS = 6;
@@ -181,6 +182,7 @@ export function FanoutDialog(props: { workspace: WorkspaceInfo; onClose: () => v
             {runs.map((r, i) => (
               <RunRow
                 key={r.key}
+                machineId={ws.machineId}
                 index={i}
                 draft={r}
                 agents={startable}
@@ -203,6 +205,7 @@ export function FanoutDialog(props: { workspace: WorkspaceInfo; onClose: () => v
 }
 
 function RunRow(props: {
+  machineId: string;
   index: number;
   draft: RunDraft;
   agents: AgentListing[];
@@ -215,7 +218,6 @@ function RunRow(props: {
   const listing = props.agents.find((a) => a.agent === r.agent);
   const models = listing?.capabilities?.models;
   const known = [...new Set(props.baselines.filter((b) => b.agent === r.agent && b.model).map((b) => b.model!))];
-  const listId = `fanout-models-${r.key}`;
   return (
     <div className="rounded-md border border-border p-2.5">
       <div className="grid grid-cols-[auto_1fr_auto] items-end gap-2 sm:grid-cols-[auto_9rem_1fr_6rem_auto]">
@@ -230,25 +232,13 @@ function RunRow(props: {
           </Select>
         </Field>
         <Field label="Model" className="col-span-2 row-start-2 sm:col-span-1 sm:row-start-auto">
-          {Array.isArray(models) && models.length > 0 ? (
-            <Select value={r.model} onChange={(e) => props.onChange({ model: e.target.value })}>
-              <option value="">Agent default</option>
-              {models.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </Select>
-          ) : (
-            <>
-              <Input value={r.model} onChange={(e) => props.onChange({ model: e.target.value })} placeholder="Agent default" list={listId} spellCheck={false} autoCapitalize="off" />
-              <datalist id={listId}>
-                {known.map((m) => (
-                  <option key={m} value={m} />
-                ))}
-              </datalist>
-            </>
-          )}
+          <ModelPicker
+            machineId={props.machineId}
+            agent={r.agent}
+            value={r.model}
+            onChange={(model) => props.onChange({ model })}
+            fixed={Array.isArray(models) ? models : known}
+          />
         </Field>
         <Field label="Budget $" className="row-start-2 sm:row-start-auto">
           <Input value={r.budget} onChange={(e) => props.onChange({ budget: e.target.value })} inputMode="decimal" placeholder="none" title="Metered spend cap for this run (session budget)" />

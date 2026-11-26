@@ -1,6 +1,7 @@
 // The node role: wires store, bus, workspaces, sessions and tools behind a method dispatcher.
 
 import {
+  AGENT_KINDS,
   BizziError,
   GLOBAL_CHANNEL,
   PROTOCOL_VERSION,
@@ -164,6 +165,7 @@ const UNIMPLEMENTED = [
 /** Methods taking an optional `machineId` (MachineTarget): ours is accepted, any other is not_found. */
 const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'agents.list',
+  'agents.models',
   'workspaces.list',
   'workspace.create',
   'sessions.list',
@@ -290,6 +292,7 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     };
 
     const registry = new AdapterRegistry(opts.adapters, logger.child({ component: 'agents' }));
+    registry.agentEnv = agentEnv;
     const workspaces = new Workspaces(store, bus, machineId);
     const settings = new OrchestrationSettingsStore(store, workspaces);
     // NodeOptions.prepareStart first, then each extension's, merged.
@@ -547,6 +550,11 @@ class Node implements BizziNode {
         return { machine: { ...this.machine, tags: [...this.machine.tags] } };
       },
       'agents.list': async (p) => ({ agents: await this.registry.list(optBool(p, 'refresh') ?? false) }),
+      'agents.models': async (p) => {
+        const agent = reqString(p, 'agent');
+        if (!AGENT_KINDS.includes(agent as AgentKind)) throw new BizziError('bad_request', `unknown agent ${agent}`);
+        return { models: await this.registry.models(agent as AgentKind, optBool(p, 'refresh') ?? false) };
+      },
 
       'workspaces.list': () => ({ workspaces: ws.list() }),
       'workspace.create': async (p) => {

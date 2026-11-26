@@ -8,10 +8,11 @@ import {
   type AgentProbe,
   type EmitFn,
   type Logger,
+  type ModelOption,
   type SessionMode,
   type StartSessionOptions,
 } from '@bizzi/protocol';
-import type { GetAccountResponse, InitializeParams } from './codex-types.ts';
+import type { GetAccountResponse, InitializeParams, Model, ModelListParams, ModelListResponse } from './codex-types.ts';
 import { codexVersion, findCodex } from './locate.ts';
 import { PERMISSION_MODE_NAMES } from './permissions.ts';
 import { AppServerProcess, describeExit, type SpawnSpec } from './process.ts';
@@ -138,8 +139,8 @@ export class CodexAdapter implements AgentAdapter {
     return probe;
   }
 
-  /** Starts a throwaway app-server and asks `account/read`. */
-  async #readAccount(path: string): Promise<{ auth: AgentProbe['auth']; account?: string; notes: string[] }> {
+  /** Starts a throwaway, initialized app-server, runs `fn` against it, then kills it. */
+  async #withProbeServer<T>(path: string, fn: (proc: AppServerProcess, timeout: number) => Promise<T>, onError: (e: unknown, proc: AppServerProcess | undefined) => T): Promise<T> {
     const logger = this.#opts.logger ?? NOOP_LOGGER;
     const timeout = this.#opts.probeTimeoutMs ?? 15_000;
     let proc: AppServerProcess | undefined;
@@ -162,22 +163,60 @@ export class CodexAdapter implements AgentAdapter {
       };
       await proc.rpc.request('initialize', init, timeout);
       proc.rpc.notify('initialized');
-      const acct = await proc.rpc.request<GetAccountResponse>('account/read', { refreshToken: false }, timeout);
-      if (acct.account) {
-        const a = acct.account;
-        const account = a.type === 'chatgpt' ? (a.email ?? `ChatGPT ${a.planType}`) : a.type;
-        const notes = a.type === 'chatgpt' ? [`plan: ${a.planType}`] : [];
-        return { auth: 'ok', account, notes };
-      }
-      if (!acct.requiresOpenaiAuth) return { auth: 'ok', notes: ['configured model provider does not need OpenAI auth'] };
-      return { auth: 'missing', notes: ['run `codex login`'] };
+      return await fn(proc, timeout);
     } catch (e) {
-      const exit = proc?.exitInfo;
-      const why = exit ? describeExit(exit, proc?.stderrTail() ?? '') : (e as Error).message;
-      return { auth: 'unknown', notes: [`could not read codex account: ${why}`] };
+      return onError(e, proc);
     } finally {
       await proc?.kill(500);
     }
+  }
+
+  /** Starts a throwaway app-server and asks `account/read`. */
+  #readAccount(path: string): Promise<{ auth: AgentProbe['auth']; account?: string; notes: string[] }> {
+    return this.#withProbeServer(
+      path,
+      async (proc, timeout): Promise<{ auth: AgentProbe['auth']; account?: string; notes: string[] }> => {
+        const acct = await proc.rpc.request<GetAccountResponse>('account/read', { refreshToken: false }, timeout);
+        if (acct.account) {
+          const a = acct.account;
+          const account = a.type === 'chatgpt' ? (a.email ?? `ChatGPT ${a.planType}`) : a.type;
+          const notes = a.type === 'chatgpt' ? [`plan: ${a.planType}`] : [];
+          return { auth: 'ok', account, notes };
+        }
+        if (!acct.requiresOpenaiAuth) return { auth: 'ok', notes: ['configured model provider does not need OpenAI auth'] };
+        return { auth: 'missing', notes: ['run `codex login`'] };
+      },
+      (e, proc) => {
+        const exit = proc?.exitInfo;
+        const why = exit ? describeExit(exit, proc?.stderrTail() ?? '') : (e as Error).message;
+        return { auth: 'unknown', notes: [`could not read codex account: ${why}`] };
+      },
+    );
+  }
+
+  /** The app-server's model picker list (`model/list`, every page; hidden models left out). */
+  async listModels(): Promise<ModelOption[]> {
+    const path = await this.#codexPath();
+    if (!path) throw new BizziError('agent_unavailable', 'codex executable not found');
+    return this.#withProbeServer(
+      path,
+      async (proc, timeout) => {
+        const out: ModelOption[] = [];
+        let cursor: string | null = null;
+        for (let page = 0; page < 20; page++) {
+          const params: ModelListParams = { includeHidden: false, ...(cursor ? { cursor } : {}) };
+          const res: ModelListResponse = await proc.rpc.request<ModelListResponse>('model/list', params, timeout);
+          for (const m of res.data) if (!m.hidden) out.push(toModelOption(m));
+          cursor = res.nextCursor;
+          if (!cursor) break;
+        }
+        return out;
+      },
+      (e, proc) => {
+        const exit = proc?.exitInfo;
+        throw new Error(`could not list codex models: ${exit ? describeExit(exit, proc?.stderrTail() ?? '') : (e as Error).message}`);
+      },
+    );
   }
 
   async start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession> {
@@ -223,6 +262,16 @@ export class CodexAdapter implements AgentAdapter {
     this.#sessions.clear();
     await Promise.allSettled(sessions.map((s) => s.stop()));
   }
+}
+
+/** A `model/list` row as a ModelOption (`model` is what thread/start takes). */
+export function toModelOption(m: Model): ModelOption {
+  const out: ModelOption = { id: m.model || m.id };
+  if (m.displayName && m.displayName !== out.id) out.label = m.displayName;
+  if (m.description) out.description = m.description;
+  if (m.isDefault) out.isDefault = true;
+  if (m.supportedReasoningEfforts.length) out.efforts = m.supportedReasoningEfforts.map((e) => e.reasoningEffort);
+  return out;
 }
 
 /** Entry point used by the CLI to discover adapters. */

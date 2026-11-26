@@ -4,6 +4,7 @@ import type {
   AgentCapabilities,
   AgentKind,
   AgentListing,
+  AgentProfile,
   ApprovalDecision,
   ChannelEvent,
   DeviceInfo,
@@ -25,6 +26,7 @@ import type {
   MachineRole,
   MachineTarget,
   MethodParams,
+  ModelOption,
   MethodResult,
   OrchestrationSettings,
   PipelineInfo,
@@ -38,6 +40,7 @@ import type {
   SessionEvent,
   SessionInfo,
   UpdatePolicy,
+  UserPrefs,
   WidgetValue,
   WorkspaceInfo,
 } from '@bizzi/protocol';
@@ -115,6 +118,15 @@ export interface BizziState {
   // ---- pipelines (docs/pipelines.md)
   /** Pipeline runs by id, across machines (`pipelines.list` per machine, then `pipeline.*` events). */
   pipelines: Readonly<Record<string, PipelineInfo>>;
+  // ---- agent profiles and models (New session dialog)
+  /** User-wide prefs (`prefs.get`, then `prefs.updated`); null until loaded or on a server without them. */
+  prefs: UserPrefs | null;
+  /** `agents.models` per `modelsKey(machineId, agent)`; absent until loaded. */
+  models: Readonly<Record<string, readonly ModelOption[]>>;
+}
+
+export function modelsKey(machineId: string | null | undefined, agent: AgentKind): string {
+  return `${machineId ?? ''}:${agent}`;
 }
 
 /** What the sidebar shows of a workspace's `git.status` (spec §11.1 row 1 and row 3). */
@@ -284,6 +296,8 @@ export class BizziStore {
       widgets: {},
       gitStatus: {},
       pipelines: {},
+      prefs: null,
+      models: {},
     };
     this.hydrate();
     this.unsubs.push(
@@ -636,6 +650,9 @@ export class BizziStore {
         if (key in this.state.widgets) this.patch({ widgets: withoutKey(this.state.widgets, key) });
         return;
       }
+      case 'prefs.updated':
+        this.patch({ prefs: ev.data.prefs });
+        return;
       case 'pipeline.updated':
         this.putPipeline(ev.data.pipeline);
         return;
@@ -764,7 +781,7 @@ export class BizziStore {
     }
     const tasks: Promise<unknown>[] = this.reachableMachines().map((id) => this.loadMachine(id));
     if (this.isHub()) tasks.push(this.loadDevices());
-    tasks.push(this.loadKnowledgeMeta(), this.loadUsage(), this.loadWidgets());
+    tasks.push(this.loadKnowledgeMeta(), this.loadUsage(), this.loadWidgets(), this.loadPrefs());
     const results = await Promise.allSettled(tasks);
     for (const r of results) {
       if (r.status === 'rejected') this.logger.log('warn', 'initial load failed', { error: String(r.reason) });
@@ -800,6 +817,65 @@ export class BizziStore {
     const { agents } = await this.client.request('agents.list', params, refresh ? { timeoutMs: 60_000 } : {});
     const key = t.machineId ?? '';
     this.patch({ agents: { ...this.state.agents, [key]: agents } });
+  }
+
+  /**
+   * The models an agent offers on a machine (`agents.models`). Never throws: a failure (an older node,
+   * an offline machine) records an empty list, which the UI shows as a free-text model field.
+   */
+  loadModels(machineId: string | null | undefined, agent: AgentKind, refresh = false): Promise<readonly ModelOption[]> {
+    const key = modelsKey(machineId, agent);
+    const running = this.modelsInflight.get(key);
+    if (running && !refresh) return running;
+    const p = this.fetchModels(machineId, agent, refresh).finally(() => {
+      if (this.modelsInflight.get(key) === p) this.modelsInflight.delete(key);
+    });
+    this.modelsInflight.set(key, p);
+    return p;
+  }
+
+  private readonly modelsInflight = new Map<string, Promise<readonly ModelOption[]>>();
+
+  private async fetchModels(machineId: string | null | undefined, agent: AgentKind, refresh: boolean): Promise<readonly ModelOption[]> {
+    const t = this.target(machineId);
+    let models: ModelOption[] = [];
+    try {
+      const params: MethodParams<'agents.models'> = refresh ? { ...t, agent, refresh: true } : { ...t, agent };
+      models = (await this.client.request('agents.models', params, { timeoutMs: 60_000 })).models;
+    } catch (e) {
+      this.logger.log('debug', 'agents.models failed', { machineId: t.machineId, agent, error: String(e) });
+    }
+    this.patch({ models: { ...this.state.models, [modelsKey(machineId, agent)]: models } });
+    return models;
+  }
+
+  /** User-wide prefs; an older server without `prefs.*` leaves them null. */
+  async loadPrefs(): Promise<void> {
+    try {
+      const { prefs } = await this.client.request('prefs.get', {});
+      this.patch({ prefs });
+    } catch (e) {
+      if (!isUnsupported(e)) throw e;
+    }
+  }
+
+  /**
+   * Replace one agent's saved profiles (the others are kept) and, when given, which one is preselected
+   * (`null` clears it back to Default). Returns the stored prefs.
+   */
+  async saveAgentProfiles(agent: AgentKind, profiles: readonly AgentProfile[], preferred?: string | null): Promise<UserPrefs> {
+    const current = this.state.prefs ?? {};
+    const others = (current.agentProfiles ?? []).filter((p) => p.agent !== agent);
+    const patch: Partial<UserPrefs> = { agentProfiles: [...others, ...profiles.map((p) => ({ ...p, agent }))] };
+    if (preferred !== undefined) {
+      const next = { ...current.preferredProfiles };
+      if (preferred === null) delete next[agent];
+      else next[agent] = preferred;
+      patch.preferredProfiles = next;
+    }
+    const { prefs } = await this.client.request('prefs.set', { prefs: patch });
+    this.patch({ prefs });
+    return prefs;
   }
 
   async loadWorkspaces(machineId?: string | null): Promise<void> {

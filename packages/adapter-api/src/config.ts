@@ -262,7 +262,7 @@ export interface ResolvedModel {
   spec?: ModelSpec;
 }
 
-function modelSpecs(p: ProviderSpec): ModelSpec[] {
+export function modelSpecs(p: ProviderSpec): ModelSpec[] {
   return (p.models ?? []).map((m) => (typeof m === 'string' ? { id: m } : m));
 }
 

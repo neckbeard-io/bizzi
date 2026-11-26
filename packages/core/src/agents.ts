@@ -7,11 +7,14 @@ import type {
   AgentListing,
   AgentProbe,
   Logger,
+  ModelOption,
   SessionMode,
 } from '@bizzi/protocol';
 import { BizziError, NO_CAPABILITIES } from '@bizzi/protocol';
 
 export const PROBE_CACHE_MS = 60_000;
+/** How long an agent's model list is reused (per installed version). */
+export const MODELS_CACHE_MS = 30 * 60_000;
 
 /**
  * Adds facts to a probe on every `agents.list` (e.g. @bizzi/services: install method, supported
@@ -27,6 +30,10 @@ export class AdapterRegistry {
   #inflight?: Promise<AgentListing[]>;
   readonly #decorators = new Set<ListingDecorator>();
   readonly #probed = new Set<(agents: readonly AgentListing[]) => void>();
+  readonly #models = new Map<AgentKind, { at: number; version: string | undefined; models: ModelOption[] }>();
+  readonly #modelsInflight = new Map<AgentKind, Promise<ModelOption[]>>();
+  /** The agent's secrets as sessions get them; `listModels` receives them (set by the node). */
+  agentEnv?: (agent: AgentKind) => Record<string, string> | Promise<Record<string, string>>;
 
   constructor(adapters: readonly AgentAdapter[], logger: Logger, now: () => number = Date.now) {
     this.adapters = adapters;
@@ -96,6 +103,48 @@ export class AdapterRegistry {
     });
   }
 
+  /**
+   * The models an agent offers (`agents.models`): the structured adapter's `listModels`, else any
+   * adapter's fixed capability list. Cached per installed version for MODELS_CACHE_MS; a failed
+   * listing is logged and answers the fixed list (often empty), without caching.
+   */
+  async models(agent: AgentKind, refresh = false): Promise<ModelOption[]> {
+    const forKind = this.adapters.filter((a) => a.agent === agent);
+    if (forKind.length === 0) throw new BizziError('agent_unavailable', `no adapter for ${agent}`);
+    const version = this.lastProbe(agent)?.version;
+    const hit = this.#models.get(agent);
+    if (!refresh && hit && hit.version === version && this.#now() - hit.at < MODELS_CACHE_MS) return hit.models.map((m) => ({ ...m }));
+    const running = this.#modelsInflight.get(agent);
+    if (!refresh && running) return running;
+    const fixed = (): ModelOption[] => {
+      for (const a of forKind) {
+        const m = safeCaps(a, 'structured').models;
+        if (Array.isArray(m) && m.length > 0) return m.map((id) => ({ id }));
+      }
+      return [];
+    };
+    const lister = this.select(agent, 'structured') ?? forKind.find((a) => a.listModels);
+    if (!lister?.listModels) return fixed();
+    const env = this.agentEnv;
+    const p = (async () => lister.listModels!(env ? { env: await env(agent) } : {}))().then(
+      (models) => {
+        if (this.#modelsInflight.get(agent) === p) this.#modelsInflight.delete(agent);
+        const clean = dedupeModels(models);
+        // An empty answer is often transient (an agent still loading its catalog): ask again next time.
+        if (clean.length) this.#models.set(agent, { at: this.#now(), version, models: clean });
+        else return fixed();
+        return clean.map((m) => ({ ...m }));
+      },
+      (err: unknown) => {
+        if (this.#modelsInflight.get(agent) === p) this.#modelsInflight.delete(agent);
+        this.#logger.log('warn', 'listing models failed', { agent, err });
+        return fixed();
+      },
+    );
+    this.#modelsInflight.set(agent, p);
+    return p;
+  }
+
   async list(refresh = false): Promise<AgentListing[]> {
     return (await this.#list(refresh)).map((l) => this.#decorate(l));
   }
@@ -155,6 +204,18 @@ export class AdapterRegistry {
       return { agent: adapter.agent, installed: false, auth: 'unknown', notes: [`probe failed: ${(err as Error).message}`] };
     }
   }
+}
+
+/** Drops entries without an id and repeats (first wins); keeps the adapter's order. */
+function dedupeModels(models: readonly ModelOption[]): ModelOption[] {
+  const seen = new Set<string>();
+  const out: ModelOption[] = [];
+  for (const m of models) {
+    if (!m || typeof m.id !== 'string' || !m.id || seen.has(m.id)) continue;
+    seen.add(m.id);
+    out.push({ ...m });
+  }
+  return out;
 }
 
 function safeCaps(a: AgentAdapter, mode: SessionMode): AgentCapabilities {

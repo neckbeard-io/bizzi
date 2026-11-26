@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { homedir } from 'node:os';
 import { basename } from 'node:path';
 import { BizziError, NO_CAPABILITIES } from '@bizzi/protocol';
 import type {
@@ -10,11 +11,12 @@ import type {
   AgentProbe,
   EmitFn,
   McpServerSpec,
+  ModelOption,
   ProcessLauncher,
   SessionMode,
   StartSessionOptions,
 } from '@bizzi/protocol';
-import type { McpServerConfig, Options, SettingSource, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
+import type { McpServerConfig, ModelInfo, Options, SDKUserMessage, SettingSource, SpawnedProcess, SpawnOptions } from '@anthropic-ai/claude-agent-sdk';
 import { EFFORT_LEVELS, PERMISSION_MODES, isEffort, isPermissionMode } from './mapping.ts';
 import { findClaudeBinary, probeClaude } from './probe.ts';
 import { ClaudeSession } from './session.ts';
@@ -113,6 +115,48 @@ export class ClaudeAdapter implements AgentAdapter {
   capabilities(mode: SessionMode): AgentCapabilities {
     if (mode !== 'structured') return { ...NO_CAPABILITIES, modes: [] };
     return { ...STRUCTURED_CAPABILITIES, permissionModes: [...PERMISSION_MODES], effort: [...EFFORT_LEVELS], modes: ['structured'] };
+  }
+
+  /**
+   * The models Claude Code offers this login (its `/model` list), read from a short-lived process
+   * that never gets a prompt: started in the home directory, closed once it answered.
+   */
+  async listModels(): Promise<ModelOption[]> {
+    let executable: string | undefined;
+    if (this.#opts.claudePath !== null) {
+      executable = (await findClaudeBinary({ claudePath: this.#opts.claudePath, searchDirs: this.#opts.searchDirs }))?.path;
+    }
+    const abort = new AbortController();
+    const idle: AsyncIterable<SDKUserMessage> = {
+      [Symbol.asyncIterator]: () => ({
+        next: () =>
+          new Promise<IteratorResult<SDKUserMessage>>((resolve) => {
+            abort.signal.addEventListener('abort', () => resolve({ done: true, value: undefined }), { once: true });
+          }),
+      }),
+    };
+    const options: Options = {
+      cwd: homedir(),
+      env: { ...process.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP },
+      settingSources: this.#opts.settingSources ?? ['user', 'project', 'local'],
+      persistSession: false,
+      ...(executable ? { pathToClaudeCodeExecutable: executable } : {}),
+    };
+    const queryFn = this.#opts.queryFn ?? (await loadSdkQuery());
+    const q = queryFn({ prompt: idle, options });
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      if (!q.supportedModels) return [];
+      const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('claude did not list its models within 30s')), 30_000);
+      });
+      const models = await Promise.race([q.supportedModels(), timeout]);
+      return models.map((m) => toModelOption(m));
+    } finally {
+      clearTimeout(timer);
+      abort.abort();
+      q.close();
+    }
   }
 
   async start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession> {
@@ -249,6 +293,16 @@ export function launchThrough(launcher: ProcessLauncher, cwd: string, onStderr: 
     child.on('error', () => {});
     return child;
   };
+}
+
+/** An SDK model row as a ModelOption; the `default` row is the CLI's choice when no model is given. */
+export function toModelOption(m: ModelInfo): ModelOption {
+  const out: ModelOption = { id: m.value };
+  if (m.displayName && m.displayName !== m.value) out.label = m.displayName;
+  if (m.description) out.description = m.description;
+  if (m.value === 'default') out.isDefault = true;
+  if (m.supportedEffortLevels?.length) out.efforts = [...m.supportedEffortLevels];
+  return out;
 }
 
 async function loadSdkQuery(): Promise<QueryFn> {

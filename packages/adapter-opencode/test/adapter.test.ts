@@ -53,6 +53,13 @@ describe('discovery and capabilities', () => {
     assert.deepEqual(list[0]!.capabilities('terminal').modes, []);
   });
 
+  test('listModels: provider/model ids, variants as efforts', async () => {
+    assert.deepEqual(await adapter.listModels(), [
+      { id: 'fake/fake-model', label: 'Fake', efforts: ['low', 'high'] },
+      { id: 'fake/other', label: 'Other' },
+    ]);
+  });
+
   test('terminal mode is rejected', async () => {
     await assert.rejects(adapter.start(opts({ mode: 'terminal' }), () => {}, ctx), (e: unknown) => e instanceof BizziError && e.code === 'unsupported');
   });

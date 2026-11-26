@@ -2,7 +2,8 @@ import { useState } from 'react';
 import type { ReactNode } from 'react';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
-import { ErrorText, Input, Select, Spinner } from '../../components/ui.tsx';
+import { ModelPicker } from '../../components/ModelPicker.tsx';
+import { ErrorText, Select, Spinner } from '../../components/ui.tsx';
 
 /** Model / permission mode / effort, each shown only when the agent's capabilities allow changing it. */
 export function SessionControls(props: { sessionId: string; className?: string }): ReactNode {
@@ -25,34 +26,26 @@ export function SessionControls(props: { sessionId: string; className?: string }
     <div className={props.className}>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         {canModel ? (
-          <label className={label}>
+          <div className={label}>
             Model
-            {Array.isArray(caps.models) ? (
-              <Select className={select} value={session.model ?? ''} onChange={(e) => void set.run({ model: e.target.value })}>
-                {session.model && !caps.models.includes(session.model) ? <option value={session.model}>{session.model}</option> : null}
-                {!session.model ? <option value="">default</option> : null}
-                {caps.models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
-                  </option>
-                ))}
-              </Select>
-            ) : (
-              <Input
-                className="h-7 w-40 text-xs"
-                value={modelDraft ?? session.model ?? ''}
-                placeholder="default"
-                onChange={(e) => setModelDraft(e.target.value)}
-                onBlur={() => {
-                  if (modelDraft !== null && modelDraft !== (session.model ?? '')) void set.run({ model: modelDraft });
-                  setModelDraft(null);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') (e.target as HTMLInputElement).blur();
-                }}
-              />
-            )}
-          </label>
+            <ModelPicker
+              size="sm"
+              className="min-w-40"
+              machineId={session.machineId}
+              agent={session.agent}
+              value={modelDraft ?? session.model ?? ''}
+              defaultLabel="default"
+              onChange={(model) => {
+                // A picked option applies at once; typed text applies on blur / Enter.
+                setModelDraft(model);
+              }}
+              onCommit={(model) => {
+                setModelDraft(null);
+                if (model !== (session.model ?? '')) void set.run({ model });
+              }}
+              {...(Array.isArray(caps.models) ? { fixed: caps.models } : {})}
+            />
+          </div>
         ) : null}
         {canPerm ? (
           <label className={label}>

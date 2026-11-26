@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { PIPELINE_STATUS_LABEL, fanoutGroupsEqual, pipelinesEqual, selectAgents, selectFanoutGroups, selectNestedSessions, selectPipelines, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
-import { BizziError } from '@bizzi/protocol';
-import type { AgentKind, AgentListing, LabelColor, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
+import { BizziError, defaultProfileId, preferredProfile, profilesFor, ulid } from '@bizzi/protocol';
+import type { AgentKind, AgentListing, AgentProfile, LabelColor, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useShowMachine } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
+import { ModelPicker, effortsFor, useAgentModels } from '../components/ModelPicker.tsx';
 import { LabelColorField, MachineChip, WorkspaceTile, stripeStyle } from '../components/labels.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Disclosure, Empty, ErrorText, Field, IconButton, Input, Modal, Select, Spinner, StatusBadge, cx } from '../components/ui.tsx';
@@ -386,20 +387,79 @@ function SessionRow(props: { session: SessionInfo; depth?: number; foreign?: boo
 
 const FALLBACK_MODES: SessionMode[] = ['structured'];
 
+/** What a profile sets, as the form holds it ('' = the agent's default). */
+interface ProfileFields {
+  mode: SessionMode | '';
+  model: string;
+  permissionMode: string;
+  effort: string;
+}
+
+function fieldsOf(p: AgentProfile): ProfileFields {
+  return { mode: p.mode ?? '', model: p.model ?? '', permissionMode: p.permissionMode ?? '', effort: p.effort ?? '' };
+}
+
+function sameFields(a: ProfileFields, b: ProfileFields): boolean {
+  return a.mode === b.mode && a.model === b.model && a.permissionMode === b.permissionMode && a.effort === b.effort;
+}
+
+function withFields(p: AgentProfile, f: ProfileFields): AgentProfile {
+  const out: AgentProfile = { id: p.id, agent: p.agent, name: p.name };
+  if (f.mode) out.mode = f.mode;
+  if (f.model.trim()) out.model = f.model.trim();
+  if (f.permissionMode) out.permissionMode = f.permissionMode;
+  if (f.effort) out.effort = f.effort;
+  return out;
+}
+
 function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): ReactNode {
   const store = useStore();
-  const agents = useBizzi((s) => selectAgents(s, s.workspaces?.[props.workspaceId]?.machineId ?? null));
+  const machineId = useBizzi((s) => s.workspaces?.[props.workspaceId]?.machineId ?? null);
+  const agents = useBizzi((s) => selectAgents(s, machineId));
+  const prefs = useBizzi((s) => s.prefs);
   const installed = useMemo(() => (agents ?? []).filter((a) => a.installed), [agents]);
   const defaultAgent = installed.find((a) => a.auth === 'ok' && a.capabilities?.modes.includes('structured')) ?? installed[0];
   const [agent, setAgent] = useState<AgentKind | ''>(defaultAgent?.agent ?? '');
   const listing: AgentListing | undefined = installed.find((a) => a.agent === agent) ?? defaultAgent;
   const caps = listing?.capabilities;
   const modes = caps?.modes.length ? caps.modes : FALLBACK_MODES;
-  const [modeChoice, setMode] = useState<SessionMode>('structured');
-  const mode = modes.includes(modeChoice) ? modeChoice : (modes[0] ?? 'structured');
-  const [model, setModel] = useState('');
-  const [permissionMode, setPermissionMode] = useState('');
-  const [effort, setEffort] = useState('');
+
+  // Profiles (user-wide prefs). Without prefs support on the server there are none: plain fields.
+  const profiles = useMemo(() => (listing ? profilesFor(prefs ?? undefined, listing.agent) : []), [prefs, listing]);
+  const [profileId, setProfileId] = useState<string | null>(null);
+  const [fields, setFields] = useState<ProfileFields>({ mode: '', model: '', permissionMode: '', effort: '' });
+  /** The user changed something since the profile was applied: prefs arriving late must not overwrite it. */
+  const [touched, setTouched] = useState(false);
+  const profile = profiles.find((p) => p.id === profileId) ?? (listing ? preferredProfile(prefs ?? undefined, listing.agent) : undefined);
+  useEffect(() => {
+    if (!listing || touched) return;
+    const p = preferredProfile(prefs ?? undefined, listing.agent);
+    setProfileId(p.id);
+    setFields(fieldsOf(p));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [listing?.agent, prefs]);
+  const edit = (patch: Partial<ProfileFields>): void => {
+    setTouched(true);
+    setFields((f) => ({ ...f, ...patch }));
+  };
+  const pickProfile = (id: string): void => {
+    const p = profiles.find((x) => x.id === id);
+    if (!p) return;
+    setProfileId(p.id);
+    setFields(fieldsOf(p));
+    setTouched(true);
+  };
+  const pickAgent = (a: AgentKind): void => {
+    setAgent(a);
+    const p = preferredProfile(prefs ?? undefined, a);
+    setProfileId(p.id);
+    setFields(fieldsOf(p));
+    setTouched(false);
+  };
+
+  const mode: SessionMode = fields.mode && modes.includes(fields.mode) ? fields.mode : modes.includes('structured') ? 'structured' : (modes[0] ?? 'structured');
+  const { models } = useAgentModels(machineId, caps && mode === 'structured' && caps.models === 'dynamic' ? listing?.agent : undefined);
+  const efforts = effortsFor(models, fields.model, caps?.effort ?? undefined);
   const [title, setTitle] = useState('');
 
   const unsupported = listing?.support === 'unsupported';
@@ -408,9 +468,9 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
     const params: Parameters<typeof store.createSession>[0] = { workspaceId: props.workspaceId, agent: listing.agent, mode };
     if (title.trim()) params.title = title.trim();
     if (mode === 'structured') {
-      if (model.trim()) params.model = model.trim();
-      if (permissionMode) params.permissionMode = permissionMode;
-      if (effort) params.effort = effort;
+      if (fields.model.trim()) params.model = fields.model.trim();
+      if (fields.permissionMode) params.permissionMode = fields.permissionMode;
+      if (fields.effort && efforts.includes(fields.effort)) params.effort = fields.effort;
     } else {
       params.cols = 100;
       params.rows = 30;
@@ -438,7 +498,7 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
     <Card className="mb-4 p-4">
       <form onSubmit={(e) => void submit(e)} className="grid gap-3 sm:grid-cols-2">
         <Field label="Agent">
-          <Select value={listing?.agent ?? ''} onChange={(e) => setAgent(e.target.value as AgentKind)}>
+          <Select value={listing?.agent ?? ''} onChange={(e) => pickAgent(e.target.value as AgentKind)}>
             {installed.map((a) => (
               <option key={a.agent} value={a.agent}>
                 {a.agent}
@@ -448,13 +508,29 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
             ))}
           </Select>
         </Field>
+        {prefs && listing && profile ? (
+          <ProfileField
+            agent={listing.agent}
+            profiles={profiles}
+            profile={profile}
+            fields={{ ...fields, mode: fields.mode && modes.includes(fields.mode) ? fields.mode : '' }}
+            preferredId={preferredProfile(prefs, listing.agent).id}
+            onPick={pickProfile}
+            onSaved={(p) => {
+              setProfileId(p.id);
+              setFields(fieldsOf(p));
+            }}
+          />
+        ) : (
+          <div className="hidden sm:block" />
+        )}
         <Field label="Mode">
           <div className="flex h-9 gap-1 rounded-md border border-border p-0.5">
             {modes.map((m) => (
               <button
                 key={m}
                 type="button"
-                onClick={() => setMode(m)}
+                onClick={() => edit({ mode: m })}
                 className={`flex-1 rounded px-2 text-sm capitalize ${mode === m ? 'bg-panel-2 font-medium' : 'text-muted'}`}
               >
                 {m}
@@ -462,27 +538,25 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
             ))}
           </div>
         </Field>
-        {structured && caps ? (
+        {structured && caps && listing ? (
           <>
-            {Array.isArray(caps.models) && caps.models.length > 0 ? (
-              <Field label="Model">
-                <Select value={model} onChange={(e) => setModel(e.target.value)}>
-                  <option value="">Agent default</option>
-                  {caps.models.map((m) => (
-                    <option key={m} value={m}>
-                      {m}
-                    </option>
-                  ))}
-                </Select>
-              </Field>
-            ) : caps.models === 'dynamic' ? (
-              <Field label="Model">
-                <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="Agent default" spellCheck={false} autoCapitalize="off" />
-              </Field>
-            ) : null}
+            {caps.models === 'dynamic' || caps.models.length > 0 ? (
+              <div className="flex flex-col gap-1">
+                <span className="text-xs font-medium text-muted">Model</span>
+                <ModelPicker
+                  machineId={machineId}
+                  agent={listing.agent}
+                  value={fields.model}
+                  onChange={(model) => edit({ model })}
+                  {...(Array.isArray(caps.models) ? { fixed: caps.models } : {})}
+                />
+              </div>
+            ) : (
+              <div className="hidden sm:block" />
+            )}
             {caps.permissionModes.length > 0 ? (
               <Field label="Permission mode">
-                <Select value={permissionMode} onChange={(e) => setPermissionMode(e.target.value)}>
+                <Select value={fields.permissionMode} onChange={(e) => edit({ permissionMode: e.target.value })}>
                   <option value="">Agent default</option>
                   {caps.permissionModes.map((m) => (
                     <option key={m} value={m}>
@@ -492,11 +566,11 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
                 </Select>
               </Field>
             ) : null}
-            {caps.effort?.length ? (
+            {efforts.length ? (
               <Field label="Effort">
-                <Select value={effort} onChange={(e) => setEffort(e.target.value)}>
+                <Select value={efforts.includes(fields.effort) ? fields.effort : ''} onChange={(e) => edit({ effort: e.target.value })}>
                   <option value="">Agent default</option>
-                  {caps.effort.map((m) => (
+                  {efforts.map((m) => (
                     <option key={m} value={m}>
                       {m}
                     </option>
@@ -532,5 +606,106 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
         </div>
       </form>
     </Card>
+  );
+}
+
+/**
+ * Profile picker with its actions: save the form into the selected profile, save it as a new one,
+ * preselect it for this agent (star), delete it (not Default).
+ */
+function ProfileField(props: {
+  agent: AgentKind;
+  profiles: readonly AgentProfile[];
+  profile: AgentProfile;
+  fields: ProfileFields;
+  preferredId: string;
+  onPick: (id: string) => void;
+  onSaved: (p: AgentProfile) => void;
+}): ReactNode {
+  const store = useStore();
+  const { agent, profiles, profile, fields } = props;
+  const [naming, setNaming] = useState<string | null>(null);
+  const isDefault = profile.id === defaultProfileId(agent);
+  const dirty = !sameFields(fieldsOf(profile), fields);
+  const preferred = props.preferredId === profile.id;
+
+  const save = useAction(async (list: AgentProfile[], preferredChange?: string | null) => store.saveAgentProfiles(agent, list, preferredChange));
+  /** Stored profiles of this agent; Default is stored only once it differs from blank. */
+  const stored = (): AgentProfile[] => profiles.filter((p) => p.id !== defaultProfileId(agent) || p.model || p.mode || p.permissionMode || p.effort);
+
+  const update = async (): Promise<void> => {
+    const next = withFields(profile, fields);
+    const list = stored().some((p) => p.id === next.id) ? stored().map((p) => (p.id === next.id ? next : p)) : [next, ...stored()];
+    if (await save.run(list)) props.onSaved(next);
+  };
+  const saveAs = async (name: string): Promise<void> => {
+    const next = withFields({ id: `pr_${ulid()}`, agent, name: name.trim() }, fields);
+    if (await save.run([...stored(), next])) {
+      setNaming(null);
+      props.onSaved(next);
+    }
+  };
+  const remove = async (): Promise<void> => {
+    if (isDefault) return;
+    if (await save.run(stored().filter((p) => p.id !== profile.id), preferred ? null : undefined)) props.onPick(defaultProfileId(agent));
+  };
+
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="text-xs font-medium text-muted">Profile</span>
+      {naming !== null ? (
+        <div className="flex items-center gap-1">
+          <Input
+            value={naming}
+            onChange={(e) => setNaming(e.target.value)}
+            placeholder="Profile name"
+            autoFocus
+            maxLength={80}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                if (naming.trim()) void saveAs(naming);
+              } else if (e.key === 'Escape') {
+                e.preventDefault();
+                setNaming(null);
+              }
+            }}
+          />
+          <Button size="md" variant="primary" disabled={!naming.trim()} busy={save.busy} onClick={() => void saveAs(naming)}>
+            Save
+          </Button>
+          <IconButton icon="x" label="Cancel" className="h-9 w-9" onClick={() => setNaming(null)} />
+        </div>
+      ) : (
+        <div className="flex items-center gap-1">
+          <Select value={profile.id} onChange={(e) => props.onPick(e.target.value)}>
+            {profiles.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+                {p.id === props.preferredId ? ' ★' : ''}
+              </option>
+            ))}
+          </Select>
+          <IconButton
+            icon="sparkle"
+            label={preferred ? 'Preselected for new sessions' : 'Preselect this profile for new sessions'}
+            className={cx('h-9 w-9', preferred && 'text-accent-text')}
+            disabled={preferred || save.busy}
+            onClick={() => void save.run(stored(), isDefault ? null : profile.id)}
+          />
+          <IconButton icon="plus" label="Save these settings as a new profile" className="h-9 w-9" disabled={save.busy} onClick={() => setNaming('')} />
+          {!isDefault ? <IconButton icon="trash" label={`Delete profile ${profile.name}`} className="h-9 w-9" disabled={save.busy} onClick={() => void remove()} /> : null}
+        </div>
+      )}
+      {dirty && naming === null ? (
+        <div className="flex items-center gap-2 text-xs text-muted">
+          <span>Changed from {profile.name}.</span>
+          <button type="button" className="text-accent-text underline disabled:opacity-50" disabled={save.busy} onClick={() => void update()}>
+            Update profile
+          </button>
+        </div>
+      ) : null}
+      <ErrorText error={save.error} />
+    </div>
   );
 }

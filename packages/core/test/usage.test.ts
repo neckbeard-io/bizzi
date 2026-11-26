@@ -198,3 +198,28 @@ test('mergeUserPrefs replaces only the keys present', () => {
   assert.deepEqual(mergeUserPrefs({}, {}), {});
   assert.deepEqual(parseUserPrefsPatch({ prefs: { themeId: 'th_01ABC', density: 'theme', other: 1 } }), { themeId: 'th_01ABC', density: 'theme' });
 });
+
+test('agent profiles in prefs: validated, replaced as a whole, unknown agents dropped', () => {
+  const profiles = [
+    { id: 'default:claude', agent: 'claude', name: 'Default', model: 'opus' },
+    { id: 'p_1', agent: 'claude', name: ' Fast ', model: 'haiku', effort: 'low', permissionMode: '', mode: 'structured' },
+    { id: 'p_2', agent: 'nope', name: 'Gone' },
+  ];
+  assert.deepEqual(parseUserPrefsPatch({ prefs: { agentProfiles: profiles, preferredProfiles: { claude: 'p_1', nope: 'x' } } }), {
+    agentProfiles: [
+      { id: 'default:claude', agent: 'claude', name: 'Default', model: 'opus' },
+      { id: 'p_1', agent: 'claude', name: 'Fast', model: 'haiku', effort: 'low', mode: 'structured' },
+    ],
+    preferredProfiles: { claude: 'p_1' },
+  });
+  const bad = (agentProfiles: unknown) => assert.throws(() => parseUserPrefsPatch({ prefs: { agentProfiles } }), { code: 'bad_request' });
+  bad({});
+  bad([{ id: 'p', agent: 'claude', name: '' }]);
+  bad([{ id: '../p', agent: 'claude', name: 'x' }]);
+  bad([{ id: 'p', agent: 'claude', name: 'x', mode: 'gui' }]);
+  bad([
+    { id: 'p', agent: 'claude', name: 'x' },
+    { id: 'p', agent: 'claude', name: 'y' },
+  ]);
+  assert.deepEqual(mergeUserPrefs({ themeId: 'a', agentProfiles: [{ id: 'p', agent: 'codex', name: 'x' }] }, { agentProfiles: [] }), { themeId: 'a', agentProfiles: [] });
+});

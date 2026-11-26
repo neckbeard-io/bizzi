@@ -480,3 +480,26 @@ describe('adapter surface', () => {
     assert.ok(p3.notes?.[0]?.includes('api-providers.json'));
   });
 });
+
+describe('listModels', () => {
+  test('configured models, else each provider\'s models endpoint; providers without a key are left out', async () => {
+    const { adapter, server } = await setup(
+      async (req, res) => {
+        if (req.method === 'GET' && req.path === '/anthropic/v1/models?limit=1000') return json(res, 200, { data: [{ id: 'claude-x', display_name: 'Claude X' }] });
+        if (req.method === 'GET' && req.path === '/openai/v1/models') return json(res, 200, { data: [{ id: 'llama' }, { id: '' }, null] });
+        json(res, 404, { error: { message: 'nope' } });
+      },
+      (url) => ({ defaultModel: 'fixed/m1', providers: { fixed: { api: 'openai', baseUrl: `${url}/fixed/v1`, models: ['m1', { id: 'm2' }] } } }),
+    );
+    const ids = (await adapter.listModels({ env: { TEST_ANTHROPIC_KEY: KEY } })).filter((m) => ['claude', 'local', 'keyed', 'fixed'].includes(m.id.split('/')[0]!));
+    assert.deepEqual(ids, [
+      { id: 'claude/claude-x', label: 'Claude X' },
+      { id: 'local/llama' },
+      { id: 'fixed/m1', isDefault: true },
+      { id: 'fixed/m2' },
+    ]);
+    const anthropicReq = server.requests.find((r) => r.path.startsWith('/anthropic/v1/models'));
+    assert.equal(anthropicReq?.headers['x-api-key'], KEY);
+    assert.ok(!server.requests.some((r) => r.path === '/openai/v1/models' && r.headers.authorization), 'keyed provider without a key is not asked');
+  });
+});

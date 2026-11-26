@@ -340,6 +340,62 @@ export interface UserPrefs {
   /** Selected theme: a built-in id or a custom theme's id (`themes.list`). */
   themeId?: string;
   density?: DensityPref;
+  /**
+   * Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile
+   * (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.
+   */
+  agentProfiles?: AgentProfile[];
+  /** Per agent (an `AgentKind` key), the profile the New session dialog preselects. Unset: the Default profile. */
+  preferredProfiles?: Record<string, string>;
+}
+
+/**
+ * Named start options for an agent: what the New session dialog fills in. Unset fields mean "the
+ * agent's own default". User-wide (stored with `UserPrefs`), so model ids are the agent's, not a machine's.
+ */
+export interface AgentProfile {
+  id: string;
+  agent: AgentKind;
+  name: string;
+  mode?: SessionMode;
+  model?: string;
+  permissionMode?: string;
+  effort?: string;
+}
+
+export const MAX_AGENT_PROFILES = 200;
+
+/** The id of an agent's built-in Default profile; it always exists and can be edited but not deleted. */
+export function defaultProfileId(agent: AgentKind): string {
+  return `default:${agent}`;
+}
+
+/** An agent's profiles: its Default (stored or blank) first, then the user's in stored order. */
+export function profilesFor(prefs: UserPrefs | undefined, agent: AgentKind): AgentProfile[] {
+  const own = (prefs?.agentProfiles ?? []).filter((p) => p.agent === agent);
+  const defId = defaultProfileId(agent);
+  const def = own.find((p) => p.id === defId) ?? { id: defId, agent, name: 'Default' };
+  return [{ ...def, name: 'Default' }, ...own.filter((p) => p.id !== defId)];
+}
+
+/** The profile the New session dialog starts with for an agent. */
+export function preferredProfile(prefs: UserPrefs | undefined, agent: AgentKind): AgentProfile {
+  const list = profilesFor(prefs, agent);
+  const want = prefs?.preferredProfiles?.[agent];
+  return list.find((p) => p.id === want) ?? list[0]!;
+}
+
+/** One model an agent offers (`agents.models`). */
+export interface ModelOption {
+  /** What `session.create` / `session.set` take as `model`. */
+  id: string;
+  /** Display name, when the agent gives one. */
+  label?: string;
+  description?: string;
+  /** The model the agent uses when none is given. */
+  isDefault?: boolean;
+  /** Effort levels this model accepts, when the agent says (a subset of the capability's `effort`). */
+  efforts?: string[];
 }
 
 /** A custom theme stored on the hub (theming.md §5); `data` is the theme JSON (shape owned by @bizzi/ui). */

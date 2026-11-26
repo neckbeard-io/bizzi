@@ -68,6 +68,9 @@ export class MockThemes implements MockModule {
           patch.density = r.density as DensityPref;
         }
         this.prefs = mergePrefs(this.prefs, patch);
+        // Agent profiles are replaced as a whole (the real server validates each one).
+        if (Array.isArray(r.agentProfiles)) this.prefs.agentProfiles = structuredClone(r.agentProfiles) as UserPrefs['agentProfiles'];
+        if (r.preferredProfiles && typeof r.preferredProfiles === 'object') this.prefs.preferredProfiles = { ...(r.preferredProfiles as UserPrefs['preferredProfiles']) };
         this.host.emit(GLOBAL_CHANNEL, { type: 'prefs.updated', data: { prefs: { ...this.prefs } } });
         return { prefs: { ...this.prefs } };
       }

@@ -63,6 +63,15 @@
         "$ref": "#/$defs/result:agents.list"
       }
     },
+    "agents.models": {
+      "description": "The models an agent offers on this machine (from the agent itself where it can say; its capability's fixed list otherwise). Cached per agent version; `refresh` asks again. An empty list means the agent can't list them: clients fall back to a free-text model field.",
+      "params": {
+        "$ref": "#/$defs/params:agents.models"
+      },
+      "result": {
+        "$ref": "#/$defs/result:agents.models"
+      }
+    },
     "workspaces.list": {
       "params": {
         "$ref": "#/$defs/params:workspaces.list"
@@ -1487,6 +1496,38 @@
         "agent",
         "installed",
         "auth"
+      ]
+    },
+    "AgentProfile": {
+      "description": "Named start options for an agent: what the New session dialog fills in. Unset fields mean \"the agent's own default\". User-wide (stored with `UserPrefs`), so model ids are the agent's, not a machine's.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "mode": {
+          "$ref": "#/$defs/SessionMode"
+        },
+        "model": {
+          "type": "string"
+        },
+        "permissionMode": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "agent",
+        "name"
       ]
     },
     "AgentRemedy": {
@@ -3499,6 +3540,7 @@
         "machines.list",
         "machine.set",
         "agents.list",
+        "agents.models",
         "workspaces.list",
         "workspace.create",
         "workspace.remove",
@@ -3592,6 +3634,37 @@
         "push.register",
         "push.unregister",
         "push.test"
+      ]
+    },
+    "ModelOption": {
+      "description": "One model an agent offers (`agents.models`).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "What `session.create` / `session.set` take as `model`.",
+          "type": "string"
+        },
+        "label": {
+          "description": "Display name, when the agent gives one.",
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "isDefault": {
+          "description": "The model the agent uses when none is given.",
+          "type": "boolean"
+        },
+        "efforts": {
+          "description": "Effort levels this model accepts, when the agent says (a subset of the capability's `effort`).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id"
       ]
     },
     "NodeCaller": {
@@ -4205,6 +4278,25 @@
             },
             "params": {
               "$ref": "#/$defs/params:agents.list"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "agents.models"
+            },
+            "params": {
+              "$ref": "#/$defs/params:agents.models"
             }
           }
         },
@@ -7193,6 +7285,20 @@
         },
         "density": {
           "$ref": "#/$defs/DensityPref"
+        },
+        "agentProfiles": {
+          "description": "Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/AgentProfile"
+          }
+        },
+        "preferredProfiles": {
+          "description": "Per agent (an `AgentKind` key), the profile the New session dialog preselects. Unset: the Default profile.",
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
         }
       }
     },
@@ -7967,6 +8073,27 @@
               "type": "boolean"
             }
           }
+        }
+      ]
+    },
+    "params:agents.models": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "agent": {
+              "$ref": "#/$defs/AgentKind"
+            },
+            "refresh": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "agent"
+          ]
         }
       ]
     },
@@ -9061,6 +9188,20 @@
             },
             "density": {
               "$ref": "#/$defs/DensityPref"
+            },
+            "agentProfiles": {
+              "description": "Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AgentProfile"
+              }
+            },
+            "preferredProfiles": {
+              "description": "Per agent (an `AgentKind` key), the profile the New session dialog preselects. Unset: the Default profile.",
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
             }
           }
         }
@@ -9773,6 +9914,20 @@
       },
       "required": [
         "agents"
+      ]
+    },
+    "result:agents.models": {
+      "type": "object",
+      "properties": {
+        "models": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ModelOption"
+          }
+        }
+      },
+      "required": [
+        "models"
       ]
     },
     "result:approval.respond": {

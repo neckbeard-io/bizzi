@@ -3,7 +3,7 @@
 
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { BizziError } from '@bizzi/protocol';
+import { BizziError, type ModelOption } from '@bizzi/protocol';
 import { FakeAdapter } from '../src/testing/index.ts';
 import { makeNode, tempDir } from './helpers.ts';
 
@@ -61,4 +61,32 @@ test('structured sessions are refused on an unsupported install; terminal mode s
   }
   const { session } = await node.call('session.create', { workspaceId: workspace.id, agent: 'opencode', mode: 'terminal' });
   assert.equal(session.mode, 'terminal');
+});
+
+test('agents.models: the adapter lists them, cached; the fixed capability list otherwise; failures fall back', async (t) => {
+  let calls = 0;
+  let fail = false;
+  class Listing extends FakeAdapter {
+    async listModels(): Promise<ModelOption[]> {
+      calls++;
+      if (fail) throw new Error('agent would not start');
+      return [{ id: 'big', label: 'Big', isDefault: true }, { id: 'small' }, { id: 'big' }, { id: '' }];
+    }
+  }
+  const dir = tempDir();
+  const node = await makeNode(dir.path, [new Listing({ agent: 'claude' }), new FakeAdapter({ agent: 'codex' })]);
+  t.after(async () => {
+    await node.close();
+    dir.cleanup();
+  });
+  const expected = [{ id: 'big', label: 'Big', isDefault: true }, { id: 'small' }];
+  assert.deepEqual((await node.call('agents.models', { agent: 'claude' })).models, expected);
+  assert.deepEqual((await node.call('agents.models', { agent: 'claude' })).models, expected);
+  assert.equal(calls, 1, 'second call is cached');
+  fail = true;
+  assert.deepEqual((await node.call('agents.models', { agent: 'claude', refresh: true })).models, [{ id: 'fake-model' }, { id: 'fake-model-large' }]);
+  assert.equal(calls, 2);
+  assert.deepEqual((await node.call('agents.models', { agent: 'codex' })).models, [{ id: 'fake-model' }, { id: 'fake-model-large' }]);
+  await assert.rejects(node.call('agents.models', { agent: 'agy' }), { code: 'agent_unavailable' });
+  await assert.rejects(node.call('agents.models', { agent: 'bogus' as never }), { code: 'bad_request' });
 });

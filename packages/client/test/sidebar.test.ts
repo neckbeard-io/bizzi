@@ -55,6 +55,8 @@ function state(sessions: SessionInfo[], over: Partial<BizziState> = {}): BizziSt
     widgets: {},
     gitStatus: {},
     pipelines: {},
+    prefs: null,
+    models: {},
     ...over,
   };
 }

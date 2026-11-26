@@ -11,11 +11,14 @@ import {
   type AgentProbe,
   type EmitFn,
   type Logger,
+  type ModelOption,
   type SessionMode,
   type StartSessionOptions,
 } from '@bizzi/protocol';
-import { ConfigSource, defaultModelRef, hasPricing, listedModels, resolveApiKey, resolveModel, type ApiConfigFile } from './config.ts';
-import type { HttpOptions } from './http.ts';
+import * as anthropic from './anthropic.ts';
+import { authHeaders } from './chat.ts';
+import { ConfigSource, defaultModelRef, hasPricing, listedModels, modelSpecs, resolveApiKey, resolveModel, type ApiConfigFile, type ProviderSpec } from './config.ts';
+import { getJson, type HttpOptions } from './http.ts';
 import { ApiChatSession } from './session.ts';
 import { isTranscriptRef, TranscriptStore, type Transcript } from './transcript.ts';
 import { approxTokens } from './usage.ts';
@@ -78,6 +81,47 @@ export class ApiChatAdapter implements AgentAdapter {
       }
     }
     return probe;
+  }
+
+  /**
+   * `provider/model` for every provider: its configured models, else (unless `discover: false`) its
+   * models endpoint. A provider that can't be reached or has no key is left out.
+   */
+  async listModels(ctx: { env?: Record<string, string> } = {}): Promise<ModelOption[]> {
+    const loaded = this.config.get();
+    const env = { ...this.#env, ...ctx.env };
+    const def = defaultModelRef(loaded);
+    const perProvider = await Promise.all(
+      Object.entries(loaded.config.providers).map(async ([providerId, provider]): Promise<ModelOption[]> => {
+        const specs = modelSpecs(provider);
+        if (specs.length) return specs.map((m) => ({ id: `${providerId}/${m.id}` }));
+        if (provider.discover === false) return [];
+        let apiKey: string | undefined;
+        try {
+          apiKey = resolveApiKey(providerId, provider, env);
+        } catch {
+          return [];
+        }
+        return (await this.#discoverModels(providerId, provider, apiKey)).map((m) => ({ ...m, id: `${providerId}/${m.id}` }));
+      }),
+    );
+    return perProvider.flat().map((m) => (m.id === def ? { ...m, isDefault: true } : m));
+  }
+
+  async #discoverModels(providerId: string, provider: ProviderSpec, apiKey: string | undefined): Promise<ModelOption[]> {
+    const headers = { ...provider.headers, ...authHeaders({ providerId, provider, model: '', ref: '', ...(apiKey ? { apiKey } : {}) }) };
+    const fetchOpts = this.options.fetch ? { fetch: this.options.fetch } : {};
+    const anthropicApi = provider.api === 'anthropic';
+    const url = `${provider.baseUrl}/models${anthropicApi ? '?limit=1000' : ''}`;
+    const j = (await getJson(url, anthropicApi ? { 'anthropic-version': anthropic.API_VERSION, ...headers } : headers, fetchOpts)) as { data?: unknown } | undefined;
+    if (!Array.isArray(j?.data)) return [];
+    const out: ModelOption[] = [];
+    for (const m of j.data as Record<string, unknown>[]) {
+      if (!m || typeof m.id !== 'string' || !m.id) continue;
+      const label = typeof m.display_name === 'string' ? m.display_name : typeof m.name === 'string' ? m.name : undefined;
+      out.push(label && label !== m.id ? { id: m.id, label } : { id: m.id });
+    }
+    return out;
   }
 
   capabilities(mode: SessionMode): AgentCapabilities {

@@ -2,7 +2,7 @@
 
 import type { AgentCapabilities } from './capabilities.ts';
 import type { SessionEventBody } from './events.ts';
-import type { AgentKind, AgentProbe, ApprovalDecision, InputBlock, QuestionAnswers, SessionMode } from './model.ts';
+import type { AgentKind, AgentProbe, ApprovalDecision, InputBlock, ModelOption, QuestionAnswers, SessionMode } from './model.ts';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -131,6 +131,12 @@ export interface AgentAdapter {
   probe(): Promise<AgentProbe>;
   capabilities(mode: SessionMode): AgentCapabilities;
   start(opts: StartSessionOptions, emit: EmitFn, ctx: AdapterContext): Promise<AdapterSession>;
+  /**
+   * The models the agent offers (`agents.models`). Optional: without it the capability's fixed
+   * `models` list is used. May start the agent briefly; the core caches the answer per version.
+   * `env` is the agent's secrets (as sessions get them), for agents that need a key to ask.
+   */
+  listModels?(ctx?: { env?: Record<string, string> }): Promise<ModelOption[]>;
   /** Release shared resources (e.g. a per-node agent server) when the node shuts down. */
   dispose?(): Promise<void>;
   // ---- restarts onto a new agent version (updates.md §3, §5)

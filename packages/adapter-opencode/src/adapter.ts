@@ -10,6 +10,7 @@ import {
   type EmitFn,
   type Logger,
   type McpServerSpec,
+  type ModelOption,
   type SessionMode,
   type StartSessionOptions,
 } from '@bizzi/protocol';
@@ -19,7 +20,7 @@ import { approxTokens } from './context.ts';
 import { probeOpenCode } from './probe.ts';
 import { OpenCodeServer } from './server.ts';
 import { OpenCodeSession } from './session.ts';
-import type { McpConfig, ModelRef, PermissionRule, SessionInfo } from './types.ts';
+import type { McpConfig, ModelInfo, ModelRef, PermissionRule, SessionInfo } from './types.ts';
 
 export interface OpenCodeAdapterOptions {
   /** `opencode` executable (default "opencode" on PATH). */
@@ -45,6 +46,8 @@ export interface OpenCodeAdapterOptions {
    * `question.asked` and are answered through `respondQuestion`. `false` adds a deny rule.
    */
   allowQuestions?: boolean;
+  /** Waits between re-asks while a fresh server's model list is still empty (tests shorten it). */
+  modelListRetryMs?: number[];
   /** Stop the private server this long after the last session stops (default 10 min; 0 = never). */
   idleShutdownMs?: number;
   startupTimeoutMs?: number;
@@ -69,6 +72,15 @@ const noopLogger: Logger = {
 
 /** OpenCode primary agents shipped by default; any other primary agent name is accepted too. */
 export const OPENCODE_PERMISSION_MODES = ['build', 'plan'];
+/** An OpenCode model row as a ModelOption; its variants are the effort levels. */
+export function toModelOption(m: ModelInfo): ModelOption {
+  const out: ModelOption = { id: formatModel({ providerID: m.providerID, id: m.id }) };
+  if (m.name && m.name !== m.id) out.label = m.name;
+  const efforts = (m.variants ?? []).map((v) => v.id).filter((v) => v && v !== 'default');
+  if (efforts.length) out.efforts = efforts;
+  return out;
+}
+
 /** Model variants OpenCode ships for reasoning models; the actual set depends on the model. */
 export const OPENCODE_EFFORTS = ['minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
 
@@ -331,6 +343,25 @@ export class OpenCodeAdapter implements AgentAdapter {
     }
     log.log('info', 'opencode session started', { ref, directory, resumed: Boolean(opts.resumeRef), forkedFrom: opts.fork ? opts.resumeRef : undefined });
     return session;
+  }
+
+  /** The enabled models of the configured providers, as `provider/model` (what `model` takes). */
+  async listModels(): Promise<ModelOption[]> {
+    clearTimeout(this.#idleTimer);
+    try {
+      const client = await this.server.ensure();
+      // A freshly started server loads its model catalog in the background and answers [] until then.
+      const waits = this.options.modelListRetryMs ?? [250, 500, 1000, 1500, 2000];
+      let models = await client.models();
+      for (const ms of waits) {
+        if (models.length) break;
+        await new Promise((r) => setTimeout(r, ms));
+        models = await client.models();
+      }
+      return models.filter((m) => m.enabled !== false).map((m) => toModelOption(m));
+    } finally {
+      this.#scheduleIdleShutdown();
+    }
   }
 
   async #contextWindow(client: OpenCodeClient, directory: string, model: ModelRef | undefined): Promise<number | undefined> {

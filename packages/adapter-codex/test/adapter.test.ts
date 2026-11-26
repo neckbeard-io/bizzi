@@ -340,3 +340,11 @@ test('terminal mode is unsupported', async () => {
     (e: unknown) => e instanceof BizziError && e.code === 'unsupported',
   );
 });
+
+test('listModels: every page of model/list, hidden models left out', async () => {
+  assert.deepEqual(await fakeAdapter().listModels(), [
+    { id: 'gpt-a', label: 'GPT-A', description: 'gpt-a model', isDefault: true, efforts: ['low', 'high'] },
+    { id: 'gpt-b', label: 'GPT-B', description: 'gpt-b model' },
+  ]);
+  await assert.rejects(createAdapters({ codexPath: '/nonexistent/codex' })[0]!.listModels!(), { code: 'agent_unavailable' });
+});

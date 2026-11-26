@@ -1,6 +1,6 @@
 // Mock provisioning: agents.list per machine, agent.plan / install (with install.progress), login, secrets.
 import { BizziError, GLOBAL_CHANNEL } from '@bizzi/protocol';
-import type { AgentKind, AgentListing, InstallAction, InstallPlan, InstallStep, MachineInfo, RestartPolicy, SecretInfo, UpdatePolicy } from '@bizzi/protocol';
+import type { AgentKind, AgentListing, InstallAction, InstallPlan, InstallStep, MachineInfo, ModelOption, RestartPolicy, SecretInfo, UpdatePolicy } from '@bizzi/protocol';
 import { AGENTS, MACHINE, MINI, MINI_AGENTS, SERVER, SERVER_AGENTS } from './fixtures.ts';
 import type { MockHost, MockModule } from './host.ts';
 
@@ -173,7 +173,7 @@ export class MockProvision implements MockModule {
   }
 
   handles(method: string): boolean {
-    return method === 'agents.list' || (method.startsWith('agent.') && method !== 'agent.raw');
+    return method === 'agents.list' || method === 'agents.models' || (method.startsWith('agent.') && method !== 'agent.raw');
   }
 
   async handle(method: string, params: Record<string, unknown>): Promise<unknown> {
@@ -182,6 +182,10 @@ export class MockProvision implements MockModule {
       case 'agents.list': {
         await this.host.sleep(params.refresh ? 600 : 50);
         return { agents: (this.agents.get(m.id) ?? []).map((a) => ({ ...a })) };
+      }
+      case 'agents.models': {
+        await this.host.sleep(params.refresh ? 500 : 150);
+        return { models: MOCK_MODELS[this.agentParam(params)] ?? [] };
       }
       case 'agent.plan': {
         await this.host.sleep(250);
@@ -444,3 +448,22 @@ function randomBlock(): string {
   for (let i = 0; i < 4; i++) out += alphabet[Math.floor(Math.random() * alphabet.length)] ?? 'X';
   return out;
 }
+
+const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+/** What `agents.models` answers per agent in the mock (shapes as the real adapters report them). */
+const MOCK_MODELS: Partial<Record<AgentKind, ModelOption[]>> = {
+  claude: [
+    { id: 'default', label: 'Default (recommended)', description: 'Opus · Best for everyday, complex tasks', isDefault: true, efforts: EFFORTS },
+    { id: 'opus', label: 'Opus', description: 'For complex work and everyday tasks', efforts: EFFORTS },
+    { id: 'sonnet', label: 'Sonnet', description: 'Most efficient for simpler tasks', efforts: EFFORTS },
+    { id: 'haiku', label: 'Haiku', description: 'Fastest for quick answers', efforts: EFFORTS },
+  ],
+  codex: [
+    { id: 'gpt-codex', label: 'GPT-Codex', description: 'Balanced model for agentic coding', isDefault: true, efforts: ['low', 'medium', 'high'] },
+    { id: 'gpt-codex-mini', label: 'GPT-Codex-Mini', description: 'Fast model for simpler tasks', efforts: ['low', 'medium'] },
+  ],
+  opencode: [
+    { id: 'opencode/big-pickle', label: 'Big Pickle' },
+    { id: 'anthropic/claude-sonnet', label: 'Claude Sonnet', efforts: ['high', 'max'] },
+  ],
+};
