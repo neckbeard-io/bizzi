@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
+import { afterEach, describe, it } from 'node:test';
 import { BizziError } from '@bizzi/protocol';
 import { TerminalAdapter, TerminalHost, claudeSpec, createAdapters, shellSpec } from '../src/index.ts';
 import { EventLog, ctx, sleep, startOpts } from './helpers.ts';
@@ -47,10 +47,22 @@ describe('TerminalHost', () => {
 });
 
 describe('TerminalAdapter (in-process PTY)', () => {
+  // A failed assertion skips a test's own stop(); a live PTY would then keep the file running forever.
+  type Session = Awaited<ReturnType<TerminalAdapter['start']>>;
+  const live: Session[] = [];
+  afterEach(async () => {
+    await Promise.allSettled(live.splice(0).map((s) => s.stop()));
+  });
+  async function start(adapter: TerminalAdapter, opts: Parameters<TerminalAdapter['start']>[0], emit: Parameters<TerminalAdapter['start']>[1]): Promise<Session> {
+    const s = await adapter.start(opts, emit, ctx);
+    live.push(s);
+    return s;
+  }
+
   it('streams term.output, takes input, resizes and reports the exit code', async () => {
     const adapter = bashAdapter(SCRIPT);
     const log = new EventLog();
-    const session = await adapter.start(startOpts(), log.emit, ctx);
+    const session = await start(adapter, startOpts(), log.emit);
     await log.waitForOutput('hi');
     session.resizeTerminal!(100, 40);
     session.writeTerminal!(new TextEncoder().encode('yo\r'));
@@ -67,8 +79,10 @@ describe('TerminalAdapter (in-process PTY)', () => {
   it('send() types text + Enter and completes the turn when output goes idle', async () => {
     const adapter = bashAdapter('read x; echo "got $x"; read y; echo "bye $y"');
     const log = new EventLog();
-    const session = await adapter.start(startOpts(), log.emit, ctx);
+    const session = await start(adapter, startOpts(), log.emit);
     await session.send('t_1', [{ type: 'text', text: 'hello world' }]);
+    // Under load the program's reply can trail the echoed input by more than idleMs; wait for both.
+    await log.waitForOutput('got hello world');
     await log.waitFor(() => log.ofType('turn.completed').length === 1, 'turn.completed');
     assert.deepEqual(log.ofType('turn.completed')[0]!.data, { turnId: 't_1', stopReason: 'end_turn' });
     assert.match(log.output(), /got hello world/);
@@ -90,7 +104,7 @@ describe('TerminalAdapter (in-process PTY)', () => {
   it('emits waiting_input after output stops, and running when it resumes', async () => {
     const adapter = bashAdapter('echo one; read x; echo two; sleep 0.2; echo three; read y', { idleMs: 250 });
     const log = new EventLog();
-    const session = await adapter.start(startOpts(), log.emit, ctx);
+    const session = await start(adapter, startOpts(), log.emit);
     await log.waitFor(() => log.ofType('session.status').some((e) => e.data.status === 'waiting_input'), 'waiting_input');
     assert.equal(log.ofType('session.status')[0]!.data.reason, 'idle');
     session.writeTerminal!(Buffer.from('go\r'));
@@ -107,10 +121,11 @@ describe('TerminalAdapter (in-process PTY)', () => {
   });
 
   it('interrupt() sends Ctrl-C and completes the in-flight turn as interrupted', async () => {
-    const adapter = new TerminalAdapter(shellSpec({ command: 'sleep', args: ['30'] }), { supervisor: false, idleMs: 5000 });
+    // `exec` keeps the pid, so the Ctrl-C lands on sleep; waiting for `ready` means the tty is set up first.
+    const adapter = new TerminalAdapter(shellSpec({ command: 'sh', args: ['-c', 'echo ready; exec sleep 30'] }), { supervisor: false, idleMs: 5000 });
     const log = new EventLog();
-    const session = await adapter.start(startOpts(), log.emit, ctx);
-    await sleep(100);
+    const session = await start(adapter, startOpts(), log.emit);
+    await log.waitForOutput('ready');
     await session.send('t_1', [{ type: 'text', text: '' }]);
     await session.interrupt();
     assert.deepEqual(log.ofType('turn.completed')[0]!.data, { turnId: 't_1', stopReason: 'interrupted' });
@@ -122,7 +137,7 @@ describe('TerminalAdapter (in-process PTY)', () => {
   it('stop() kills the process and is idempotent', async () => {
     const adapter = new TerminalAdapter(shellSpec({ command: 'sleep', args: ['30'] }), { supervisor: false });
     const log = new EventLog();
-    const session = await adapter.start(startOpts(), log.emit, ctx);
+    const session = await start(adapter, startOpts(), log.emit);
     await Promise.all([session.stop(), session.stop()]);
     await session.stop();
     assert.equal(log.ofType('term.exited').length, 1);
@@ -136,7 +151,7 @@ describe('TerminalAdapter (in-process PTY)', () => {
       adapter.start(startOpts({ mode: 'structured' }), () => {}, ctx),
       (e: BizziError) => e.code === 'unsupported',
     );
-    const session = await adapter.start(startOpts(), () => {}, ctx);
+    const session = await start(adapter, startOpts(), () => {});
     await assert.rejects(session.respondApproval('ap_1', { decision: 'allow' }), (e: BizziError) => e.code === 'unsupported');
     await assert.rejects(
       session.send('t_1', [{ type: 'image', mediaType: 'image/png', dataBase64: '' }]),
