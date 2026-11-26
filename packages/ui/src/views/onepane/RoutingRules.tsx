@@ -1,4 +1,4 @@
-// Routing rules (spec §11.2 step 3, knowledge.md §9.3) and the recorded routes (the labelled set for
+// Routing rules (spec §11.2 step 3, knowledge.md §9.3) and the recorded routes (the labeled set for
 // choosing a classifier). Rules live where routing happens: on the hub, or on the node in local mode.
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
@@ -188,7 +188,7 @@ function RecordedRoutes(): ReactNode {
   return (
     <div className="flex items-center gap-2 border-t border-border pt-2 text-xs text-muted">
       <span className="flex-1">
-        {counts.total} routed prompt{counts.total === 1 ? '' : 's'} recorded, {counts.overridden} moved by you. They become the labelled set for comparing classifiers.
+        {counts.total} routed prompt{counts.total === 1 ? '' : 's'} recorded, {counts.overridden} moved by you. They become the labeled set for comparing classifiers.
       </span>
       {counts.total > 0 ? (
         <Button size="sm" variant="ghost" icon="download" busy={download.busy} onClick={() => void download.run()}>

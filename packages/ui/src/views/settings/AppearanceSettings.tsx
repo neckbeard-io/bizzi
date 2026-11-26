@@ -8,7 +8,7 @@ import type { DensityPref } from '../../app/theme.ts';
 import { Icon } from '../../components/icons.tsx';
 import { SectionTitle } from '../../components/layout.tsx';
 import { Badge, Button, Card, CopyButton, ErrorText, Field, Input, Modal, Segmented, cx } from '../../components/ui.tsx';
-import { BUILTIN_CATALOGUE, DEVICE_THEME_ID, deviceTheme } from '../../lib/theme/builtins/index.ts';
+import { BUILTIN_CATALOG, DEVICE_THEME_ID, deviceTheme } from '../../lib/theme/builtins/index.ts';
 import type { ThemeGroup } from '../../lib/theme/builtins/index.ts';
 import { IMPORT_ACCEPT, customThemeId, downloadName, parseThemeFile, serializeTheme, themeFromCurrent } from '../../lib/theme/files.ts';
 import type { ImportResult } from '../../lib/theme/files.ts';
@@ -41,7 +41,7 @@ export function AppearanceSettings(): ReactNode {
   const fileRef = useRef<HTMLInputElement>(null);
 
   const entries = useMemo<Entry[]>(() => {
-    const out: Entry[] = BUILTIN_CATALOGUE.map(({ theme, group }) => ({ id: theme.id, theme: theme.id === DEVICE_THEME_ID ? deviceTheme(s.accent) : theme, name: theme.name, group }));
+    const out: Entry[] = BUILTIN_CATALOG.map(({ theme, group }) => ({ id: theme.id, theme: theme.id === DEVICE_THEME_ID ? deviceTheme(s.accent) : theme, name: theme.name, group }));
     for (const c of s.custom) out.push({ id: c.file.id, theme: c.theme, name: c.file.name, group: 'custom', failures: c.ok ? [] : c.failures });
     return out;
   }, [s.custom, s.accent]);
@@ -50,7 +50,7 @@ export function AppearanceSettings(): ReactNode {
     if (!file) return;
     const result = parseThemeFile(await file.text(), file.name);
     // An id a built-in already uses gets a fresh one; a custom one with the same id is replaced.
-    if (result.theme && BUILTIN_CATALOGUE.some((e) => e.theme.id === result.theme!.id)) result.theme.id = customThemeId(result.theme.name, themeIdTaken);
+    if (result.theme && BUILTIN_CATALOG.some((e) => e.theme.id === result.theme!.id)) result.theme.id = customThemeId(result.theme.name, themeIdTaken);
     if (result.theme) themeStore.preview(result.theme);
     setImporting({ result, fileName: file.name });
   };
@@ -334,7 +334,7 @@ function CreateModal(props: { base: Theme; onClose: () => void }): ReactNode {
     >
       <div className="grid gap-3 text-sm">
         <p className="text-muted">
-          Starts from {props.base.name}. Edit the JSON (or ask an agent: “make me a theme like Nord but warmer”, see packages/ui/themes/AGENTS.md), then import it. Five colours per variant are
+          Starts from {props.base.name}. Edit the JSON (or ask an agent: “make me a theme like Nord but warmer”, see packages/ui/themes/AGENTS.md), then import it. Five colors per variant are
           enough; everything else is derived and checked.
         </p>
         <Field label="Name">

@@ -4,7 +4,7 @@
 
 /*
  * Theme tokens (docs/theming.md). Names follow Chorus/shadcn so Chorus and Terax themes drop in, plus
- * bizzi's own (status, code, diff, agent state colours). These blocks are bizzi Default and paint
+ * bizzi's own (status, code, diff, agent state colors). These blocks are bizzi Default and paint
  * before any theme loads; applyTheme (src/lib/theme/apply.ts) overrides them inline on :root. Keep in
  * sync with src/lib/theme/defaults.ts (a test checks).
  */
@@ -54,7 +54,7 @@
   --state-failed: #dc2626;
   --state-idle: #6b6b76;
   --radius: 0.5rem;
-  /* Identity colours (spec §11.1), DEFAULT_LABELS in defaults.ts; resolveTheme derives them per theme. */
+  /* Identity colors (spec §11.1), DEFAULT_LABELS in defaults.ts; resolveTheme derives them per theme. */
   --label-red: #dc2626;
   --label-orange: #c2410c;
   --label-yellow: #a16207;
@@ -157,7 +157,7 @@
   --color-accent: var(--primary);
   --color-accent-fg: var(--primary-foreground);
   --color-accent-soft: var(--primary-soft);
-  /* Accent-coloured text: the primary, nudged to 4.5:1 on every surface it sits on (resolve.ts). */
+  /* Accent-colored text: the primary, nudged to 4.5:1 on every surface it sits on (resolve.ts). */
   --color-accent-text: var(--primary-text);
   --color-ok: var(--ok);
   --color-warn: var(--warn);

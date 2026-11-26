@@ -1,7 +1,7 @@
 bizzi
 =====
 
-bizzi includes third-party material listed below. Each item keeps its own licence.
+bizzi includes third-party material listed below. Each item keeps its own license.
 
 ------------------------------------------------------------------------------
 Theming: model, converter and hand-authored themes
@@ -9,7 +9,7 @@ Theming: model, converter and hand-authored themes
 ------------------------------------------------------------------------------
 
 Chorus (an agentic development environment)
-  Licence: Apache License 2.0
+  License: Apache License 2.0
   Used: the theme model (semantic tokens, terminal palette, layout tokens per
   light/dark variant), the base16/base24 converter including its YAML
   inline-comment handling, theme validation, and the themes Graphite, Paper,
@@ -18,7 +18,7 @@ Chorus (an agentic development environment)
   Chorus's own house palette ("Chorus Default") is not included.
 
 Terax (https://github.com/crynta/terax-ai)
-  Licence: Apache License 2.0
+  License: Apache License 2.0
   Used: the theme model Chorus descends from, and the themes Tokyo Night,
   Nord, Catppuccin, Gruvbox, Rosé Pine, Tide, Sage, Caffeine and
   Warm Paper & Clay (Terax "claude"), via Chorus. Three light-variant muted
@@ -34,7 +34,7 @@ Terax (https://github.com/crynta/terax-ai)
 Cobalt2 (https://github.com/wesbos/cobalt2-vscode)
 ------------------------------------------------------------------------------
 
-  Colours taken from the Cobalt2 VS Code theme.
+  Colors taken from the Cobalt2 VS Code theme.
 
   MIT License
 
@@ -63,7 +63,7 @@ base16 schemes (https://github.com/tinted-theming/schemes)
 ------------------------------------------------------------------------------
 
   Copyright (c) 2022 Tinted Theming (https://github.com/tinted-theming)
-  Licence: MIT (same terms as above). Each scheme also names its author:
+  License: MIT (same terms as above). Each scheme also names its author:
 
   Ayu Dark, Ayu Light ........ Tinted Theming, Ayu Theme (https://github.com/ayu-theme)
   Catppuccin Latte ........... Catppuccin (https://github.com/catppuccin/catppuccin)

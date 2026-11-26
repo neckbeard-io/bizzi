@@ -344,7 +344,7 @@ export class MockCore implements MockHost {
     this.emitS(q, { type: 'session.status', data: { status: 'waiting_input', prompt: 'input', source: 'adapter' } }, at());
     this.pendingStatic.set(PLAN_QUESTION_ID, q);
 
-    // s_notes: a finished research turn, then a turn whose approval was cancelled by an interrupt.
+    // s_notes: a finished research turn, then a turn whose approval was canceled by an interrupt.
     const n = 's_notes';
     m = -60 * 26;
     this.emitS(n, { type: 'turn.started', data: { turnId: 't_n1', input: [{ type: 'text', text: 'Summarize the three CRDT papers in this folder in a table.' }] } }, at());
@@ -515,7 +515,7 @@ export class MockCore implements MockHost {
         return {};
       }
       case 'workspace.set': {
-        // Like the node (spec §11.1): name, colour and icon; '' clears colour or icon.
+        // Like the node (spec §11.1): name, color and icon; '' clears color or icon.
         const w = this.workspaceOnline(p.workspaceId);
         const next: WorkspaceInfo = { ...w };
         if (p.name !== undefined) {

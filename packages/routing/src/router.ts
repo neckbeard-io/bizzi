@@ -3,7 +3,7 @@
 // client: it knows which session the conversation is in.
 
 import { BizziError, type Logger, type RouteCandidate, type RouteSuggestion, type RoutingRule } from '@bizzi/protocol';
-import { buildTargets, type CatalogueInput, type RouteTarget } from './catalogue.ts';
+import { buildTargets, type CatalogInput, type RouteTarget } from './catalog.ts';
 import { parseExplicit } from './explicit.ts';
 import { backendScorer, confidence, type LogprobBackend, type OptionScorer } from './logprobs.ts';
 import { MAX_REMOTE_ATTEMPTS } from './remote.ts';
@@ -42,7 +42,7 @@ export class Router {
     this.#log = o.logger;
   }
 
-  async suggest(rawText: unknown, input: CatalogueInput, o: SuggestOptions = {}): Promise<RouteSuggestion> {
+  async suggest(rawText: unknown, input: CatalogInput, o: SuggestOptions = {}): Promise<RouteSuggestion> {
     if (typeof rawText !== 'string' || rawText.trim() === '') throw new BizziError('bad_request', 'text is required');
     const all = buildTargets(input, { includeOffline: true });
     const ex = parseExplicit(rawText.slice(0, MAX_TEXT), all, input.machines);

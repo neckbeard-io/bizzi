@@ -1,5 +1,5 @@
 // The built-in themes (theming.md §4), in picker order: bizzi's own, hand-authored, flax five-tone,
-// Cobalt2, then the base16 catalogue through the same converter as imports.
+// Cobalt2, then the base16 catalog through the same converter as imports.
 import { base16ToTheme } from '../base16.ts';
 import type { Theme } from '../types.ts';
 import { BASE16_SCHEMES } from './base16-schemes.ts';
@@ -12,7 +12,7 @@ export { DEFAULT_THEME_ID, DEVICE_THEME_ID, bizziDefault, deviceTheme, normalize
 
 export type ThemeGroup = 'bizzi' | 'hand-authored' | 'five-tone' | 'base16' | 'custom';
 
-export type CatalogueEntry = { theme: Theme; group: ThemeGroup };
+export type CatalogEntry = { theme: Theme; group: ThemeGroup };
 
 export const BASE16_THEMES: Theme[] = BASE16_SCHEMES.map(base16ToTheme);
 
@@ -24,9 +24,9 @@ const GROUPS: [ThemeGroup, Theme[]][] = [
 ];
 
 /** Every built-in; ids are checked here because a collision would silently shadow a theme. */
-export const BUILTIN_CATALOGUE: CatalogueEntry[] = (() => {
+export const BUILTIN_CATALOG: CatalogEntry[] = (() => {
   const seen = new Set<string>();
-  const out: CatalogueEntry[] = [];
+  const out: CatalogEntry[] = [];
   for (const [group, themes] of GROUPS) {
     for (const theme of themes) {
       if (seen.has(theme.id)) throw new Error(`duplicate built-in theme id: ${theme.id}`);
@@ -37,7 +37,7 @@ export const BUILTIN_CATALOGUE: CatalogueEntry[] = (() => {
   return out;
 })();
 
-export const BUILTIN_THEMES: Theme[] = BUILTIN_CATALOGUE.map((e) => e.theme);
+export const BUILTIN_THEMES: Theme[] = BUILTIN_CATALOG.map((e) => e.theme);
 
 const BY_ID = new Map(BUILTIN_THEMES.map((t) => [t.id, t]));
 

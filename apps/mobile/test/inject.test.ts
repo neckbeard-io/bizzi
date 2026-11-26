@@ -41,7 +41,7 @@ test('falls back to the end of <head> when there are no scripts', () => {
   assert.ok(out.includes(`${TAG}\n</head>`), out);
 });
 
-test('uppercase tags are recognised', () => {
+test('uppercase tags are recognized', () => {
   const out = injectBridgeScript('<HTML><HEAD><SCRIPT SRC="a.js"></SCRIPT></HEAD></HTML>');
   assert.ok(out.indexOf('native-bridge.js') < out.indexOf('a.js'));
 });

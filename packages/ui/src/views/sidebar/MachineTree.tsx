@@ -81,7 +81,7 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
   return (
     <section className={cx('relative', !summary.online && 'opacity-60')}>
       {m.color ? (
-        // Identity stripe (spec §11.1): the machine's colour down the left edge of its whole group.
+        // Identity stripe (spec §11.1): the machine's color down the left edge of its whole group.
         <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-0 z-10 w-0.5 rounded-full" style={{ backgroundColor: labelVar(m.color) }} />
       ) : null}
       <div

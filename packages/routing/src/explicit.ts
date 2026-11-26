@@ -5,7 +5,7 @@
 // a machine that's offline), routing stops with `problem` instead of guessing elsewhere.
 
 import { AGENT_KINDS, type AgentKind, type MachineInfo } from '@bizzi/protocol';
-import type { RouteTarget } from './catalogue.ts';
+import type { RouteTarget } from './catalog.ts';
 
 export interface ExplicitRoute {
   /** Online targets left after the `@` and `#` filters (every online target when neither matched). */
@@ -27,7 +27,7 @@ const norm = (s: string) => s.toLowerCase();
 
 /**
  * @param all every target, offline machines included (`buildTargets(input, { includeOffline: true })`)
- * @param machines every known machine, so `@name` is recognised even when it has no workspaces
+ * @param machines every known machine, so `@name` is recognized even when it has no workspaces
  */
 export function parseExplicit(text: string, all: RouteTarget[], machines: MachineInfo[] = uniqueMachines(all)): ExplicitRoute {
   let set = all;

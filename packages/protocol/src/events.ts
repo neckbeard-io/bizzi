@@ -175,7 +175,7 @@ export interface GlobalEventMap {
   /** A pipeline run was started or changed (stage started or finished, gate opened or answered). */
   'pipeline.updated': { pipeline: PipelineInfo };
   'pipeline.removed': { pipelineId: string; machineId: string };
-  // ---- identity colour and icon (spec §11.1 "Identity colour")
+  // ---- identity color and icon (spec §11.1 "Identity color")
   /** A workspace's user fields changed (`workspace.set`): the whole new record. */
   'workspace.updated': { workspace: WorkspaceInfo };
 }

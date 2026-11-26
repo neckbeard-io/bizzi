@@ -47,7 +47,7 @@
       }
     },
     "machine.set": {
-      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list, `description` replaces the text (`''` clears it), `color` sets the identity colour (`''` clears it). Emits `machine.updated`.",
+      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list, `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it). Emits `machine.updated`.",
       "params": {
         "$ref": "#/$defs/params:machine.set"
       },
@@ -558,7 +558,7 @@
       }
     },
     "route.record": {
-      "description": "Record a routed prompt (the labelled eval set). Returns it with its id and time.",
+      "description": "Record a routed prompt (the labeled eval set). Returns it with its id and time.",
       "params": {
         "$ref": "#/$defs/params:route.record"
       },
@@ -628,7 +628,7 @@
       }
     },
     "pipeline.cancel": {
-      "description": "Stop the running stage's session and end the run as cancelled.",
+      "description": "Stop the running stage's session and end the run as canceled.",
       "params": {
         "$ref": "#/$defs/params:pipeline.cancel"
       },
@@ -2115,7 +2115,7 @@
       }
     },
     "ForkTransfer": {
-      "description": "How the workspace state travelled for a fork to another machine. `git`: the source branch plus any uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.",
+      "description": "How the workspace state traveled for a fork to another machine. `git`: the source branch plus any uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.",
       "type": "object",
       "properties": {
         "kind": {
@@ -3356,7 +3356,7 @@
       ]
     },
     "LabelColor": {
-      "description": "A palette name, not a CSS colour: each theme resolves it (`--label-<name>`) so it reads on that theme's sidebar and cards, light or dark.",
+      "description": "A palette name, not a CSS color: each theme resolves it (`--label-<name>`) so it reads on that theme's sidebar and cards, light or dark.",
       "type": "string",
       "enum": [
         "red",
@@ -3420,7 +3420,7 @@
           "type": "string"
         },
         "color": {
-          "description": "User-chosen identity colour (spec §11.1 \"Identity colour\"); set with `machine.set`.",
+          "description": "User-chosen identity color (spec §11.1 \"Identity color\"); set with `machine.set`.",
           "$ref": "#/$defs/LabelColor"
         },
         "online": {
@@ -6069,7 +6069,7 @@
       ]
     },
     "RouteDecisionInput": {
-      "description": "One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set for comparing classifiers (spec §11.2 \"Choosing\"): `text` → `chosen`, with what was offered and by whom.",
+      "description": "One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labeled set for comparing classifiers (spec §11.2 \"Choosing\"): `text` → `chosen`, with what was offered and by whom.",
       "type": "object",
       "properties": {
         "text": {
@@ -7506,7 +7506,7 @@
           "type": "string"
         },
         "color": {
-          "description": "User-chosen identity colour (spec §11.1 \"Identity colour\"); set with `workspace.set`. A worktree without one shows its repo's.",
+          "description": "User-chosen identity color (spec §11.1 \"Identity color\"); set with `workspace.set`. A worktree without one shows its repo's.",
           "$ref": "#/$defs/LabelColor"
         },
         "icon": {

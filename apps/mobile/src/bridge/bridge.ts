@@ -12,7 +12,7 @@ export interface BizziNative {
   secureGet(key: string): Promise<string | null>;
   secureSet(key: string, value: string): Promise<void>;
   secureDelete(key: string): Promise<void>;
-  /** Scanned text (e.g. a pairing URL), or null if the user cancelled. */
+  /** Scanned text (e.g. a pairing URL), or null if the user canceled. */
   scanQr(): Promise<string | null>;
 }
 

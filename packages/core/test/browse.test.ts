@@ -119,7 +119,7 @@ test('fs.browse: entry cap sets truncated', async (t) => {
   assert.equal((await big.browse({ path: many })).truncated, false);
 });
 
-test('fs.complete: shell-like, base keeps the typed form, case behaviour behind a flag', async (t) => {
+test('fs.complete: shell-like, base keeps the typed form, case behavior behind a flag', async (t) => {
   const { home } = fixture(t);
   const cs = new FsBrowser({ home, caseInsensitive: false });
   const ci = new FsBrowser({ home, caseInsensitive: true });

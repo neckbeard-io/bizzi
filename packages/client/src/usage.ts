@@ -2,7 +2,7 @@
 import type { AccountUsage, AgentListing, ContextCategory, ContextUsage, SessionInfo, UsageWindow, WidgetValue } from '@bizzi/protocol';
 import type { BizziState } from './store.ts';
 
-/** Colour carries state only: neutral, amber from 80%, red when limited / near compaction. */
+/** Color carries state only: neutral, amber from 80%, red when limited / near compaction. */
 export type MeterTone = 'neutral' | 'warn' | 'err';
 
 // ---------------------------------------------------------------- context (usage.md §1.3)
@@ -21,7 +21,7 @@ export type ContextView =
       pct: number;
       /** Where the agent compacts, as a share of the window, when known. */
       compactPct?: number;
-      /** neutral < 60% · elevated 60–80% (still neutral colour) · warn ≥ 80% · err near compaction. */
+      /** neutral < 60% · elevated 60–80% (still neutral color) · warn ≥ 80% · err near compaction. */
       level: 'neutral' | 'elevated' | 'warn' | 'err';
       tone: MeterTone;
       /** "71% · compacts at 80%" */

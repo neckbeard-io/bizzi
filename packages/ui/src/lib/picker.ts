@@ -1,5 +1,5 @@
 // Pure logic behind the workspace picker (WorkspacePicker.tsx): path splitting, tilde handling,
-// breadcrumbs, common-prefix completion and the keyboard behaviour of the completion dropdown.
+// breadcrumbs, common-prefix completion and the keyboard behavior of the completion dropdown.
 import type { BrowseEntry } from '@bizzi/protocol';
 
 /** The typed directory part (`~/`, `/a/b/`) and the partial name after it, as fs.complete splits it. */
@@ -117,7 +117,7 @@ export function breadcrumbs(abs: string, home: string): { label: string; path: s
   return out;
 }
 
-// ---- dropdown keyboard behaviour
+// ---- dropdown keyboard behavior
 
 export interface DropdownState {
   input: string;

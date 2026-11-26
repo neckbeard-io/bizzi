@@ -48,7 +48,7 @@ describe('services inside createNode({ extensions })', { skip: supported ? false
     await node.call('agent.setSecret', { agent: 'claude', name: 'ANTHROPIC_API_KEY', value: 'sk-int' });
     assert.deepEqual((await node.call('agent.secrets', {})).secrets.map((s) => s.name), ['ANTHROPIC_API_KEY']);
     assert.deepEqual((await node.call('widgets.list', {})).widgets, []);
-    assert.ok(existsSync(join(dir, 'widgets', 'AGENTS.md')), 'widgets dir initialised');
+    assert.ok(existsSync(join(dir, 'widgets', 'AGENTS.md')), 'widgets dir initialized');
     const { workspace } = await node.call('workspace.create', { path: tempDir() });
     await node.call('session.create', { workspaceId: workspace.id, agent: 'claude', mode: 'structured' });
     await waitFor(() => structured.starts.length === 1, 'structured start');

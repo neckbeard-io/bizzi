@@ -64,7 +64,7 @@ export const BIZZI_COLOR_KEYS = [
   'diffHunkForeground',
   /** Tinted primary surface (badges, selected chips). */
   'primarySoft',
-  /** Accent-coloured text (links, accent badges); derived from the primary when omitted. */
+  /** Accent-colored text (links, accent badges); derived from the primary when omitted. */
   'primaryText',
   'stateWaiting',
   'stateWorking',
@@ -80,7 +80,7 @@ export type BizziColorKey = (typeof BIZZI_COLOR_KEYS)[number];
 export type ColorKey = ChorusColorKey | BizziColorKey;
 export type StateKey = (typeof STATE_KEYS)[number];
 
-/** Colour tokens plus `radius` (a CSS length), as in Chorus. */
+/** Color tokens plus `radius` (a CSS length), as in Chorus. */
 export type ThemeColors = Partial<Record<ColorKey, string>> & { radius?: string };
 
 export type Ansi16 = readonly [string, string, string, string, string, string, string, string, string, string, string, string, string, string, string, string];
@@ -102,7 +102,7 @@ export type Theme = {
   name: string;
   author?: string;
   description?: string;
-  /** Licence of the palette, for built-ins and vendored schemes. */
+  /** License of the palette, for built-ins and vendored schemes. */
   license?: string;
   /** Shared by both variants unless a variant overrides it. */
   layout?: LayoutTokens;
@@ -111,7 +111,7 @@ export type Theme = {
   editorTheme?: { light?: string; dark?: string };
 };
 
-/** Every colour token, filled in (resolve.ts). */
+/** Every color token, filled in (resolve.ts). */
 export type ResolvedColors = Record<ColorKey, string> & { radius: string };
 export type ResolvedTerminal = Required<TerminalPalette>;
 
@@ -124,9 +124,9 @@ export type ResolvedTheme = {
   dark: boolean;
   colors: ResolvedColors;
   terminal: ResolvedTerminal;
-  /** Identity colours for machines and workspaces (spec §11.1), written as `--label-<name>`. Not theme tokens: derived for every theme. */
+  /** Identity colors for machines and workspaces (spec §11.1), written as `--label-<name>`. Not theme tokens: derived for every theme. */
   labels: Record<LabelColor, string>;
   layout: LayoutTokens;
-  /** What derivation had to fall back on (e.g. state colours replaced by defaults). */
+  /** What derivation had to fall back on (e.g. state colors replaced by defaults). */
   notes: string[];
 };

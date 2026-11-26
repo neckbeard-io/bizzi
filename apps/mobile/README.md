@@ -127,7 +127,7 @@ interface BizziNative {
   secureGet(key: string): Promise<string | null>;   // null if missing
   secureSet(key: string, value: string): Promise<void>;
   secureDelete(key: string): Promise<void>;          // no error if missing
-  scanQr(): Promise<string | null>;                  // scanned text, or null if cancelled
+  scanQr(): Promise<string | null>;                  // scanned text, or null if canceled
 }
 
 // Extras (feature-detect each one):
@@ -151,7 +151,7 @@ its own copy rather than depend on this app.
   recent WebViews (WebKit on iOS 17+, Chromium 137+). Feature-detect it and fall back to a JS
   implementation if needed.
 - **scanQr()** opens a full-screen native scanner (QR only, back camera) and resolves with the text.
-  Cancelling resolves `null`. A denied camera permission rejects with
+  Canceling resolves `null`. A denied camera permission rejects with
   `Error('Camera access was denied. …')`, so offer manual code entry as the fallback. The first call
   shows the OS camera prompt.
 

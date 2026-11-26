@@ -1,6 +1,6 @@
-// bizzi's own palette ("bizzi Default", theming.md §4): indigo primary, neutral greys. These are also the
+// bizzi's own palette ("bizzi Default", theming.md §4): indigo primary, neutral grays. These are also the
 // fallbacks for tokens a theme leaves out and the derivation can't fill (§3 step 3), and for state
-// colours that fail the contrast checks. Keep in sync with the :root / [data-theme='dark'] blocks in
+// colors that fail the contrast checks. Keep in sync with the :root / [data-theme='dark'] blocks in
 // src/index.css, which paint before any theme is applied.
 import type { LabelColor } from '@bizzi/protocol';
 import type { Ansi16, ResolvedColors, ThemeMode } from './types.ts';
@@ -103,7 +103,7 @@ export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
 };
 
 /**
- * Identity colours (spec §11.1 "Identity colour"), by the background's polarity. resolveTheme nudges them
+ * Identity colors (spec §11.1 "Identity color"), by the background's polarity. resolveTheme nudges them
  * toward the foreground until each clears LABEL_MIN_CONTRAST on the theme's sidebar, cards and page, so a
  * light theme gets darker inks and a dark theme lighter ones. Keep in sync with `--label-*` in index.css.
  */
@@ -133,7 +133,7 @@ export const DEFAULT_LABELS: Record<ThemeMode, Record<LabelColor, string>> = {
 /** Terminal ANSI palettes for themes without one (black red green yellow blue magenta cyan white, then bright). */
 export const DEFAULT_ANSI: Record<ThemeMode, Ansi16> = {
   dark: ['#1c1c23', '#f87171', '#4ade80', '#fbbf24', '#60a5fa', '#c084fc', '#22d3ee', '#d4d4d8', '#6b6b76', '#fca5a5', '#86efac', '#fde68a', '#93c5fd', '#d8b4fe', '#67e8f9', '#ffffff'],
-  // Light: "white" is a mid grey and bright white a dark one, so `white` text stays readable on white.
+  // Light: "white" is a mid gray and bright white a dark one, so `white` text stays readable on white.
   light: ['#17171c', '#dc2626', '#15803d', '#a16207', '#1d4ed8', '#9333ea', '#0e7490', '#a1a1aa', '#6b6b76', '#b91c1c', '#166534', '#854d0e', '#1e40af', '#7e22ce', '#155e75', '#52525b'],
 };
 

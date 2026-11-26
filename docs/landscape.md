@@ -4,7 +4,7 @@ Researched 2026-11-09 from public docs, repos and hands-on write-ups. Both proje
 
 ## 1. Positioning
 
-Rex and Herdr both start from the terminal: a server owns PTYs, clients render them, agents are recognised processes inside panes. bizzi starts from the session: adapters speak each agent's structured interface (Agent SDK, `codex app-server`, OpenCode server), with a PTY as the fallback (`@bizzi/pty`).
+Rex and Herdr both start from the terminal: a server owns PTYs, clients render them, agents are recognized processes inside panes. bizzi starts from the session: adapters speak each agent's structured interface (Agent SDK, `codex app-server`, OpenCode server), with a PTY as the fallback (`@bizzi/pty`).
 
 What neither does, and what bizzi should lead with if released as a project:
 
@@ -20,7 +20,7 @@ Don't compete on terminal fidelity, multiplexer ergonomics or plugin count.
 ## 2. Rex (Superlogical)
 
 - **Who / status:** Mitchell Hashimoto's company (announced 2026-07-29, VC-funded). Public beta via mailing-list invites since 2026-10-05; macOS app plus Linux/FreeBSD server; iOS in TestFlight alpha; Windows server and Linux/Windows clients internal; web client promised.
-- **Licence / cost:** "free and will always be free", no account, self-hostable, no telemetry. No licence named on first-party pages; secondary sources say closed source with a hinted OSS release. Built on libghostty (MIT).
+- **License / cost:** "free and will always be free", no account, self-hostable, no telemetry. No license named on first-party pages; secondary sources say closed source with a hinted OSS release. Built on libghostty (MIT).
 - **Architecture:** server owns PTYs and tees raw bytes to every client; each client parses with libghostty (no double parsing, per-client scrollback). Each split is its own PTY, which is what enables native iOS and web clients.
 - **Remote:** real system logins; servers can join a tailnet as their own device (built-in Tailscale, QR pairing for iOS); `rex hosts add`.
 - **Agents:** program status protocol (OSC 7501, §4.1), emitted natively by Claude Code. `rex skill setup` installs a skill plus SessionStart hook (Claude Code, Codex; skill only for OpenCode, Pi). Agents open tabs and splits, run commands, read other panes, send keys.
@@ -31,7 +31,7 @@ Don't compete on terminal fidelity, multiplexer ergonomics or plugin count.
 
 - **Who / status:** `herdrdev` (YC F26 per one source). v0.1.0 March 2026; `herdrdev/herdr` about 50k stars. Apache-2.0 (moved from AGPL). Rust, single binary. Free; "Herdr Cloud" announced, unpriced.
 - **Three products, not sharing agents:** the Herdr TUI (`herdr`); herdr-core (`hc`), a headless terminal runtime with an OpenRPC API (`hc schema`); herdr-app, a native desktop client on herdr-core whose UI is agent-editable files explained by an AGENTS.md. Official iOS/Android apps; community clients (Moshi, Roamgate web GUI with diff review, herdr-web-ui with chat-style approvals and push).
-- **Model:** session → workspace (per repo) → tab → pane (PTY); an "agent" is a recognised process in a pane. Server restarts kill processes; layouts return; conversations resume only where an integration saved the native session ID.
+- **Model:** session → workspace (per repo) → tab → pane (PTY); an "agent" is a recognized process in a pane. Server restarts kill processes; layouts return; conversations resume only where an integration saved the native session ID.
 - **Status detection:** the TUI uses foreground process plus remotely updated "screen manifests" (rules matched against the bottom of the screen), optional hooks (`herdr integration install claude`), and `herdr agent explain` for debugging. herdr-core uses only OSC 7501. States: working / blocked / done (finished while unseen) / idle / unknown; they roll up to tab and workspace.
 - **Agent-to-agent:** `hc run --bg`, `hc send`, `hc wait`, `hc read`; helpers are scoped to their parent and report back. TUI: `agent start / prompt --wait / wait --until blocked / read / send-keys`, `pane wait-output --regex`. `--skill` teaches it all.
 - **Other:** `hc machine add` over SSH or Tailscale, `hc run --on <machine>`; `herdr worktree create --branch`; toasts / OS notifications / per-agent sounds; plugins are any executable plus `herdr-plugin.toml` using the public CLI and socket API.
@@ -80,9 +80,9 @@ For self-hosters without a domain or Caddy: the hub listens on the tailnet (HTTP
 - Command palette that shows each action's shortcut and rebinds in place (Rex).
 - Attention rollup, per-agent marks and `done` as an unseen-result flag: **designed, spec §11.1** (sidebar rows), with a hub-side `seen_through` cursor so devices agree (spec §4).
 - Per-agent notification sounds; suppress the toast for the session you're viewing (Herdr).
-- Agent-editable UI config with its own AGENTS.md (herdr-app): users customise layout by asking their agent.
+- Agent-editable UI config with its own AGENTS.md (herdr-app): users customize layout by asking their agent.
 - Sidebar as the machine → workspace tree with clickable machine tiles and a resizable, auto-fitting width: **done, spec §11.1**.
-- Colour/tags per machine and workspace (a stripe or dot in the sidebar and headers): later, spec §13 M5. Not a per-machine theme: the theme is one user-wide setting (theming.md §5).
+- Color/tags per machine and workspace (a stripe or dot in the sidebar and headers): later, spec §13 M5. Not a per-machine theme: the theme is one user-wide setting (theming.md §5).
 
 ## Sources
 

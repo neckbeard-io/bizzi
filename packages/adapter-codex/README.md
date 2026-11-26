@@ -109,7 +109,7 @@ Both question-shaped server requests become `question.asked {questionId, text, o
 | same, form with no properties | one question with Accept / Decline | `accept {content: {}}` / `decline` |
 | same, URL mode | one question with the message + URL and Done / Cancel | Done → `accept`, Cancel → `decline` |
 
-Questions pending when a turn is interrupted or ends, the session stops, or the process dies are answered (empty answers / elicitation `cancel`) and reported as `question.resolved {cancelled: true}`. A request Codex withdraws (`serverRequest/resolved`, e.g. a non-blocking question that auto-resolved) resolves as cancelled. `isSecret` isn't signalled to clients (the protocol has no field for it).
+Questions pending when a turn is interrupted or ends, the session stops, or the process dies are answered (empty answers / elicitation `cancel`) and reported as `question.resolved {cancelled: true}`. A request Codex withdraws (`serverRequest/resolved`, e.g. a non-blocking question that auto-resolved) resolves as canceled. `isSecret` isn't signaled to clients (the protocol has no field for it).
 
 ### Process lifecycle
 
@@ -134,6 +134,6 @@ If the process exits unexpectedly, the adapter emits these events in order:
 
 `npm test -w @bizzi/adapter-codex` runs offline:
 
-- `test/fake-app-server.ts` is a scripted JSON-RPC server. It covers handshake, streaming, early notifications, approvals, interrupt, steer, `set()`, crash, resume and fork, `requestUserInput` and elicitation questions (answered, declined, withdrawn, cancelled by interrupt / stop / crash), per-turn vs cumulative usage, and `dispose()` (`test/adapter.test.ts`, `test/v1-1.test.ts`).
+- `test/fake-app-server.ts` is a scripted JSON-RPC server. It covers handshake, streaming, early notifications, approvals, interrupt, steer, `set()`, crash, resume and fork, `requestUserInput` and elicitation questions (answered, declined, withdrawn, canceled by interrupt / stop / crash), per-turn vs cumulative usage, and `dispose()` (`test/adapter.test.ts`, `test/v1-1.test.ts`).
 - `test/rpc.test.ts` covers framing.
 - `test/real-binary.test.ts` runs a handshake against the real devDependency binary with a temporary `CODEX_HOME`. It needs no login, and it skips if the binary is unavailable.

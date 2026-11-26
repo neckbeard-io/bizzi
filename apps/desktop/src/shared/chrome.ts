@@ -1,15 +1,15 @@
 // Themed window chrome (docs/theming.md §8): the native title bar is hidden and the UI paints its own
-// strip in the theme's colours. Pure helpers shared by main and tests; no Electron imports.
+// strip in the theme's colors. Pure helpers shared by main and tests; no Electron imports.
 
-/** Colours the renderer sends after each theme change (`window.bizzi.setChrome`). */
+/** Colors the renderer sends after each theme change (`window.bizzi.setChrome`). */
 export interface ChromeColors {
   /** Page background: the window background behind everything (first frame, resizes). */
   background: string;
-  /** Main column strip, the colour of the page headers below it; also the Windows/Linux controls overlay. */
+  /** Main column strip, the color of the page headers below it; also the Windows/Linux controls overlay. */
   card: string;
   /** Sidebar column strip. */
   sidebar: string;
-  /** Text colour, used for the Windows/Linux window-control symbols. */
+  /** Text color, used for the Windows/Linux window-control symbols. */
   foreground: string;
   dark: boolean;
 }
@@ -28,7 +28,7 @@ export interface TitleBar {
   height: number;
 }
 
-/** macOS: the standard title bar height, where `hidden` keeps the traffic lights vertically centred. */
+/** macOS: the standard title bar height, where `hidden` keeps the traffic lights vertically centered. */
 export const MAC_TITLEBAR_HEIGHT = 28;
 /** Windows/Linux: the controls overlay height. */
 export const OVERLAY_TITLEBAR_HEIGHT = 32;
@@ -46,7 +46,7 @@ const HEX = /^#[0-9a-f]{6}$/i;
 
 export const CHROME_COLOR_KEYS = ['background', 'card', 'sidebar', 'foreground'] as const;
 
-/** Validate what the renderer sent: four `#rrggbb` colours and a boolean, nothing else. */
+/** Validate what the renderer sent: four `#rrggbb` colors and a boolean, nothing else. */
 export function parseChrome(raw: unknown): ChromeColors | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const r = raw as Record<string, unknown>;
@@ -60,7 +60,7 @@ export function parseChrome(raw: unknown): ChromeColors | null {
   return out;
 }
 
-/** The BrowserWindow options for a title bar style and the last-known theme colours. */
+/** The BrowserWindow options for a title bar style and the last-known theme colors. */
 export function windowChromeOptions(bar: TitleBar, colors: ChromeColors): Record<string, unknown> {
   // The first frame (before the UI paints) and every resize show the theme's background, not white.
   const base = { backgroundColor: colors.background };
@@ -74,7 +74,7 @@ export function windowChromeOptions(bar: TitleBar, colors: ChromeColors): Record
   }
 }
 
-/** Windows/Linux controls overlay: sits over the main column's strip, so it takes the card colour. */
+/** Windows/Linux controls overlay: sits over the main column's strip, so it takes the card color. */
 export function overlayFor(colors: ChromeColors, height: number): { color: string; symbolColor: string; height: number } {
   return { color: colors.card, symbolColor: colors.foreground, height };
 }

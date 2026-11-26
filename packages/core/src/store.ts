@@ -14,7 +14,7 @@ export interface SessionState {
   command?: string[];
   /** Forked session not started yet: the source's agentSessionRef to fork from on first start. */
   forkOf?: string;
-  /** Approvals / questions awaiting an answer; cancelled after a node restart. */
+  /** Approvals / questions awaiting an answer; canceled after a node restart. */
   pendingApprovals?: string[];
   pendingQuestions?: string[];
   /** Terminal size. */

@@ -158,7 +158,7 @@ try {
   check(comp.base === join(tree, 'apps') + '/', `fs.complete base (${comp.base})`);
   check(comp.completions[0]?.name === 'web', `fs.complete exact-case match first (${comp.completions.map((e: any) => e.name).join(',')})`);
   const tilde = await a.call('fs.complete', { machineId, prefix: '~/', limit: 3 });
-  check(tilde.base === '~/' && tilde.completions.length <= 3, 'fs.complete keeps ~/ and honours limit');
+  check(tilde.base === '~/' && tilde.completions.length <= 3, 'fs.complete keeps ~/ and honors limit');
   const { entries: suggested } = await a.call('fs.suggest', { machineId });
   check(suggested[0]?.suggest === 'home' && suggested.some((e: any) => e.suggest === 'recent' && e.path === root), 'fs.suggest: home and the parent of the repo workspace');
   let missing = '';

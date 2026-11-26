@@ -14,7 +14,7 @@ export interface RouteTarget {
   lastActive: string;
 }
 
-export interface CatalogueInput {
+export interface CatalogInput {
   machines: MachineInfo[];
   workspaces: WorkspaceInfo[];
   /** For recency: the most recently active workspaces are kept when there are too many. */
@@ -30,7 +30,7 @@ const MAX_TITLE = 60;
  * helpers' and fan-out runs' copies of a repo, not places you'd send a new prompt. `includeOffline`
  * keeps offline machines' workspaces too, so explicit tokens can say "that machine is offline".
  */
-export function buildTargets(input: CatalogueInput, o: { includeOffline?: boolean } = {}): RouteTarget[] {
+export function buildTargets(input: CatalogInput, o: { includeOffline?: boolean } = {}): RouteTarget[] {
   const online = new Map(input.machines.filter((m) => o.includeOffline || m.online).map((m) => [m.id, m]));
   const last = new Map<string, string>();
   const titled = new Map<string, SessionInfo[]>();

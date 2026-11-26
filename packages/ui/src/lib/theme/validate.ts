@@ -10,7 +10,7 @@ import type { Density, LayoutTokens, PanelStyle, StateKey, TerminalPalette, Them
 export type ValidationResult = {
   /** True when the theme can be applied. */
   ok: boolean;
-  /** The normalised theme when its shape is usable (also when `ok` is false: preview only). */
+  /** The normalized theme when its shape is usable (also when `ok` is false: preview only). */
   theme: Theme | null;
   failures: string[];
 };
@@ -61,9 +61,9 @@ function parseColors(raw: unknown, path: string, fail: (m: string) => void): The
       if (isStr(v) && /^\d*\.?\d+(px|rem|em)?$/.test(v.trim())) out.radius = v.trim();
       else fail(`${path}.radius must be a CSS length (e.g. 0.5rem)`);
     } else if (!COLOR_KEYS.includes(k)) {
-      fail(`${path}.${k} is not a colour token`);
+      fail(`${path}.${k} is not a color token`);
     } else if (!isColor(v)) {
-      fail(`${path}.${k} must be a colour (#rrggbb, #rrggbbaa or rgb()/rgba()), got ${JSON.stringify(v)}`);
+      fail(`${path}.${k} must be a color (#rrggbb, #rrggbbaa or rgb()/rgba()), got ${JSON.stringify(v)}`);
     } else {
       out[k as keyof ThemeColors] = v.trim();
     }
@@ -80,12 +80,12 @@ function parseTerminal(raw: unknown, path: string, fail: (m: string) => void): T
   const out: TerminalPalette = {};
   for (const [k, v] of Object.entries(raw)) {
     if (k === 'ansi') {
-      if (!Array.isArray(v) || v.length !== 16) fail(`${path}.ansi must be an array of 16 colours`);
-      else if (!v.every(isColor)) fail(`${path}.ansi must contain only colours`);
+      if (!Array.isArray(v) || v.length !== 16) fail(`${path}.ansi must be an array of 16 colors`);
+      else if (!v.every(isColor)) fail(`${path}.ansi must contain only colors`);
       else out.ansi = v.map((x: string) => x.trim()) as unknown as TerminalPalette['ansi'];
     } else if (k === 'background' || k === 'foreground' || k === 'cursor' || k === 'cursorAccent' || k === 'selection') {
       if (isColor(v)) out[k] = v.trim();
-      else fail(`${path}.${k} must be a colour`);
+      else fail(`${path}.${k} must be a color`);
     } else {
       fail(`${path}.${k} is not a terminal token`);
     }
@@ -108,7 +108,7 @@ function parseVariant(raw: unknown, path: string, fail: (m: string) => void): Th
   return v;
 }
 
-/** Shape checks; returns the normalised theme (or null) and the structural failures. */
+/** Shape checks; returns the normalized theme (or null) and the structural failures. */
 export function parseTheme(raw: unknown): { theme: Theme | null; failures: string[] } {
   const failures: string[] = [];
   const fail = (m: string) => failures.push(m);
@@ -171,7 +171,7 @@ export function contrastFailures(theme: Theme): string[] {
     check(r.accentForeground, r.accent, 4.5, 'accent foreground on accent');
     check(r.sidebarAccentForeground, r.sidebarAccent, 4.5, 'sidebar accent foreground on sidebar accent');
     check(r.popoverForeground, r.popover, 4.5, 'popover foreground on popover');
-    // A theme's own state colours must pass as given (derived ones fall back silently).
+    // A theme's own state colors must pass as given (derived ones fall back silently).
     const own = STATE_KEYS.filter((k) => v.colors?.[k]);
     if (own.length > 0) {
       const set = {} as Record<StateKey, string>;

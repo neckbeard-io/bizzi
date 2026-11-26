@@ -251,7 +251,7 @@ export class TerminalAdapter implements AgentAdapter {
         });
       }
     } else if (opts.resumeRef && !nativeRef && !supervisorId) {
-      logger.log('warn', 'ignoring unrecognised resumeRef', { resumeRef: opts.resumeRef });
+      logger.log('warn', 'ignoring unrecognized resumeRef', { resumeRef: opts.resumeRef });
     }
 
     const launch = this.#resolveLaunch(opts, nativeRef);

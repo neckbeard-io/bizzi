@@ -91,7 +91,7 @@ test('scanQr surfaces camera denial and other errors', async () => {
   await assert.rejects(makeBridge({ scanner: { scanBarcode: async () => Promise.reject(other) } }).bridge.scanQr(), /boom/);
 });
 
-test('isScanCancelled recognises the code and the message', () => {
+test('isScanCancelled recognizes the code and the message', () => {
   assert.equal(isScanCancelled({ code: SCAN_CANCELLED_CODE }), true);
   assert.equal(isScanCancelled(new Error('User cancelled')), true);
   assert.equal(isScanCancelled(new Error('boom')), false);

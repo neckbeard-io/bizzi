@@ -158,7 +158,7 @@ Because a session never changes hands, each event log has exactly one writer: no
 
 - **Replay:** every client keeps the last `seq` per session it watched and reconnects with `subscribe { since }`. The hub serves from its replica; events still in an offline machine's outbox show as a gap that fills in later.
 - **Push:** while you're disconnected, notifications carry what needs you: approval requested, question asked, turn finished, machine went offline mid-turn.
-- **Airplane mode:** the desktop app talks to its own node in-process, so everything on the laptop works: sessions, workspaces, knowledge (local replica). Other machines are greyed out. On reconnect the outbox uploads, and knowledge and config replicate.
+- **Airplane mode:** the desktop app talks to its own node in-process, so everything on the laptop works: sessions, workspaces, knowledge (local replica). Other machines are grayed out. On reconnect the outbox uploads, and knowledge and config replicate.
 
 ### 5.1 What replicates
 

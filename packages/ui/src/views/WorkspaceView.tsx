@@ -97,7 +97,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
               <Button size="sm" variant="ghost" icon="bolt" disabled={!online} onClick={() => setPipeline(true)} title="Pipeline: planner → implementer → reviewer, one stage after another, with gates you approve">
                 <span className="hidden sm:inline">Pipeline</span>
               </Button>
-              <IconButton icon="edit" label="Name, colour and icon" disabled={!online} onClick={() => setEditing(true)} />
+              <IconButton icon="edit" label="Name, color and icon" disabled={!online} onClick={() => setEditing(true)} />
               {ws.kind !== 'dir' ? (
                 <Button size="sm" variant="ghost" icon="tree" disabled={!online} onClick={() => setFanout(true)} title="Fan out: the same prompt to several agents, each in its own worktree, then compare">
                   <span className="hidden sm:inline">Fan out</span>
@@ -210,7 +210,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
 }
 
 /** Branch, ahead/behind and the worktrees made from this repo. */
-/** Rename the workspace and pick its identity colour and icon (spec §11.1); stored on its node, replicated by the hub. */
+/** Rename the workspace and pick its identity color and icon (spec §11.1); stored on its node, replicated by the hub. */
 function WorkspaceIdentityDialog(props: { workspace: WorkspaceInfo; onClose: () => void }): ReactNode {
   const w = props.workspace;
   const store = useStore();
@@ -231,7 +231,7 @@ function WorkspaceIdentityDialog(props: { workspace: WorkspaceInfo; onClose: () 
   else delete preview.icon;
   return (
     <Modal
-      title="Name, colour and icon"
+      title="Name, color and icon"
       onClose={props.onClose}
       footer={
         <>
@@ -257,8 +257,8 @@ function WorkspaceIdentityDialog(props: { workspace: WorkspaceInfo; onClose: () 
         <LabelColorField
           value={color}
           onChange={setColor}
-          label="Workspace colour"
-          hint={!color && parent?.color ? `None set: it shows ${parent.name}'s colour.` : 'On its sidebar tile and in headers; readable in every theme.'}
+          label="Workspace color"
+          hint={!color && parent?.color ? `None set: it shows ${parent.name}'s color.` : 'On its sidebar tile and in headers; readable in every theme.'}
         />
         <Field label="Icon" hint={iconError ?? 'One or two characters or an emoji, in place of the first letter.'}>
           <div className="flex items-center gap-2">

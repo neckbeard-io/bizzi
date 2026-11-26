@@ -2,7 +2,7 @@
 // should run, shows the target and why, and Enter starts a session there when the router is confident.
 // Not confident: the top candidates and "other…" to pick from. A follow-up continues the open session
 // (step 2) unless a token changes the target. Every routed send is recorded (`route.record`), overrides
-// included, as the labelled set for choosing a classifier.
+// included, as the labeled set for choosing a classifier.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { selectMachineList } from '@bizzi/client';

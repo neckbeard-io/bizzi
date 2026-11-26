@@ -5,7 +5,7 @@ import { AGENT_GLYPH, AGENT_LABEL, MARK_DOT, MARK_LABEL, MARK_RING, MARK_SYMBOL,
 import { cx } from './ui.tsx';
 
 /**
- * One live session in the sidebar (spec §11.1): the agent-type glyph inside a ring in the state colour.
+ * One live session in the sidebar (spec §11.1): the agent-type glyph inside a ring in the state color.
  * Waiting pulses, working spins; helpers show as a small number in the corner.
  */
 export function AgentMark(props: { agent: AgentKind; state: MarkState; helpers?: number; size?: number; title?: string }): ReactNode {
@@ -37,7 +37,7 @@ export function AgentMark(props: { agent: AgentKind; state: MarkState; helpers?:
   );
 }
 
-/** The narrow-sidebar form of a mark: a plain dot in the state colour (idle is hollow). */
+/** The narrow-sidebar form of a mark: a plain dot in the state color (idle is hollow). */
 export function MarkDot(props: { state: MarkState; title?: string; size?: number }): ReactNode {
   const s = props.size ?? 8;
   return <span className={cx('inline-block shrink-0 rounded-full', MARK_DOT[props.state], props.state === 'waiting' && 'animate-pulse')} style={{ width: s, height: s }} title={props.title ?? MARK_LABEL[props.state]} />;
@@ -53,7 +53,7 @@ export function MarkCount(props: { state: MarkState; n: number }): ReactNode {
   );
 }
 
-/** A thin horizontal meter; colour only when the tone says so. */
+/** A thin horizontal meter; color only when the tone says so. */
 export function Meter(props: { value: number; tone: MeterTone; className?: string; marker?: number; title?: string }): ReactNode {
   const pct = Math.round(Math.min(1, Math.max(0, props.value)) * 100);
   return (

@@ -67,7 +67,7 @@ test('timeline reduction of a scripted session', () => {
 
   const a1 = tl.items['ap:ap_1'];
   assert.ok(a1?.kind === 'approval' && a1.status === 'resolved' && a1.decision === 'allow');
-  // An approval left open by an interrupted turn expires; its tool is cancelled.
+  // An approval left open by an interrupted turn expires; its tool is canceled.
   const a2 = tl.items['ap:ap_2'];
   assert.ok(a2?.kind === 'approval' && a2.status === 'expired');
   const t3 = tl.items['tool:tc_3'];

@@ -5,7 +5,7 @@ import { BizziClient } from '@bizzi/client';
 import { BizziError } from '@bizzi/protocol';
 import {
   BASE16_THEMES,
-  BUILTIN_CATALOGUE,
+  BUILTIN_CATALOG,
   BUILTIN_THEMES,
   DEFAULT_COLORS,
   SAFETY,
@@ -41,7 +41,7 @@ import { chromeColors } from '../src/lib/theme/apply.ts';
 import { xtermTheme } from '../src/lib/theme/terminal.ts';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
 
-// ---------------------------------------------------------------- colour
+// ---------------------------------------------------------------- color
 
 test('parseColor reads hex, short hex, alpha hex and rgb()/rgba()', () => {
   assert.deepEqual(parseColor('#abc'), { r: 0xaa, g: 0xbb, b: 0xcc, a: 1 });
@@ -114,7 +114,7 @@ test('base16: legacy top-level keys, unquoted values, JSON, and variant inferenc
   const j = parseBase16Scheme(json);
   assert.ok(j);
   assert.equal(j.variant, 'light');
-  assert.equal(parseBase16Scheme(LATTE_YAML.replace(/ {2}base0F.*\n/, '')), null, 'a missing base colour rejects the scheme');
+  assert.equal(parseBase16Scheme(LATTE_YAML.replace(/ {2}base0F.*\n/, '')), null, 'a missing base color rejects the scheme');
   assert.equal(parseBase16Scheme('not: a scheme'), null);
 });
 
@@ -129,7 +129,7 @@ test('one converter: an imported scheme file gives exactly the built-in theme', 
   assert.deepEqual(got, exp);
 });
 
-test('base16 converter picks readable foregrounds and fills a 16-colour terminal', () => {
+test('base16 converter picks readable foregrounds and fills a 16-color terminal', () => {
   for (const scheme of BASE16_SCHEMES) {
     const theme = base16ToTheme(scheme);
     const v = theme.variants[scheme.variant]!;
@@ -138,7 +138,7 @@ test('base16 converter picks readable foregrounds and fills a 16-colour terminal
   }
   assert.equal(BASE16_SCHEMES.length, 16);
   assert.ok(!BASE16_SCHEMES.some((s) => s.name === 'Dracula'), 'base16 Dracula is replaced by flax');
-  assert.ok(BASE16_SCHEMES.every((s) => s.author && s.license), 'each scheme records author and licence');
+  assert.ok(BASE16_SCHEMES.every((s) => s.author && s.license), 'each scheme records author and license');
 });
 
 // ---------------------------------------------------------------- five-tone
@@ -186,7 +186,7 @@ test('a theme without the requested variant falls back to the other one', () => 
   assert.equal(r.colors.popover, '#122738', 'popover follows card');
 });
 
-test('status colours derive from the ANSI palette; state colours from status', () => {
+test('status colors derive from the ANSI palette; state colors from status', () => {
   const theme: Theme = {
     id: 'ansi-test',
     name: 'ANSI',
@@ -210,7 +210,7 @@ test('status colours derive from the ANSI palette; state colours from status', (
   assert.deepEqual(r.notes, []);
 });
 
-test('state colours that collide fall back to bizzi defaults for those tokens', () => {
+test('state colors that collide fall back to bizzi defaults for those tokens', () => {
   // base16 primary is base0D, the same blue as "done" (info): working keeps it, done falls back.
   const r = resolveTheme(builtinTheme('tomorrow-night')!, 'dark');
   assert.equal(r.colors.stateWorking, r.colors.primary);
@@ -218,7 +218,7 @@ test('state colours that collide fall back to bizzi defaults for those tokens', 
   assert.match(r.notes.join(' '), /done/);
 });
 
-test('state colours of every built-in are readable and distinct in both modes', () => {
+test('state colors of every built-in are readable and distinct in both modes', () => {
   for (const t of BUILTIN_THEMES) {
     for (const mode of ['light', 'dark'] as const) {
       const r = resolveTheme(t, mode);
@@ -228,7 +228,7 @@ test('state colours of every built-in are readable and distinct in both modes', 
   }
 });
 
-test('a hostile sidebar still gets readable state colours (nudged defaults)', () => {
+test('a hostile sidebar still gets readable state colors (nudged defaults)', () => {
   const theme: Theme = { id: 'odd-one', name: 'Odd', variants: { light: { colors: { background: '#ffffff', foreground: '#000000', sidebar: '#808080', card: '#7a7a7a' } } } };
   const r = resolveTheme(theme, 'light');
   for (const k of STATE_KEYS) assert.ok(contrast(r.colors[k], r.colors.sidebar) >= 3 && contrast(r.colors[k], r.colors.card) >= 3, k);
@@ -265,7 +265,7 @@ test('CSS variables use shadcn names and never include the safety tokens', () =>
 // ---------------------------------------------------------------- validation
 
 test('every built-in passes validation', () => {
-  assert.ok(BUILTIN_CATALOGUE.length >= 35);
+  assert.ok(BUILTIN_CATALOG.length >= 35);
   for (const t of BUILTIN_THEMES) {
     const v = validateTheme(t);
     assert.ok(v.ok, `${t.id}: ${v.failures.join('; ')}`);
@@ -295,24 +295,24 @@ test('validation lists every failure and keeps a usable theme for preview', () =
   assert.equal(v.ok, false);
   assert.ok(v.theme, 'shape is usable, so it can be previewed');
   const all = v.failures.join('\n');
-  for (const needle of ['id must be kebab-case', 'bogus is not a colour token', 'primary must be a colour', 'ansi must be an array of 16', 'foreground on background', 'muted foreground on card', 'destructive on background']) {
+  for (const needle of ['id must be kebab-case', 'bogus is not a color token', 'primary must be a color', 'ansi must be an array of 16', 'foreground on background', 'muted foreground on card', 'destructive on background']) {
     assert.ok(all.includes(needle), `missing failure: ${needle}\n${all}`);
   }
   assert.equal(validateTheme({ id: 'x-y', name: 'n', variants: {} }).theme, null);
   assert.equal(validateTheme('nope').ok, false);
 });
 
-test("a theme's own state colours must pass; safety tokens can't be themed", () => {
+test("a theme's own state colors must pass; safety tokens can't be themed", () => {
   const base = structuredClone(bizziDefault);
   base.id = 'state-test';
   base.variants.light!.colors!.stateWaiting = '#fefefe';
   base.variants.light!.colors!.stateFailed = base.variants.light!.colors!.stateWorking;
   const v = validateTheme(base);
   assert.equal(v.ok, false);
-  assert.match(v.failures.join('\n'), /waiting state colour is .* on card/);
+  assert.match(v.failures.join('\n'), /waiting state color is .* on card/);
   assert.match(v.failures.join('\n'), /too similar/);
   const s = validateTheme({ id: 'sneaky', name: 'Sneaky', variants: { dark: { colors: { safetyWarn: '#000000' } } } });
-  assert.match(s.failures.join('\n'), /safetyWarn is not a colour token/);
+  assert.match(s.failures.join('\n'), /safetyWarn is not a color token/);
 });
 
 test('the invariant safety pairs are high contrast and match index.css', () => {
@@ -338,7 +338,7 @@ test('index.css paints bizzi Default exactly (defaults.ts and the stylesheet agr
   }
 });
 
-test('index.css element rules sit in a layer, so utilities still colour buttons and inputs', () => {
+test('index.css element rules sit in a layer, so utilities still color buttons and inputs', () => {
   // Unlayered CSS beats every @layer: an unlayered `button { color: inherit }` hid the primary button
   // text in Tokyo Night (text-accent-fg lost to the inherited foreground, which equals its primary).
   const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
@@ -362,7 +362,7 @@ test('index.css element rules sit in a layer, so utilities still colour buttons 
   }
 });
 
-test('desktop chrome colours: opaque #rrggbb from the resolved theme, translucent ones flattened', () => {
+test('desktop chrome colors: opaque #rrggbb from the resolved theme, translucent ones flattened', () => {
   const r = resolveTheme(builtinTheme('tokyo-night')!, 'dark');
   assert.deepEqual(chromeColors(r), { background: '#1a1b26', card: '#1f2030', sidebar: '#1f2030', foreground: '#c0caf5', dark: true });
   const glass = resolveTheme({ id: 'glass', name: 'Glass', variants: { light: { colors: { background: '#ffffff', card: 'rgba(0,0,0,0.5)' } } } }, 'light');

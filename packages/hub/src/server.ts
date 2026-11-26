@@ -367,7 +367,7 @@ function isPrivate(addr: string): boolean {
   );
 }
 
-/** http(s)://host as the client sees it (honours X-Forwarded-Proto/Host from the proxy). */
+/** http(s)://host as the client sees it (honors X-Forwarded-Proto/Host from the proxy). */
 function requestBase(req: IncomingMessage): string {
   const header = (name: string) => {
     const v = req.headers[name];

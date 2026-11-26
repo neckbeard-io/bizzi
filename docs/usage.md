@@ -114,7 +114,7 @@ interface AccountUsage {
   [C] max   5h ▓▓▓▓▓▓░░ 62% ↻1h20  7d 31%   [X] pro  5h 18%   [L] billed $554 / $2,474 (22%)   [H] h200 3/8
   ```
 
-  Colour carries state only (neutral, amber from 80%, red when limited). Click opens the usage panel: every window with reset time, which sessions consumed it, a 7-day sparkline, machines using the login. When the bar is narrow it shows the most constrained login plus `+n`.
+  Color carries state only (neutral, amber from 80%, red when limited). Click opens the usage panel: every window with reset time, which sessions consumed it, a 7-day sparkline, machines using the login. When the bar is narrow it shows the most constrained login plus `+n`.
 - **Phone:** no persistent bottom bar (the tab bar is there). A usage chip in the Machines and Inbox headers shows the most constrained login; tapping it opens the same panel as a sheet. Push notifications at 80% and 95% of a plan window and when a login is limited, so you can switch before a helper tree stalls.
 - **Where they also appear:** the fan-out preflight (§2) and the session header's model picker ("Opus · plan 5h 62%").
 

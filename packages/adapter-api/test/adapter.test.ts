@@ -221,7 +221,7 @@ describe('openai-compatible wire format', () => {
     assert.equal(fresh.capabilities('structured').usage, 'tokens+cost');
   });
 
-  test('retries 503 (honouring retry-after), then succeeds; 401 fails at once with the message', async () => {
+  test('retries 503 (honoring retry-after), then succeeds; 401 fails at once with the message', async () => {
     let n = 0;
     const { adapter, server } = await setup((req, res) => {
       if (req.method === 'GET') return json(res, 404, {});

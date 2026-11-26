@@ -1,4 +1,4 @@
-// Protocol v1.1 behaviour: fork, delete, questions, cancellations, turn semantics, terminal snapshot,
+// Protocol v1.1 behavior: fork, delete, questions, cancellations, turn semantics, terminal snapshot,
 // session.create command, MachineTarget and the extension API.
 
 import assert from 'node:assert/strict';
@@ -253,7 +253,7 @@ test('question.respond is unsupported when the adapter cannot answer questions',
   );
 });
 
-// --- approvals cancelled ---------------------------------------------------------------------------
+// --- approvals canceled ---------------------------------------------------------------------------
 
 test('pending approval is cancelled when the session stops', async (t) => {
   const { node, workspace } = await setup(t);
@@ -278,7 +278,7 @@ test('pending approval is cancelled on shutdown and after a crash-restart', asyn
   const dir = tempDir();
   t.after(dir.cleanup);
 
-  // Clean shutdown: the open turn is closed and the approval cancelled.
+  // Clean shutdown: the open turn is closed and the approval canceled.
   const n1 = await makeNode(dir.path, [new FakeAdapter()]);
   const { workspace } = await n1.call('workspace.create', { path: dir.path + '/ws', create: true });
   const s = await idleSession(n1, workspace.id);

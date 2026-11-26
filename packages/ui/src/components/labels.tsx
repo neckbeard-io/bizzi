@@ -1,4 +1,4 @@
-// Identity colour and icon (spec §11.1 "Identity colour"): the workspace tile, the machine chip and
+// Identity color and icon (spec §11.1 "Identity color"): the workspace tile, the machine chip and
 // stripe, and the palette picker. Identity is shown as shapes state never uses (a square tile, a square
 // dot, an edge stripe), on the left of a row; state marks stay round and on the right.
 import type { CSSProperties, ReactNode } from 'react';
@@ -13,7 +13,7 @@ export function stripeStyle(color: LabelColor | undefined, width = 3): CSSProper
   return color ? { boxShadow: `inset ${width}px 0 0 ${labelVar(color)}` } : undefined;
 }
 
-/** A small square in an identity colour. Nothing without one. */
+/** A small square in an identity color. Nothing without one. */
 export function LabelDot(props: { color: LabelColor | undefined; className?: string; title?: string }): ReactNode {
   if (!props.color) return null;
   return (
@@ -27,8 +27,8 @@ export function LabelDot(props: { color: LabelColor | undefined; className?: str
 }
 
 /**
- * The workspace's tile: its icon or first letter, filled with its colour (a worktree borrows its repo's).
- * Worktrees show the branch glyph instead, in the colour.
+ * The workspace's tile: its icon or first letter, filled with its color (a worktree borrows its repo's).
+ * Worktrees show the branch glyph instead, in the color.
  */
 export function WorkspaceTile(props: { workspace: WorkspaceInfo; size?: 'sm' | 'md'; className?: string }): ReactNode {
   const w = props.workspace;
@@ -53,7 +53,7 @@ export function WorkspaceTile(props: { workspace: WorkspaceInfo; size?: 'sm' | '
   );
 }
 
-/** "▪ mac-mini · gui · prod-access": which machine, in its colour, with its tags (headers). */
+/** "▪ mac-mini · gui · prod-access": which machine, in its color, with its tags (headers). */
 export function MachineChip(props: { machine: MachineInfo; tags?: boolean; className?: string }): ReactNode {
   const m = props.machine;
   const tags = props.tags !== false ? machineTagsLabel(m) : '';
@@ -73,7 +73,7 @@ export function MachineChip(props: { machine: MachineInfo; tags?: boolean; class
 export function LabelColorField(props: { value: LabelColor | undefined; onChange: (c: LabelColor | undefined) => void; label: string; hint?: string; disabled?: boolean }): ReactNode {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted">Colour</span>
+      <span className="text-xs font-medium text-muted">Color</span>
       <LabelColorPicker value={props.value} onChange={props.onChange} label={props.label} {...(props.disabled !== undefined ? { disabled: props.disabled } : {})} />
       {props.hint ? <span className="text-xs text-muted">{props.hint}</span> : null}
     </div>
@@ -84,12 +84,12 @@ export function LabelColorField(props: { value: LabelColor | undefined; onChange
 export function LabelColorPicker(props: { value: LabelColor | undefined; onChange: (c: LabelColor | undefined) => void; disabled?: boolean; label?: string }): ReactNode {
   const swatch = 'flex h-8 w-8 items-center justify-center rounded-full border outline-offset-2 disabled:opacity-40';
   return (
-    <div role="radiogroup" aria-label={props.label ?? 'Colour'} className="flex flex-wrap items-center gap-1.5">
+    <div role="radiogroup" aria-label={props.label ?? 'Color'} className="flex flex-wrap items-center gap-1.5">
       <button
         type="button"
         role="radio"
         aria-checked={!props.value}
-        title="No colour"
+        title="No color"
         disabled={props.disabled}
         onClick={() => props.onChange(undefined)}
         className={cx(swatch, 'text-muted', !props.value ? 'border-fg' : 'border-border hover:border-muted')}

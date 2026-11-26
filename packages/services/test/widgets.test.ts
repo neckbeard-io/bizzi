@@ -88,12 +88,12 @@ describe('widget expressions', () => {
     assert.deepEqual(ok.def.billing, { account: 'claude-via-litellm', agent: 'claude', billing: 'metered' });
 
     const bad = parseWidget(
-      { label: 'x', every: 'often', colour: 'red', source: { type: 'command', command: ['./x', '${secret:K}'] }, billing: { account: 'mystery' } },
+      { label: 'x', every: 'often', color: 'red', source: { type: 'command', command: ['./x', '${secret:K}'] }, billing: { account: 'mystery' } },
       'x.json',
     );
     assert.ok('errors' in bad);
     const text = bad.errors.join('\n');
-    assert.match(text, /unknown field "colour"/);
+    assert.match(text, /unknown field "color"/);
     assert.match(text, /every must be a duration/);
     assert.match(text, /only allowed in http url\/headers and command env/);
     assert.match(text, /billing.agent must be one of/);

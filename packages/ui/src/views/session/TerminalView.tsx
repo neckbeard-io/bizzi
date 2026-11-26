@@ -18,8 +18,8 @@ function wantsWebgl(): boolean {
 }
 
 /**
- * Terminal-mode session (and login PTYs): xterm.js, coloured with the theme's terminal palette
- * (derived from its UI colours when it has none). Output comes straight from the client's
+ * Terminal-mode session (and login PTYs): xterm.js, colored with the theme's terminal palette
+ * (derived from its UI colors when it has none). Output comes straight from the client's
  * TerminalStreams (never through the React store); keystrokes go out as term.input, size as term.resize.
  */
 export function TerminalView(props: { sessionId: string }): ReactNode {

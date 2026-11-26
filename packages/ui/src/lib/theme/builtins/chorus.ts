@@ -829,7 +829,7 @@ export const graphite: Theme = {
   author: 'Chorus',
   license: 'Apache-2.0',
   name: 'Graphite',
-  description: 'Neutral cool greys, periwinkle primary.',
+  description: 'Neutral cool grays, periwinkle primary.',
   editorTheme: { dark: 'atomone', light: 'github' },
   variants: {
     dark: {
@@ -1021,7 +1021,7 @@ export const inkBone: Theme = {
   author: 'Chorus',
   license: 'Apache-2.0',
   name: 'Ink & Bone',
-  description: 'Warm charcoal with a monochrome bone primary so only status carries colour.',
+  description: 'Warm charcoal with a monochrome bone primary so only status carries color.',
   editorTheme: { dark: 'atomone', light: 'github' },
   variants: {
     dark: {

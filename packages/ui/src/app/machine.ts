@@ -22,7 +22,7 @@ export function useIsHub(): boolean {
 
 /**
  * Whether headers should name the machine (spec §11.1 identity): when there's more than one, or when the
- * user gave this one a colour or tags.
+ * user gave this one a color or tags.
  */
 export function useShowMachine(machine: MachineInfo | null): boolean {
   const several = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);

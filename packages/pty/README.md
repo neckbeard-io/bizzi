@@ -82,7 +82,7 @@ Every `session.status` the adapter emits carries `source`:
 
 The format comes from Rex ("Program Status Protocol"); herdr-core reads it too. See docs/landscape.md §4.1. `src/osc.ts` is a streaming scanner: it keeps state between PTY reads, so a report split across chunks (even one byte at a time) is still seen whole. It runs on the decoded output before the activity monitor, so a report applies before the heuristics see the chunk. The raw bytes still go to clients unchanged, and `stripAnsi` still removes the sequences from the text the detectors see.
 
-`ESC ] 7501 ; key=value:key=value ST`, where ST is `ESC \` or BEL. An ESC followed by anything else, CAN or SUB aborts the sequence. Other OSCs (titles, OSC 8 links, OSC 52 clipboard) are skipped without being buffered. The 8-bit C1 forms aren't recognised.
+`ESC ] 7501 ; key=value:key=value ST`, where ST is `ESC \` or BEL. An ESC followed by anything else, CAN or SUB aborts the sequence. Other OSCs (titles, OSC 8 links, OSC 52 clipboard) are skipped without being buffered. The 8-bit C1 forms aren't recognized.
 
 | key | meaning |
 |---|---|

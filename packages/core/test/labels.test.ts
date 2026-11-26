@@ -1,4 +1,4 @@
-// Identity colour and icon (spec §11.1): machine.set { color }, workspace.set { name, color, icon }.
+// Identity color and icon (spec §11.1): machine.set { color }, workspace.set { name, color, icon }.
 
 import assert from 'node:assert/strict';
 import { mkdirSync } from 'node:fs';
@@ -11,12 +11,12 @@ const rejectsWith = (code: string) => (err: unknown) => err instanceof BizziErro
 
 test('label predicates: palette names and short icons', () => {
   for (const c of LABEL_COLORS) assert.ok(isLabelColor(c));
-  for (const bad of ['Red', '#ff0000', '', 'grey', 1, null]) assert.equal(isLabelColor(bad), false, String(bad));
+  for (const bad of ['Red', '#ff0000', '', 'gray', 1, null]) assert.equal(isLabelColor(bad), false, String(bad));
   for (const ok of ['A', 'ab', 'λ', '🚀', '👩‍💻', '🇸🇪', '🏴󠁧󠁢󠁳󠁣󠁴󠁿', 'W1']) assert.ok(isLabelIcon(ok), ok);
   for (const bad of ['', 'abc', 'a b', ' a', '\n', 'a‮', '​', '🚀🚀🚀', 'x'.repeat(17), 3]) assert.equal(isLabelIcon(bad), false, JSON.stringify(bad));
 });
 
-test('machine.set stores a colour, keeps it across restarts, and clears it with an empty string', async (t) => {
+test('machine.set stores a color, keeps it across restarts, and clears it with an empty string', async (t) => {
   const dir = tempDir();
   t.after(() => dir.cleanup());
   const node = await makeNode(dir.path);
@@ -28,7 +28,7 @@ test('machine.set stores a colour, keeps it across restarts, and clears it with 
   assert.equal(machine.description, 'Mac mini.');
   const ev = await log.waitFor('machine.updated', (e) => e.data.machine.color === 'teal');
   assert.deepEqual(ev.data.machine.tags, ['gui']);
-  // Tags and description edits keep the colour.
+  // Tags and description edits keep the color.
   assert.equal((await node.call('machine.set', { tags: ['gui', 'always-on'] })).machine.color, 'teal');
   log.stop();
   await node.close();
@@ -49,7 +49,7 @@ test('machine.set stores a colour, keeps it across restarts, and clears it with 
   }
 });
 
-test('workspace.set renames and sets colour and icon, emits workspace.updated, and persists', async (t) => {
+test('workspace.set renames and sets color and icon, emits workspace.updated, and persists', async (t) => {
   const dir = tempDir();
   t.after(() => dir.cleanup());
   const wsDir = join(dir.path, 'site');

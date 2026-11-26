@@ -45,7 +45,7 @@ const uiOrigin = ui.kind === 'dev' ? new URL(ui.url).origin : APP_ORIGIN;
 const csp = buildCsp(ui.kind === 'dev' ? { devOrigin: uiOrigin } : {});
 
 const titleBar = titleBarFor(process.platform, env);
-/** The theme's last chrome colours, kept so the next launch's first frame already matches. */
+/** The theme's last chrome colors, kept so the next launch's first frame already matches. */
 const chromeFile = join(app.getPath('userData'), 'chrome.json');
 let chrome: ChromeColors = loadChrome();
 
@@ -208,11 +208,11 @@ function applyChrome(c: ChromeColors): void {
   try {
     writeFileSync(chromeFile, JSON.stringify(c));
   } catch (err) {
-    log.log('warn', 'could not save chrome colours', { error: String(err) });
+    log.log('warn', 'could not save chrome colors', { error: String(err) });
   }
 }
 
-/** The platform accent colour (`rrggbbaa`) for the UI's Device theme; macOS and Windows only. */
+/** The platform accent color (`rrggbbaa`) for the UI's Device theme; macOS and Windows only. */
 function accentColor(): string | null {
   if (process.platform !== 'darwin' && process.platform !== 'win32') return null;
   try {

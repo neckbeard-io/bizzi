@@ -1,4 +1,4 @@
-// Supervisor behaviour against the stub core (test/fixtures/stub-core.ts) run by this Node.
+// Supervisor behavior against the stub core (test/fixtures/stub-core.ts) run by this Node.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

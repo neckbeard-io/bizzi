@@ -37,7 +37,7 @@ test('parseRemoteItem rejects malformed records', () => {
     { ...good, appliesTo: ['emacs'] },
     { ...good, source: { via: 'ui' } },
     { ...good, source: { machineId: M1, via: 'fax' } },
-    { ...good, kind: 'rumour' },
+    { ...good, kind: 'rumor' },
   ];
   for (const v of variants) assert.throws(() => parseRemoteItem(v), isBad, JSON.stringify(v).slice(0, 80));
   assert.throws(() => parseRemoteItem(null), isBad);

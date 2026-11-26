@@ -3,7 +3,7 @@
 // prompt, and the first rule that matches narrows the targets to its tag, machine or workspace.
 
 import { AGENT_KINDS, BizziError, isMachineTag, ulid, type AgentKind, type MachineInfo, type RoutingRule, type WorkspaceInfo } from '@bizzi/protocol';
-import type { RouteTarget } from './catalogue.ts';
+import type { RouteTarget } from './catalog.ts';
 
 export const MAX_RULES = 200;
 export const MAX_RULE_WORDS = 50;

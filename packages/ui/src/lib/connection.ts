@@ -14,7 +14,7 @@ export interface ConnectionTarget {
   mock?: { role: MachineRole; demo: string[] };
 }
 
-/** Colours for the desktop window chrome (themed title bar strip, window background). */
+/** Colors for the desktop window chrome (themed title bar strip, window background). */
 export interface ChromeColors {
   background: string;
   card: string;
@@ -29,9 +29,9 @@ export interface BizziBridge {
   platform?: string;
   /** The desktop hid the native title bar: the UI reserves a themed strip of this height (theming.md §8). */
   titleBar?: { style: 'inset' | 'overlay'; height: number };
-  /** Send the theme's chrome colours to the desktop shell after each theme change. */
+  /** Send the theme's chrome colors to the desktop shell after each theme change. */
   setChrome?: (c: ChromeColors) => void;
-  /** System accent colour (`rrggbbaa`, macOS/Windows) for the Device theme. */
+  /** System accent color (`rrggbbaa`, macOS/Windows) for the Device theme. */
   accentColor?: string;
 }
 

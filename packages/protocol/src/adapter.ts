@@ -101,7 +101,7 @@ export interface AdapterSession {
    * Resolves once the input is accepted, not when the turn finishes.
    */
   send(turnId: string, input: InputBlock[]): Promise<void>;
-  /** Add input to the in-flight turn without cancelling it (capability `steer`). */
+  /** Add input to the in-flight turn without canceling it (capability `steer`). */
   steer?(input: InputBlock[]): Promise<void>;
   /** Cancel the in-flight turn; the adapter emits `turn.completed` with stopReason 'interrupted'. */
   interrupt(): Promise<void>;
@@ -146,6 +146,6 @@ export interface AgentAdapter {
    * The core calls it only after stopping every session on it.
    */
   recycle?(): Promise<void>;
-  /** start() honours StartSessionOptions.executable (restart fallback onto the previous version). */
+  /** start() honors StartSessionOptions.executable (restart fallback onto the previous version). */
   readonly acceptsExecutable?: boolean;
 }

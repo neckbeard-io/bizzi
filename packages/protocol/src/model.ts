@@ -31,7 +31,7 @@ export interface MachineInfo {
   tags: string[];
   /** User-written paragraph about what the machine is for; part of the machine card (knowledge.md §9.2). */
   description?: string;
-  /** User-chosen identity colour (spec §11.1 "Identity colour"); set with `machine.set`. */
+  /** User-chosen identity color (spec §11.1 "Identity color"); set with `machine.set`. */
   color?: LabelColor;
   online: boolean;
   roles: MachineRole[];
@@ -125,7 +125,7 @@ export interface WorkspaceInfo {
   /** kind 'container': how its container is built and run (topology.md §7). */
   container?: WorkspaceContainer;
   createdAt: string;
-  /** User-chosen identity colour (spec §11.1 "Identity colour"); set with `workspace.set`. A worktree without one shows its repo's. */
+  /** User-chosen identity color (spec §11.1 "Identity color"); set with `workspace.set`. A worktree without one shows its repo's. */
   color?: LabelColor;
   /** User-chosen icon in place of the name's first letter: one or two characters or an emoji (`isLabelIcon`). */
   icon?: string;
@@ -559,7 +559,7 @@ export interface RoutingRule {
 }
 
 /**
- * One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labelled set
+ * One routed prompt and where it went, recorded by the one-pane composer (`route.record`). The labeled set
  * for comparing classifiers (spec §11.2 "Choosing"): `text` → `chosen`, with what was offered and by whom.
  */
 export interface RouteDecisionInput {
@@ -727,10 +727,10 @@ export interface ContainerStatus {
   error?: string;
 }
 
-// ---- identity colour and icon (spec §11.1 "Identity colour")
+// ---- identity color and icon (spec §11.1 "Identity color")
 
 /**
- * A palette name, not a CSS colour: each theme resolves it (`--label-<name>`) so it reads on that theme's
+ * A palette name, not a CSS color: each theme resolves it (`--label-<name>`) so it reads on that theme's
  * sidebar and cards, light or dark.
  */
 export type LabelColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink';
@@ -903,7 +903,7 @@ export interface HelperReadResult {
 }
 
 /**
- * How the workspace state travelled for a fork to another machine. `git`: the source branch plus any
+ * How the workspace state traveled for a fork to another machine. `git`: the source branch plus any
  * uncommitted or untracked changes as one snapshot commit on top, sent as a git bundle and checked out
  * on `branch`. `snapshot`: a plain directory, committed into a shadow repository on each side.
  */

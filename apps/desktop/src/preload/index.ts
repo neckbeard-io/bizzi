@@ -12,7 +12,7 @@ contextBridge.exposeInMainWorld('bizzi', {
   platform: process.platform,
   accentColor: boot.accentColor ?? undefined,
   titleBar: boot.titleBar && boot.titleBar.style !== 'native' ? { style: boot.titleBar.style, height: boot.titleBar.height } : undefined,
-  // Only the colour fields go over IPC; main validates them again.
+  // Only the color fields go over IPC; main validates them again.
   setChrome: (c: { background?: unknown; card?: unknown; sidebar?: unknown; foreground?: unknown; dark?: unknown }) =>
     ipcRenderer.send(IPC_CHROME, { background: c?.background, card: c?.card, sidebar: c?.sidebar, foreground: c?.foreground, dark: c?.dark }),
   versions: {

@@ -7,7 +7,7 @@ export interface BizziNative {
   secureGet(key: string): Promise<string | null>;
   secureSet(key: string, value: string): Promise<void>;
   secureDelete(key: string): Promise<void>;
-  /** Returns the scanned text (e.g. a pairUrl) or null if cancelled. */
+  /** Returns the scanned text (e.g. a pairUrl) or null if canceled. */
   scanQr(): Promise<string | null>;
 }
 

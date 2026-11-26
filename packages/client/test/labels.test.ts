@@ -1,4 +1,4 @@
-// Identity colour and icon in the store (spec §11.1): workspace.updated, setWorkspace, setMachine { color }.
+// Identity color and icon in the store (spec §11.1): workspace.updated, setWorkspace, setMachine { color }.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GLOBAL_CHANNEL } from '@bizzi/protocol';

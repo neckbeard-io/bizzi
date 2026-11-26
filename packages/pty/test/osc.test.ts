@@ -48,7 +48,7 @@ describe('OscScanner', () => {
     assert.equal(scanAll([...text]).length, 1);
   });
 
-  it('ignores other OSCs without buffering them, and recognises OSC 133;A', () => {
+  it('ignores other OSCs without buffering them, and recognizes OSC 133;A', () => {
     const big = 'x'.repeat(100_000);
     const ev = scanAll([osc('0;title'), osc(`52;c;${big}`), osc('8;;https://example.com'), osc('133;A'), osc('133;B'), osc('133;A;cl=m')]);
     assert.deepEqual(ev, [{ type: 'prompt-start' }, { type: 'prompt-start' }]);
@@ -122,7 +122,7 @@ describe('parseProgramStatus', () => {
     assert.equal(parseProgramStatus(`state=working:id=${'x'.repeat(300)}`).ok, false);
   });
 
-  it('parses clear, the ? query, and normalises nested ids', () => {
+  it('parses clear, the ? query, and normalizes nested ids', () => {
     assert.deepEqual(report('state=clear:id=/a//b/'), { type: 'clear', id: 'a/b' });
     assert.deepEqual(report('state=clear'), { type: 'clear', id: '' });
     assert.deepEqual(report('?'), { type: 'query' });

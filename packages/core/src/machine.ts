@@ -80,7 +80,7 @@ export function parseMachineDescription(v: unknown): string {
   return text;
 }
 
-/** Validate an identity colour (`machine.set`, `workspace.set`): a palette name; '' clears it (undefined). */
+/** Validate an identity color (`machine.set`, `workspace.set`): a palette name; '' clears it (undefined). */
 export function parseLabelColor(v: unknown): LabelColor | undefined {
   if (v === '') return undefined;
   if (!isLabelColor(v)) throw new BizziError('bad_request', `color must be one of ${LABEL_COLORS.join(', ')} (or '' to clear it)`);

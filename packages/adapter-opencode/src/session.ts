@@ -75,7 +75,7 @@ interface ToolState {
   files?: { file: string; patch?: string; status?: string }[];
 }
 
-/** Cancelled requests to settle on the server: [sessionID, id]. */
+/** Canceled requests to settle on the server: [sessionID, id]. */
 interface Pending {
   approvals: [string, string][];
   questions: [string, string][];
@@ -224,7 +224,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
 
   async interrupt(): Promise<void> {
     const turn = this.#turn;
-    // Pending approvals/questions end as cancelled now; the server cancels them too.
+    // Pending approvals/questions end as canceled now; the server cancels them too.
     const pending = this.#cancelPending();
     if (!turn) {
       await this.#rejectOnServer(pending);
@@ -673,7 +673,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     this.#emit({ type: 'session.status', data: { status: approvals ? 'waiting_approval' : this.#turn ? 'running' : 'idle' } });
   }
 
-  /** Every unresolved approval / question ends as cancelled (turn ended, session stopped, server died). */
+  /** Every unresolved approval / question ends as canceled (turn ended, session stopped, server died). */
   #cancelPending(): Pending {
     const out: Pending = { approvals: [], questions: [] };
     for (const [id, ap] of this.#approvals) {
@@ -691,7 +691,7 @@ export class OpenCodeSession implements AdapterSession, ServerListener {
     return out;
   }
 
-  /** Best effort: settle cancelled requests on the server too (an interrupt usually did already). */
+  /** Best effort: settle canceled requests on the server too (an interrupt usually did already). */
   async #rejectOnServer(p: Pending): Promise<void> {
     if (!p.approvals.length && !p.questions.length) return;
     const client = this.#server.client;

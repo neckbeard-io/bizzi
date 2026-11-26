@@ -65,7 +65,7 @@ default in that function.
 core checks `Origin` on the WebSocket upgrade, or serves HTTP that the UI fetches, it must allow
 that origin (CORS).
 
-## Shell behaviour
+## Shell behavior
 
 Single-instance lock. On macOS a menu bar icon is drawn in code; closing the window hides it (and
 the Dock icon), and Quit exits. `bizzi://` is registered for packaged builds (Info.plist/registry

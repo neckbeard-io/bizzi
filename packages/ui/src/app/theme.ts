@@ -7,7 +7,7 @@ import type { BizziStore } from '@bizzi/client';
 import type { ThemeFile, UserPrefs } from '@bizzi/protocol';
 import { applyTheme, paintEntry, PAINT_CACHE_KEY } from '../lib/theme/apply.ts';
 import type { PaintCache } from '../lib/theme/apply.ts';
-import { BUILTIN_CATALOGUE, DEFAULT_THEME_ID, DEVICE_THEME_ID, bizziDefault, builtinTheme, deviceTheme, normalizeAccent } from '../lib/theme/builtins/index.ts';
+import { BUILTIN_CATALOG, DEFAULT_THEME_ID, DEVICE_THEME_ID, bizziDefault, builtinTheme, deviceTheme, normalizeAccent } from '../lib/theme/builtins/index.ts';
 import { isUnsupported, readThemeFiles, toThemeFile, upsertFile } from '../lib/theme/custom.ts';
 import type { CustomTheme } from '../lib/theme/custom.ts';
 import { effectiveDensity, resolveTheme } from '../lib/theme/resolve.ts';
@@ -316,7 +316,7 @@ export async function deleteCustomTheme(store: BizziStore, id: string): Promise<
 
 /** Every id in use, for picking a fresh one. */
 export function themeIdTaken(id: string): boolean {
-  return BUILTIN_CATALOGUE.some((e) => e.theme.id === id) || state.custom.some((c) => c.file.id === id);
+  return BUILTIN_CATALOG.some((e) => e.theme.id === id) || state.custom.some((c) => c.file.id === id);
 }
 
 // ---------------------------------------------------------------- hooks

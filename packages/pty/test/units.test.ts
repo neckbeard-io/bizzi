@@ -84,7 +84,7 @@ describe('OutputCoalescer', () => {
 });
 
 describe('stripAnsi', () => {
-  it('removes colours, OSC titles and keeps words apart on cursor moves', () => {
+  it('removes colors, OSC titles and keeps words apart on cursor moves', () => {
     const s = stripAnsi('\x1b]0;title\x07\x1b[1;32mDo\x1b[1Cyou\x1b[0m want\r\n\x1b[2;1Hnext');
     assert.equal(s, 'Do you want\n\nnext');
   });

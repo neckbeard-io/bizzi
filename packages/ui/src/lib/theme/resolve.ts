@@ -7,13 +7,13 @@ import { deriveFromTones } from './fiveTone.ts';
 import { CHORUS_COLOR_KEYS, STATE_KEYS } from './types.ts';
 import type { Ansi16, ColorKey, Density, ResolvedColors, ResolvedTerminal, ResolvedTheme, StateKey, Theme, ThemeColors, ThemeMode, ThemeVariant } from './types.ts';
 
-/** State colours must clear this against `sidebar` and `card` (spec §11.1). */
+/** State colors must clear this against `sidebar` and `card` (spec §11.1). */
 export const STATE_MIN_CONTRAST = 3;
 /** …and be at least this far apart from each other (CIE76 ΔE). */
 export const STATE_MIN_DISTANCE = 12;
-/** Identity colours (stripes, dots, icon tiles) are graphics: WCAG 1.4.11's 3:1 on sidebar, card and page. */
+/** Identity colors (stripes, dots, icon tiles) are graphics: WCAG 1.4.11's 3:1 on sidebar, card and page. */
 export const LABEL_MIN_CONTRAST = 3;
-/** Derived status colours (ok/warn/err/info) are text; they're nudged to this against `card`. */
+/** Derived status colors (ok/warn/err/info) are text; they're nudged to this against `card`. */
 export const STATUS_MIN_CONTRAST = 4.5;
 
 /** The variant to use for `mode`; a theme without it falls back to its other variant (§2). */
@@ -55,16 +55,16 @@ function stateProblems(states: Record<StateKey, string>, surfaces: { sidebar: st
   return out;
 }
 
-/** Failures of a state-colour set against its surfaces: contrast with sidebar and card, and distinctness. */
+/** Failures of a state-color set against its surfaces: contrast with sidebar and card, and distinctness. */
 export function checkStateColors(states: Record<StateKey, string>, surfaces: { sidebar: string; card: string }): string[] {
   const p = stateProblems(states, surfaces);
   return [
-    ...p.lowContrast.map((x) => `${STATE_LABEL[x.key]} state colour is ${x.ratio.toFixed(2)}:1 on ${x.surface} (needs ${STATE_MIN_CONTRAST}:1)`),
-    ...p.similar.map((x) => `${STATE_LABEL[x.a]} and ${STATE_LABEL[x.b]} state colours are too similar (ΔE ${x.d.toFixed(1)})`),
+    ...p.lowContrast.map((x) => `${STATE_LABEL[x.key]} state color is ${x.ratio.toFixed(2)}:1 on ${x.surface} (needs ${STATE_MIN_CONTRAST}:1)`),
+    ...p.similar.map((x) => `${STATE_LABEL[x.a]} and ${STATE_LABEL[x.b]} state colors are too similar (ΔE ${x.d.toFixed(1)})`),
   ];
 }
 
-/** Which state keeps its derived colour when two collide: earlier wins (waiting and failed carry the most meaning). */
+/** Which state keeps its derived color when two collide: earlier wins (waiting and failed carry the most meaning). */
 const STATE_PRIORITY: readonly StateKey[] = ['stateWaiting', 'stateFailed', 'stateWorking', 'stateIdle', 'stateDone'];
 
 /**
@@ -145,7 +145,7 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
     colors.mutedForeground = ensureContrast(colors.mutedForeground, worst, 4.5, fg);
   }
 
-  // Status colours: the theme's own, else its ANSI palette, else bizzi's defaults (§3 step 3).
+  // Status colors: the theme's own, else its ANSI palette, else bizzi's defaults (§3 step 3).
   const t = variant.terminal ?? {};
   const ansi = t.ansi;
   const status = (k: 'ok' | 'warn' | 'err' | 'info', ansiIndex: number): string => {
@@ -170,12 +170,12 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   diff('diffDel', 'diffDelForeground', colors.err);
   diff('diffHunk', 'diffHunkForeground', colors.info);
   colors.primarySoft = c.primarySoft ?? mix(card, primary, dark ? 0.2 : 0.1);
-  // Accent-coloured text sits on the page, the card, the sidebar and the soft fill: readable on all of them.
+  // Accent-colored text sits on the page, the card, the sidebar and the soft fill: readable on all of them.
   let primaryText = c.primaryText ?? primary;
   if (!c.primaryText) for (const s of [card, bg, colors.sidebar, colors.primarySoft]) primaryText = ensureContrast(primaryText, s, 4.5, fg);
   colors.primaryText = primaryText;
 
-  // State colours (§3): own → derived from status → bizzi defaults → defaults nudged to contrast.
+  // State colors (§3): own → derived from status → bizzi defaults → defaults nudged to contrast.
   const surfaces = { sidebar: colors.sidebar, card };
   const own: Partial<Record<StateKey, string>> = {};
   for (const k of STATE_KEYS) if (c[k]) own[k] = c[k];
@@ -188,20 +188,20 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   };
   const defaults = pickStates({}, D);
   let states = settleStates(pickStates(own, derived), defaults, surfaces);
-  if (states.replaced.length > 0) notes.push(`state colours: bizzi defaults for ${states.replaced.map((k) => STATE_LABEL[k]).join(', ')} (derived ones failed contrast or distinctness)`);
+  if (states.replaced.length > 0) notes.push(`state colors: bizzi defaults for ${states.replaced.map((k) => STATE_LABEL[k]).join(', ')} (derived ones failed contrast or distinctness)`);
   if (checkStateColors(states.set, surfaces).length > 0) {
     // Even bizzi's defaults don't fit this sidebar/card: nudge them toward the foreground, which moves
     // away from both surfaces (they sit on the background's side).
     const set = {} as Record<StateKey, string>;
     for (const k of STATE_KEYS) set[k] = ensureContrast(ensureContrast(defaults[k], surfaces.sidebar, STATE_MIN_CONTRAST, fg), card, STATE_MIN_CONTRAST, fg);
     states = { set, replaced: [...STATE_KEYS] };
-    notes.push('state colours: bizzi defaults adjusted for contrast with this sidebar/card');
+    notes.push('state colors: bizzi defaults adjusted for contrast with this sidebar/card');
   }
   Object.assign(colors, states.set);
 
   const labels = resolveLabels(dark, [colors.sidebar, card, bg], fg);
 
-  // Terminal (§8): the theme's palette, else derived from its UI colours.
+  // Terminal (§8): the theme's palette, else derived from its UI colors.
   const termBg = t.background ?? bg;
   const termFg = t.foreground ?? fg;
   let derivedAnsi: Ansi16 | undefined;

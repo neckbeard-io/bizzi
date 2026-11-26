@@ -1,5 +1,5 @@
 // Durable one-pane state (spec §11.2): routing rules and recorded decisions, in a SQLite database of the
-// caller's (the hub's hub.db, a node's routing.db). The decisions are the labelled set for comparing
+// caller's (the hub's hub.db, a node's routing.db). The decisions are the labeled set for comparing
 // classifiers: prompt → machine · workspace · agent, with what was offered and whether the user overrode it.
 
 import type { DatabaseSync } from 'node:sqlite';

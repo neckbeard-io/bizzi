@@ -81,7 +81,7 @@ export function Badge(props: { tone?: Tone; children: ReactNode; className?: str
 }
 
 /**
- * Approval prompts and permission-mode badges (e.g. bypass permissions): fixed high-contrast colours
+ * Approval prompts and permission-mode badges (e.g. bypass permissions): fixed high-contrast colors
  * that themes can't override, so a theme can never camouflage "this agent can run anything" (§6).
  */
 export function SafetyBadge(props: { kind?: 'warn' | 'danger'; children: ReactNode; className?: string; title?: string }): ReactNode {

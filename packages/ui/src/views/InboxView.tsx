@@ -175,8 +175,8 @@ function WaitingRow(props: { session: SessionInfo }): ReactNode {
 }
 
 /**
- * "▣ acme-shop · ▪ mac-mini": the session's workspace tile and name, then its machine (in its colour) when
- * there are several machines or this one has a colour (spec §11.1 "Identity colour").
+ * "▣ acme-shop · ▪ mac-mini": the session's workspace tile and name, then its machine (in its color) when
+ * there are several machines or this one has a color (spec §11.1 "Identity color").
  */
 function Where(props: { session: SessionInfo }): ReactNode {
   const ws = useBizzi((st) => st.workspaces?.[props.session.workspaceId] ?? null);

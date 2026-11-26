@@ -383,7 +383,7 @@ export class ClaudeSession implements AdapterSession {
     this.#emit({ type: 'approval.resolved', data: by ? { approvalId, decision, by } : { approvalId, decision } });
   }
 
-  /** Interrupt / stop / process death: every pending approval and question ends as cancelled. */
+  /** Interrupt / stop / process death: every pending approval and question ends as canceled. */
   #cancelPending(message: string): void {
     for (const id of [...this.#approvals.keys()]) {
       this.#settle(id, 'cancelled', { behavior: 'deny', message, interrupt: true }, 'bizzi');

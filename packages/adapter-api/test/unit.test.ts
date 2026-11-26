@@ -72,7 +72,7 @@ describe('sse and limiter', () => {
     assert.deepEqual(out, [{ event: 'a', data: '1\n2' }, { data: 'x' }]);
   });
 
-  test('limiter queues beyond max and honours abort', async () => {
+  test('limiter queues beyond max and honors abort', async () => {
     const l = new Limiter(1);
     const r1 = await l.acquire();
     let second = false;

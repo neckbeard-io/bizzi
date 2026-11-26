@@ -39,7 +39,7 @@ export function applyTheme(r: ResolvedTheme, density: Density, root: HTMLElement
   }
 }
 
-/** The colours the desktop window chrome needs, as opaque `#rrggbb` (themes may use rgba()). */
+/** The colors the desktop window chrome needs, as opaque `#rrggbb` (themes may use rgba()). */
 export function chromeColors(r: ResolvedTheme): ChromeColors {
   const bg = toHex(flatten(r.colors.background, r.dark ? '#000000' : '#ffffff'));
   const opaque = (c: string) => toHex(flatten(c, bg));

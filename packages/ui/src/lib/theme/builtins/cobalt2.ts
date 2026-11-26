@@ -1,4 +1,4 @@
-// Cobalt2 by Wes Bos (wesbos/cobalt2-vscode), MIT; copyright notice in NOTICE. Colours from the VS Code
+// Cobalt2 by Wes Bos (wesbos/cobalt2-vscode), MIT; copyright notice in NOTICE. Colors from the VS Code
 // theme (theming.md §4), not the base24 port; the other tokens derive from these (resolve.ts). Dark
 // only: light mode falls back to it.
 import type { Theme } from '../types.ts';

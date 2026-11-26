@@ -1,5 +1,5 @@
 // base16 / base24 schemes (tinted-theming) → bizzi themes. Ported from Chorus's base16.ts
-// (Apache-2.0; see NOTICE). One converter serves the built-in catalogue and imports
+// (Apache-2.0; see NOTICE). One converter serves the built-in catalog and imports
 // (theming.md §5), so a converter bug shows up in the built-ins first.
 //
 //   base00 default background      base08 red      (variables, deleted)
@@ -11,7 +11,7 @@
 //   base06 light foreground        base0E magenta  (keywords)
 //   base07 light background        base0F brown    (deprecated)
 //
-// base24 adds base10–base17: a darker background pair and true bright ANSI colours.
+// base24 adds base10–base17: a darker background pair and true bright ANSI colors.
 import { contrast, luminance, mix } from './color.ts';
 import type { Ansi16, TerminalPalette, Theme, ThemeColors } from './types.ts';
 
@@ -21,7 +21,7 @@ export type Base16Scheme = {
   system: 'base16' | 'base24';
   name: string;
   author?: string;
-  /** Licence of the scheme, recorded for vendored built-ins (theming.md §1). */
+  /** License of the scheme, recorded for vendored built-ins (theming.md §1). */
   license?: string;
   variant: Base16Variant;
   /** Lowercase keys: `base00`…`base0f`, plus `base10`…`base17` for base24. */
@@ -109,7 +109,7 @@ export function parseBase16Scheme(text: string): Base16Scheme | null {
     }
   }
 
-  // All sixteen base colours are required; a missing one would surface as `undefined` downstream.
+  // All sixteen base colors are required; a missing one would surface as `undefined` downstream.
   for (let i = 0; i < 16; i++) if (!palette[`base0${i.toString(16)}`]) return null;
   if (!name) return null;
   if (!variant) variant = luminance(palette.base00!) > 0.5 ? 'light' : 'dark';
@@ -157,7 +157,7 @@ export function base16ToTheme(scheme: Base16Scheme): Theme {
   const extreme = at('base07');
   const blue = at('base0d');
 
-  // Body text must clear AA on both the page and the card, with one colour.
+  // Body text must clear AA on both the page and the card, with one color.
   const worst = contrast(at('base05'), bg) < contrast(at('base05'), surface) ? bg : surface;
   const fg = pickForContrast(worst, 4.5, [at('base05')], extreme);
   const sidebar = scheme.variant === 'light' ? mix(bg, surface, 0.5) : surface;
@@ -212,7 +212,7 @@ export function base16ToTheme(scheme: Base16Scheme): Theme {
     sidebarRing: blue,
   };
 
-  // base24 has true bright colours; base16 reuses the normal ones (the base16 terminal convention).
+  // base24 has true bright colors; base16 reuses the normal ones (the base16 terminal convention).
   const bright = (normal: string, key: string) => p[key] ?? normal;
   const ansi: Ansi16 = [
     scheme.system === 'base24' ? (p.base10 ?? bg) : bg,

@@ -214,7 +214,7 @@ interface Runtime {
   pendingQuestions: Map<string, QuestionAsked>;
   /** Questions being answered (question.respond in flight). */
   answering: Set<string>;
-  /** Approval / question ids the core cancelled this turn; a late adapter resolution is dropped. */
+  /** Approval / question ids the core canceled this turn; a late adapter resolution is dropped. */
   cancelled: Set<string>;
   /** Who is answering each approval / question in flight; stamped on its resolved event. */
   responders: Map<string, Responder>;
@@ -269,7 +269,7 @@ export class Sessions {
 
   // --- restart recovery ---------------------------------------------------------------------------
 
-  /** Load persisted sessions. Active ones become idle (resumable) or ended; pending approvals/questions are cancelled. */
+  /** Load persisted sessions. Active ones become idle (resumable) or ended; pending approvals/questions are canceled. */
   load(): void {
     this.#loading = true;
     try {
@@ -1524,7 +1524,7 @@ export class Sessions {
   }
 
   /**
-   * Resolve every pending approval / question as cancelled. With `settle`, a waiting status falls back
+   * Resolve every pending approval / question as canceled. With `settle`, a waiting status falls back
    * to running/idle; without it the caller sets the final status (turn.completed, session.status).
    */
   #cancelPending(rt: Runtime, settle: boolean): void {

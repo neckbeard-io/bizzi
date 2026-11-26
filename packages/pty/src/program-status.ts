@@ -87,7 +87,7 @@ export function parseProgramStatus(payload: string, overflow = false): ParseResu
 
   let id = fields.get('id') ?? '';
   if (id.length > MAX_ID) return { ok: false, error: 'id too long' };
-  // Normalise nesting: no empty segments, no leading/trailing slashes.
+  // Normalize nesting: no empty segments, no leading/trailing slashes.
   id = id
     .split('/')
     .map((s) => s.trim())

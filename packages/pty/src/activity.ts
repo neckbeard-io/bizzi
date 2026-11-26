@@ -3,7 +3,7 @@
 // A burst starts with the first output after a quiet period (or with an explicit kick(), e.g. when
 // bizzi types a prompt). Once output has been quiet for `idleMs`, onIdle fires once for that burst.
 // Prompt detectors run against the ANSI-stripped text of the current burst; when one matches, the
-// quiet period shrinks to `settleMs` so recognised prompts surface quickly, and the match is
+// quiet period shrinks to `settleMs` so recognized prompts surface quickly, and the match is
 // reported as the reason. Detectors are plain objects, so callers can add their own; the shipped
 // set is data (data/detectors.json, see detectors.ts). OSC 7501 reports, when a program sends
 // them, take precedence over all of this (adapter.ts).

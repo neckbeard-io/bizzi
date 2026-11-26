@@ -1,7 +1,7 @@
 // @bizzi/routing: where a prompt should run (spec §11.2 one-pane mode). Explicit `@machine #workspace
 // /agent` tokens, then an option-logit classifier on any OpenAI-compatible endpoint that returns logprobs.
 
-export { buildTargets, type CatalogueInput, type RouteTarget } from './catalogue.ts';
+export { buildTargets, type CatalogInput, type RouteTarget } from './catalog.ts';
 export { parseExplicit, type ExplicitRoute } from './explicit.ts';
 export {
   MAX_LOGPROB_OPTIONS,

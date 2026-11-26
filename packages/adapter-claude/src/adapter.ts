@@ -92,7 +92,7 @@ export function toSdkMcpServers(specs: Record<string, McpServerSpec>): Record<st
 
 export class ClaudeAdapter implements AgentAdapter {
   readonly agent = 'claude' as const;
-  /** StartSessionOptions.executable is honoured (restart fallback onto the previous version, updates.md §5). */
+  /** StartSessionOptions.executable is honored (restart fallback onto the previous version, updates.md §5). */
   readonly acceptsExecutable = true;
   readonly #opts: ClaudeAdapterOptions;
   readonly #sessions = new Set<ClaudeSession>();

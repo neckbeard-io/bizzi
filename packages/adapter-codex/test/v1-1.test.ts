@@ -99,7 +99,7 @@ test('a question asked between turns: status goes waiting_input -> idle when it 
   } finally {
     await s.stop();
   }
-  // Cancelled at stop: no status besides 'ended'.
+  // Canceled at stop: no status besides 'ended'.
   const log2 = new EventLog();
   const s2 = await fakeAdapter().start(startOpts(), log2.emit, ctx());
   await s2.send('t_late', text('lateask'));

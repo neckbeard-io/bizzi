@@ -1,4 +1,4 @@
-// Identity colour and icon (spec §11.1 "Identity colour"): the per-theme palette, the UI helpers, and the
+// Identity color and icon (spec §11.1 "Identity color"): the per-theme palette, the UI helpers, and the
 // mock server's machine.set { color } / workspace.set through the store.
 import { test } from 'node:test';
 import type { TestContext } from 'node:test';
@@ -12,10 +12,10 @@ import type { Theme } from '../src/lib/theme/index.ts';
 import { iconInputError, machineTagsLabel, workspaceColor, workspaceMonogram } from '../src/lib/labels.ts';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
 
-/** Identity colours must read as clearly different colours, not shades of one. */
+/** Identity colors must read as clearly different colors, not shades of one. */
 const LABEL_MIN_DISTANCE = 15;
 
-test('identity colours read on sidebar, cards and page in every built-in theme, light and dark, and stay distinct', () => {
+test('identity colors read on sidebar, cards and page in every built-in theme, light and dark, and stay distinct', () => {
   for (const t of BUILTIN_THEMES) {
     for (const mode of ['light', 'dark'] as const) {
       const r = resolveTheme(t, mode);
@@ -34,7 +34,7 @@ test('identity colours read on sidebar, cards and page in every built-in theme, 
           assert.ok(deltaE(r.labels[a], r.labels[b]) >= LABEL_MIN_DISTANCE, `${where}: ${a} and ${b} are too similar`);
         }
       }
-      // Identity colours are written as their own variables, never over the state tokens.
+      // Identity colors are written as their own variables, never over the state tokens.
       const vars = themeCssVars(r);
       for (const c of LABEL_COLORS) assert.equal(vars[`--label-${c}`], r.labels[c], where);
       for (const k of STATE_KEYS) assert.equal(vars[`--state-${k.slice(5).toLowerCase()}`], r.colors[k], where);
@@ -42,7 +42,7 @@ test('identity colours read on sidebar, cards and page in every built-in theme, 
   }
 });
 
-test('a hostile surface still gets readable identity colours (nudged toward the foreground)', () => {
+test('a hostile surface still gets readable identity colors (nudged toward the foreground)', () => {
   const theme: Theme = { id: 'odd-labels', name: 'Odd', variants: { light: { colors: { background: '#ffffff', foreground: '#000000', sidebar: '#9a9a9a', card: '#a0a0a0' } } } };
   const r = resolveTheme(theme, 'light');
   for (const c of LABEL_COLORS) {
@@ -50,7 +50,7 @@ test('a hostile surface still gets readable identity colours (nudged toward the 
   }
 });
 
-test('index.css paints the default identity colours (defaults.ts, the resolver and the stylesheet agree)', () => {
+test('index.css paints the default identity colors (defaults.ts, the resolver and the stylesheet agree)', () => {
   const css = readFileSync(new URL('../src/index.css', import.meta.url), 'utf8');
   const block = (selector: string) => {
     const start = css.indexOf(`${selector} {`);
@@ -66,7 +66,7 @@ test('index.css paints the default identity colours (defaults.ts, the resolver a
   }
 });
 
-test('labels helpers: worktrees borrow their repo colour, monograms, icon input, tag line', () => {
+test('labels helpers: worktrees borrow their repo color, monograms, icon input, tag line', () => {
   const repo: WorkspaceInfo = { id: 'w_r', machineId: 'm', name: 'acme', path: '/a', kind: 'git', color: 'teal', createdAt: '' };
   const tree: WorkspaceInfo = { id: 'w_t', machineId: 'm', name: 'acme (x)', path: '/b', kind: 'worktree', parentWorkspaceId: 'w_r', createdAt: '' };
   const all = { w_r: repo, w_t: tree };
@@ -111,7 +111,7 @@ async function connect(t: TestContext) {
   return { store, until };
 }
 
-test('mock: machine colour and workspace name, colour and icon through the store', async (t) => {
+test('mock: machine color and workspace name, color and icon through the store', async (t) => {
   const { store, until } = await connect(t);
   const bad = (code: string) => (e: unknown) => e instanceof BizziError && e.code === code;
 

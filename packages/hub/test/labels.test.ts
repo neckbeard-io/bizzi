@@ -1,4 +1,4 @@
-// Identity colour and icon through the hub (spec §11.1): machine.set { color } and workspace.set reach
+// Identity color and icon through the hub (spec §11.1): machine.set { color } and workspace.set reach
 // the owning node, the hub's replica keeps them (offline too), and clients get the events.
 
 import assert from 'node:assert/strict';
@@ -16,7 +16,7 @@ async function pairNode(hub: BizziHub, client: TestClient, node: BizziNode): Pro
   return credential;
 }
 
-test('hub: machine colour and workspace colour, icon and name replicate, and stay in the replica while offline', async (t) => {
+test('hub: machine color and workspace color, icon and name replicate, and stay in the replica while offline', async (t) => {
   const hubDir = tempDir();
   const nodeDir = tempDir();
   const wsDir = tempDir('bizzi-hub-ws-');
@@ -43,7 +43,7 @@ test('hub: machine colour and workspace colour, icon and name replicate, and sta
   const { machine } = await client.call<{ machine: MachineInfo }>('machine.set', { machineId, color: 'purple' });
   assert.equal(machine.color, 'purple');
   assert.equal(node.machine.color, 'purple');
-  await waitFor(() => client.on(GLOBAL_CHANNEL).some((e) => e.type === 'machine.updated' && e.data.machine.color === 'purple'), 5000, 'machine.updated with colour');
+  await waitFor(() => client.on(GLOBAL_CHANNEL).some((e) => e.type === 'machine.updated' && e.data.machine.color === 'purple'), 5000, 'machine.updated with color');
 
   const { workspace } = await client.call<{ workspace: WorkspaceInfo }>('workspace.create', { machineId, path: join(wsDir.path, 'site'), create: true });
   const set = await client.call<{ workspace: WorkspaceInfo }>('workspace.set', { workspaceId: workspace.id, name: 'Website', color: 'green', icon: 'W' });
@@ -63,7 +63,7 @@ test('hub: machine colour and workspace colour, icon and name replicate, and sta
   assert.equal((await client.request('workspace.set', { workspaceId: workspace.id, color: 'brown' })).error?.code, 'bad_request');
   assert.equal((await client.request('workspace.set', { workspaceId: 'w_nope', color: 'red' })).error?.code, 'not_found');
 
-  // Offline: lists still carry the colours; changes wait for the machine.
+  // Offline: lists still carry the colors; changes wait for the machine.
   await link.close();
   await waitFor(() => client.on(GLOBAL_CHANNEL).some((e) => e.type === 'machine.updated' && e.data.machine.id === machineId && !e.data.machine.online), 5000, 'offline');
   const machines = await client.call<{ machines: MachineInfo[] }>('machines.list');

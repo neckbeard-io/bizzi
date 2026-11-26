@@ -73,7 +73,7 @@ const [opencode] = createAdapters({ defaultAgent: 'build' });
 | `session.usage.updated` (session-cumulative, own + each subagent session) | `usage.updated`, the running session total; on resume the stored total is reported up front |
 | own `session.step.ended` tokens | `context.updated {used: input+output+reasoning+cache read+write of that step, window: model limit.context}` (window re-read when the step's model changes); with bizzi instructions, rows `bizzi` (bytes/4), `other`, `free_space`. No compaction event was observed in v2 captures, so no `context.compacted`; no `account.usage` (no login identity or window data through the server) |
 | `session.execution.succeeded/failed/interrupted` | `turn.completed` end_turn/error/interrupted (failed also emits `error`) |
-| interrupt / stop / server crash / turn end with requests still open | `approval.resolved {decision:'cancelled', by:'bizzi'}`, `question.resolved {cancelled:true}`; then rejected / cancelled on the server when it's still up (an interrupt already cancels them there) |
+| interrupt / stop / server crash / turn end with requests still open | `approval.resolved {decision:'cancelled', by:'bizzi'}`, `question.resolved {cancelled:true}`; then rejected / canceled on the server when it's still up (an interrupt already cancels them there) |
 | `session.agent.selected` / `model.selected` / `renamed` | `session.info` |
 | `form.created` (the `question` tool creates one per call: `metadata.kind:"question"`, fields `q0…`) | `question.asked` (`questionId` = form id; one `QuestionItem` per visible field: description→text, title→header, options, `multiselect`→multiSelect, `custom`→allowText, boolean→Yes/No) + `session.status waiting_input` |
 | `form.replied` / `form.cancelled` | `question.resolved {answers}` (values → labels) / `{cancelled:true}`; after the last open question: `session.status` running / waiting_approval / idle |
@@ -152,7 +152,7 @@ that reproduces the captured routes and SSE shapes, in-process and as a child pr
 - the permission round-trip for allow, allow_always and deny
 - questions from the real question-tool capture (`test/fixtures/opencode-2.0.25-question.jsonl`):
   single and multi choice, decline, answered elsewhere, interrupt/stop/crash cancellation,
-  between-turn forms, forms picked up after a stream gap; cancelled approvals; fork; usage
+  between-turn forms, forms picked up after a stream gap; canceled approvals; fork; usage
   semantics; dispose
 - interrupt, set() validation, steer, resume
 - reconciliation after a stream gap

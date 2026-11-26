@@ -1,4 +1,4 @@
-// Labels and colour classes for session marks, billing classes and status sources (spec §11.1, §12.3).
+// Labels and color classes for session marks, billing classes and status sources (spec §11.1, §12.3).
 import type { MarkState, MeterTone } from '@bizzi/client';
 import type { AgentKind, BillingClass, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
 
@@ -12,9 +12,9 @@ export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', faile
 /** Text glyphs for compact counts (`⚠1 ◐2 ●3`). */
 export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', done: '✓', idle: '●' };
 
-/** Text colour per state; colour carries state only (theme state tokens, which themes can't camouflage). */
+/** Text color per state; color carries state only (theme state tokens, which themes can't camouflage). */
 export const MARK_TEXT: Record<MarkState, string> = { waiting: 'text-state-waiting', failed: 'text-state-failed', working: 'text-state-working', done: 'text-state-done', idle: 'text-state-idle' };
-/** Ring/border colour per state. */
+/** Ring/border color per state. */
 export const MARK_RING: Record<MarkState, string> = { waiting: 'border-state-waiting', failed: 'border-state-failed', working: 'border-state-working', done: 'border-state-done', idle: 'border-state-idle' };
 /** Filled dot per state (idle is hollow). */
 export const MARK_DOT: Record<MarkState, string> = { waiting: 'bg-state-waiting', failed: 'bg-state-failed', working: 'bg-state-working', done: 'bg-state-done', idle: 'border border-state-idle bg-transparent' };

@@ -83,7 +83,7 @@ export const CODEX_STRUCTURED_CAPABILITIES: AgentCapabilities = {
 
 export class CodexAdapter implements AgentAdapter {
   readonly agent = 'codex' as const;
-  /** StartSessionOptions.executable is honoured (restart fallback onto the previous version, updates.md §5). */
+  /** StartSessionOptions.executable is honored (restart fallback onto the previous version, updates.md §5). */
   readonly acceptsExecutable = true;
   readonly #opts: CodexAdapterOptions;
   #resolvedPath: string | undefined;

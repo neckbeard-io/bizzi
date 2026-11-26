@@ -1,5 +1,5 @@
-// Identity colour and icon for machines and workspaces (spec §11.1 "Identity colour"). Pure helpers; the
-// components are in components/labels.tsx. Colours are palette names resolved per theme as `--label-<name>`.
+// Identity color and icon for machines and workspaces (spec §11.1 "Identity color"). Pure helpers; the
+// components are in components/labels.tsx. Colors are palette names resolved per theme as `--label-<name>`.
 import { LABEL_COLORS, isLabelIcon } from '@bizzi/protocol';
 import type { LabelColor, MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
 
@@ -16,12 +16,12 @@ export const LABEL_COLOR_NAME: Record<LabelColor, string> = {
   pink: 'Pink',
 };
 
-/** The CSS value of an identity colour in the current theme. */
+/** The CSS value of an identity color in the current theme. */
 export function labelVar(color: LabelColor): string {
   return `var(--label-${color})`;
 }
 
-/** A workspace's colour: its own, else (a worktree) its repo workspace's. */
+/** A workspace's color: its own, else (a worktree) its repo workspace's. */
 export function workspaceColor(w: WorkspaceInfo, workspaces: Record<string, WorkspaceInfo> | null | undefined): LabelColor | undefined {
   if (w.color) return w.color;
   if (w.kind === 'worktree' && w.parentWorkspaceId) return workspaces?.[w.parentWorkspaceId]?.color;

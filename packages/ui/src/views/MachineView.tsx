@@ -248,7 +248,7 @@ function suggestedTags(m: MachineInfo): string[] {
 
 /**
  * Tags and description: what the machine is for. Sessions get both in their machine card, and tag rules
- * follow the tags. The identity colour (spec §11.1) is edited here too: it marks the machine's sidebar group
+ * follow the tags. The identity color (spec §11.1) is edited here too: it marks the machine's sidebar group
  * and the headers of its sessions.
  */
 function MachinePurpose(props: { machine: MachineInfo; online: boolean }): ReactNode {
@@ -288,7 +288,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
                 <span className="text-xs text-muted">No tags</span>
               )}
               {m.color ? (
-                <Badge title="Identity colour: the machine's sidebar stripe and its session headers">
+                <Badge title="Identity color: the machine's sidebar stripe and its session headers">
                   <LabelDot color={m.color} />
                   {LABEL_COLOR_NAME[m.color].toLowerCase()}
                 </Badge>
@@ -300,7 +300,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
               <p className="text-xs text-muted">No description. Say what this machine is for; every session started here is told.</p>
             )}
           </div>
-          <Button size="sm" variant="ghost" icon="edit" disabled={!props.online} onClick={start} title={props.online ? 'Edit tags, description and colour' : 'The machine is offline'}>
+          <Button size="sm" variant="ghost" icon="edit" disabled={!props.online} onClick={start} title={props.online ? 'Edit tags, description and color' : 'The machine is offline'}>
             Edit
           </Button>
         </div>
@@ -332,7 +332,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
       <Field label="What it's for" hint="Every session started on this machine gets this in its machine card.">
         <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Work laptop with production access. Production investigations happen here." />
       </Field>
-      <LabelColorField value={color} onChange={setColor} label="Machine colour" hint="A stripe down its sidebar group and on the headers of its sessions, so you can tell machines apart at a glance." />
+      <LabelColorField value={color} onChange={setColor} label="Machine color" hint="A stripe down its sidebar group and on the headers of its sessions, so you can tell machines apart at a glance." />
       <ErrorText error={save.error} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => setEditing(false)}>

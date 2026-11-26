@@ -12,7 +12,7 @@ test('title bar style per platform, with a native opt-out', () => {
   assert.deepEqual(titleBarFor('darwin', { BIZZI_NATIVE_TITLEBAR: '1' }), { style: 'native', height: 0 });
 });
 
-test('window options: hidden title bar themed from the last colours', () => {
+test('window options: hidden title bar themed from the last colors', () => {
   assert.deepEqual(windowChromeOptions(titleBarFor('darwin', {}), tokyo), { backgroundColor: '#1a1b26', titleBarStyle: 'hidden' });
   assert.deepEqual(windowChromeOptions(titleBarFor('win32', {}), tokyo), {
     backgroundColor: '#1a1b26',
@@ -22,7 +22,7 @@ test('window options: hidden title bar themed from the last colours', () => {
   assert.deepEqual(windowChromeOptions({ style: 'native', height: 0 }, DEFAULT_CHROME), { backgroundColor: DEFAULT_CHROME.background });
 });
 
-test('chrome colours from the renderer: exactly four #rrggbb colours and a boolean', () => {
+test('chrome colors from the renderer: exactly four #rrggbb colors and a boolean', () => {
   assert.deepEqual(parseChrome({ ...tokyo, background: '#1A1B26', extra: 'dropped' }), tokyo);
   assert.equal(parseChrome(null), null);
   assert.equal(parseChrome('#1a1b26'), null);

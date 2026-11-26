@@ -1,6 +1,6 @@
-// base16 catalogue (theming.md §4): canonical schemes from tinted-theming/schemes (spec 0.11), each
-// under its author's licence (MIT for all of these; see NOTICE). The list and values come from Chorus
-// (Apache-2.0); Chorus's base16 Dracula is dropped in favour of flax's, which has a light variant.
+// base16 catalog (theming.md §4): canonical schemes from tinted-theming/schemes (spec 0.11), each
+// under its author's license (MIT for all of these; see NOTICE). The list and values come from Chorus
+// (Apache-2.0); Chorus's base16 Dracula is dropped in favor of flax's, which has a light variant.
 // Data only: every UI token is derived at load by base16ToTheme, the same converter imports use.
 import type { Base16Scheme } from '../base16.ts';
 

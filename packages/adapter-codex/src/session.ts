@@ -687,7 +687,7 @@ export class CodexSession implements AdapterSession {
     return toUsage(diffUsage(this.#threadUsage, turn.usageAtStart), this.#contextWindow);
   }
 
-  /** Answer every pending approval `cancel` (a no-op once the process is gone) and report it cancelled. */
+  /** Answer every pending approval `cancel` (a no-op once the process is gone) and report it canceled. */
   #cancelApprovals(reason: string): void {
     for (const [approvalId, p] of this.#approvals) {
       this.#approvals.delete(approvalId);
@@ -696,7 +696,7 @@ export class CodexSession implements AdapterSession {
     }
   }
 
-  /** Decline / cancel every pending question (a no-op once the process is gone) and report it cancelled. */
+  /** Decline / cancel every pending question (a no-op once the process is gone) and report it canceled. */
   #cancelQuestions(): void {
     for (const [questionId, q] of this.#questions) {
       this.#questions.delete(questionId);
@@ -729,7 +729,7 @@ export class CodexSession implements AdapterSession {
     this.#failed = msg;
     this.#emit({ type: 'error', data: { message: msg, code: 'process_exited', fatal: true } });
     if (this.#turn) this.#finishTurn('error', msg);
-    // Usually already cancelled by #finishTurn; this covers requests that arrived between turns.
+    // Usually already canceled by #finishTurn; this covers requests that arrived between turns.
     this.#cancelApprovals('codex app-server exited');
     this.#cancelQuestions();
     this.#emit({ type: 'session.status', data: { status: 'failed', reason: msg } });

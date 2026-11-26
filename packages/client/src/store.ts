@@ -935,7 +935,7 @@ export class BizziStore {
     this.patch({ workspaces: withoutKey(this.state.workspaces, workspaceId) });
   }
 
-  /** Rename a workspace or set its identity colour and icon (spec §11.1; `''` clears); `workspace.updated` follows. */
+  /** Rename a workspace or set its identity color and icon (spec §11.1; `''` clears); `workspace.updated` follows. */
   async setWorkspace(params: MethodParams<'workspace.set'>): Promise<WorkspaceInfo> {
     const { workspace } = await this.client.request('workspace.set', params);
     this.patch({ workspaces: { ...this.state.workspaces, [workspace.id]: workspace } });
@@ -1207,7 +1207,7 @@ export class BizziStore {
     return settings;
   }
 
-  /** Set a machine's tags, description and/or identity colour (knowledge.md §9, spec §11.1); `machine.updated` follows. */
+  /** Set a machine's tags, description and/or identity color (knowledge.md §9, spec §11.1); `machine.updated` follows. */
   async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string; color?: LabelColor | '' }): Promise<MachineInfo> {
     const { machineId, ...rest } = params;
     const { machine } = await this.client.request('machine.set', { ...this.target(machineId), ...rest });
@@ -1269,7 +1269,7 @@ export class BizziStore {
     return suggestion;
   }
 
-  // ---- one-pane mode (spec §11.2): recorded decisions (the labelled eval set) and routing rules
+  // ---- one-pane mode (spec §11.2): recorded decisions (the labeled eval set) and routing rules
 
   async recordRoute(decision: RouteDecisionInput): Promise<RouteDecision> {
     const { decision: saved } = await this.client.request('route.record', { decision });

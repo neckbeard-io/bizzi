@@ -111,7 +111,7 @@ test('serve --fake prints a valid ready line, serves clients, and drains on SIGT
   assert.equal(s.ready.pid, s.child.pid);
   const serveJson = join(dir.path, 'serve.json');
   assert.deepEqual(JSON.parse(readFileSync(serveJson, 'utf8')), s.ready);
-  // Widgets run from $BIZZI_WIDGETS_DIR, initialised with the schema and AGENTS.md.
+  // Widgets run from $BIZZI_WIDGETS_DIR, initialized with the schema and AGENTS.md.
   assert.ok(existsSync(join(dir.path, 'widgets', 'AGENTS.md')));
   assert.ok(existsSync(join(dir.path, 'widgets', 'widget.schema.json')));
   // stderr is JSON lines.

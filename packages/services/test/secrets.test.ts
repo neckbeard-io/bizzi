@@ -206,7 +206,7 @@ describe('LibsecretBackend (fake runner)', () => {
 });
 
 describe('createDefaultSecretBackend', () => {
-  it('picks keychain on macOS, the encrypted file on headless Linux, and honours an override', async () => {
+  it('picks keychain on macOS, the encrypted file on headless Linux, and honors an override', async () => {
     const dataDir = tempDir();
     const never: CommandRunner = async () => ({ code: 1, stdout: '', stderr: 'no dbus' });
     const linux = await createDefaultSecretBackend({ dataDir, platform: 'linux', run: never, env: { PATH: '' } });

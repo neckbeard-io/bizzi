@@ -1,4 +1,4 @@
-// Protocol v1.1 features against the fake server: questions (question tool → forms), cancelled
+// Protocol v1.1 features against the fake server: questions (question tool → forms), canceled
 // approvals, fork, usage semantics. Question shapes come from a real 2.0.25 capture
 // (fixtures/opencode-2.0.25-question.jsonl).
 

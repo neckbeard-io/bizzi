@@ -5,7 +5,7 @@
 //
 // Grammar handled: ESC ] <body> (BEL | ESC \). An ESC followed by anything else, CAN or SUB inside
 // the body aborts the sequence (as in a VT parser). The 8-bit C1 forms (0x9d / 0x9c) are not
-// recognised: in UTF-8 output those bytes only appear inside multi-byte characters.
+// recognized: in UTF-8 output those bytes only appear inside multi-byte characters.
 
 export type OscEvent =
   /** OSC 7501 body after `7501;`. `overflow` = the body exceeded the size cap and was cut. */

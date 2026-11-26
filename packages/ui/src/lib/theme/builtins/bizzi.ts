@@ -1,5 +1,5 @@
-// bizzi Default (theming.md §4): bizzi's own look, indigo primary on neutral greys. The Device theme
-// (platform accent colour) is this with the accent swapped in.
+// bizzi Default (theming.md §4): bizzi's own look, indigo primary on neutral grays. The Device theme
+// (platform accent color) is this with the accent swapped in.
 import { ensureContrast, isColor, mix, textOn } from '../color.ts';
 import { checkStateColors } from '../resolve.ts';
 import { STATE_KEYS } from '../types.ts';
@@ -23,13 +23,13 @@ export const bizziDefault: Theme = {
   id: DEFAULT_THEME_ID,
   name: 'bizzi Default',
   author: 'bizzi',
-  description: 'Indigo accent on neutral greys.',
+  description: 'Indigo accent on neutral grays.',
   variants: { light: variant('light'), dark: variant('dark') },
 };
 
 /**
- * Normalise a platform accent: Electron's `systemPreferences.getAccentColor()` returns `rrggbbaa`
- * without `#`; Android's dynamic colour comes as a CSS colour. Null when unusable.
+ * Normalize a platform accent: Electron's `systemPreferences.getAccentColor()` returns `rrggbbaa`
+ * without `#`; Android's dynamic color comes as a CSS color. Null when unusable.
  */
 export function normalizeAccent(raw: unknown): string | null {
   if (typeof raw !== 'string' || !raw.trim()) return null;
@@ -43,7 +43,7 @@ export function normalizeAccent(raw: unknown): string | null {
  * stays readable (3:1 against the card). Without an accent it is exactly bizzi Default.
  */
 export function deviceTheme(accent: string | null): Theme {
-  const base: Theme = { id: DEVICE_THEME_ID, name: 'Device', author: 'bizzi', description: accent ? 'Follows the system accent colour.' : 'Follows the system accent colour (none available here: bizzi Default).', variants: {} };
+  const base: Theme = { id: DEVICE_THEME_ID, name: 'Device', author: 'bizzi', description: accent ? 'Follows the system accent color.' : 'Follows the system accent color (none available here: bizzi Default).', variants: {} };
   for (const mode of ['light', 'dark'] as const) {
     const v = variant(mode);
     if (accent) {
@@ -58,7 +58,7 @@ export function deviceTheme(accent: string | null): Theme {
         sidebarPrimaryForeground: onPrimary,
         primarySoft: mix(D.card, primary, mode === 'dark' ? 0.2 : 0.1),
       });
-      // "working" takes the accent when the five state colours stay distinct (a blue accent can sit
+      // "working" takes the accent when the five state colors stay distinct (a blue accent can sit
       // too close to "done"); otherwise it keeps bizzi's indigo.
       const states = { ...pickStates(D), stateWorking: primary };
       if (checkStateColors(states, { sidebar: D.sidebar, card: D.card }).length === 0) v.colors!.stateWorking = primary;

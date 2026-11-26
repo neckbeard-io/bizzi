@@ -112,7 +112,7 @@ export class PairLinkInbox {
     return link;
   }
 
-  /** Mark the pending link as handled (the UI cancelled the `bizzi:pair` event). */
+  /** Mark the pending link as handled (the UI canceled the `bizzi:pair` event). */
   consume(link: PairLink): void {
     if (this.#pending === link) this.#pending = null;
   }

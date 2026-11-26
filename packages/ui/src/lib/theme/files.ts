@@ -62,7 +62,7 @@ export function themeFromCurrent(current: Theme, name: string, taken: (id: strin
   const copy = structuredClone(current);
   copy.id = customThemeId(name, taken);
   copy.name = name;
-  // Keep provenance: the original's author and licence travel with a derived theme.
+  // Keep provenance: the original's author and license travel with a derived theme.
   copy.description = `Based on ${current.name}${current.author ? ` by ${current.author}` : ''}.`;
   delete copy.author;
   return copy;

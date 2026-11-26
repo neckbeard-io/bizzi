@@ -116,7 +116,7 @@ export interface Methods {
   'machines.list': { params: Empty; result: { machines: MachineInfo[] } };
   /**
    * Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list,
-   * `description` replaces the text (`''` clears it), `color` sets the identity colour (`''` clears it).
+   * `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it).
    * Emits `machine.updated`.
    */
   'machine.set': {
@@ -391,7 +391,7 @@ export interface Methods {
   };
   // ---- one-pane mode (spec §11.2 steps 2–3, override recording). Stored where `route.suggest` answers:
   // on the hub across machines, on a node in local mode. Never relayed.
-  /** Record a routed prompt (the labelled eval set). Returns it with its id and time. */
+  /** Record a routed prompt (the labeled eval set). Returns it with its id and time. */
   'route.record': { params: { decision: RouteDecisionInput }; result: { decision: RouteDecision } };
   /** Recorded decisions, newest first; `overridden` filters; `before` (an id) pages. `total` counts the filter's matches. */
   'route.decisions': {
@@ -413,7 +413,7 @@ export interface Methods {
     params: MachineTarget & { pipelineId: string; decision: 'approve' | 'reject'; message?: string };
     result: { pipeline: PipelineInfo };
   };
-  /** Stop the running stage's session and end the run as cancelled. */
+  /** Stop the running stage's session and end the run as canceled. */
   'pipeline.cancel': { params: MachineTarget & { pipelineId: string }; result: { pipeline: PipelineInfo } };
   /** Forget a run that isn't running or waiting; its sessions and worktree are kept. */
   'pipeline.delete': { params: MachineTarget & { pipelineId: string }; result: Empty };
@@ -523,7 +523,7 @@ export interface Methods {
     result: { session: SessionInfo; workspace: WorkspaceInfo };
   };
 
-  // ---- identity colour and icon (spec §11.1 "Identity colour")
+  // ---- identity color and icon (spec §11.1 "Identity color")
   /**
    * Set a workspace's user-owned fields: `name` renames it (bizzi's registry only, the directory is
    * untouched), `color` and `icon` set its identity (`''` clears either). Emits `workspace.updated`.

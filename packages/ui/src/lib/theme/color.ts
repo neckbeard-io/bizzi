@@ -1,4 +1,4 @@
-// Colour maths for themes: parsing, mixing, WCAG contrast, perceptual distance. Pure functions.
+// Color maths for themes: parsing, mixing, WCAG contrast, perceptual distance. Pure functions.
 
 export type Rgba = { r: number; g: number; b: number; a: number };
 
@@ -45,7 +45,7 @@ function must(value: string): Rgba {
   return parseColor(value) ?? { r: 0, g: 0, b: 0, a: 1 };
 }
 
-/** Composite a possibly translucent colour over an opaque backdrop. */
+/** Composite a possibly translucent color over an opaque backdrop. */
 export function flatten(value: string, over: string): Rgba {
   const c = must(value);
   if (c.a >= 1) return c;
@@ -66,7 +66,7 @@ function channel(v: number): number {
   return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
 }
 
-/** WCAG relative luminance (0–1). Translucent colours count as composited over white. */
+/** WCAG relative luminance (0–1). Translucent colors count as composited over white. */
 export function luminance(value: string): number {
   const c = flatten(value, '#ffffff');
   return 0.2126 * channel(c.r) + 0.7152 * channel(c.g) + 0.0722 * channel(c.b);
@@ -110,7 +110,7 @@ export function ensureContrast(color: string, bg: string, min: number, toward?: 
 function toLab(value: string): [number, number, number] {
   const c = flatten(value, '#ffffff');
   const [r, g, b] = [channel(c.r), channel(c.g), channel(c.b)];
-  // sRGB → XYZ (D65), normalised to the white point
+  // sRGB → XYZ (D65), normalized to the white point
   const x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
   const y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
   const z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
@@ -119,7 +119,7 @@ function toLab(value: string): [number, number, number] {
   return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)];
 }
 
-/** CIE76 colour difference; ~2 is just noticeable, 20+ reads as a different colour at a glance. */
+/** CIE76 color difference; ~2 is just noticeable, 20+ reads as a different color at a glance. */
 export function deltaE(a: string, b: string): number {
   const [l1, a1, b1] = toLab(a);
   const [l2, a2, b2] = toLab(b);

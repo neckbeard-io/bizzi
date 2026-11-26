@@ -160,7 +160,7 @@ test('another device key cannot get a token for a paired device', async (t) => {
   await assert.rejects(requestToken({ hubUrl: hub.url, deviceId: creds.deviceId, identity: intruder }), (e: unknown) => e instanceof BizziError && e.code === 'unauthorized' && /signature/.test(e.message));
 });
 
-test('token provider caches, refreshes before expiry, shares concurrent fetches and honours forceRefresh', async (t) => {
+test('token provider caches, refreshes before expiry, shares concurrent fetches and honors forceRefresh', async (t) => {
   const hub = await setup(t);
   hub.tokenTtlMs = 10 * 60_000;
   const store = memoryIdentityStore();
