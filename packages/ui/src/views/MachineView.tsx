@@ -2,18 +2,20 @@ import { useCallback, useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
 import { selectAgentJob, selectAgents, shallowEqual } from '@bizzi/client';
 import type { JobAction } from '@bizzi/client';
-import type { AgentCapabilities, AgentKind, AgentListing, AgentRemedy, MachineInfo, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
+import type { AgentCapabilities, AgentKind, AgentListing, AgentRemedy, LabelColor, MachineInfo, RestartPolicy, UpdatePolicy } from '@bizzi/protocol';
 import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
 import { useIsHub, useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
+import { LabelColorField, LabelDot, stripeStyle } from '../components/labels.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
 import { Badge, Button, Card, CopyButton, Empty, ErrorText, Field, Input, Spinner, Textarea, cx } from '../components/ui.tsx';
 import { WidgetRow } from '../components/Widget.tsx';
 import { machinePresence } from '../lib/format.ts';
 import { parseTags } from '../lib/knowledge.ts';
+import { LABEL_COLOR_NAME } from '../lib/labels.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, RESTART_POLICY_LABEL, UPDATE_POLICY_LABEL, pendingUpdatesLabel } from '../lib/states.ts';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
@@ -62,6 +64,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       header={
         <PageHeader
           title={name}
+          style={stripeStyle(machine?.color)}
           subtitle={machine ? `${machine.hostname} · bizzi ${machine.bizziVersion}${serverVersion && !hub ? ` · server ${serverVersion}` : ''}` : undefined}
           back={() => navigate({ name: 'machines' })}
           actions={
@@ -213,6 +216,7 @@ function MachineCard(props: { machine: MachineInfo; online: boolean }): ReactNod
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
         <Icon name="machine" size={18} className="text-muted" />
+        <LabelDot color={m.color} className="h-2.5 w-2.5" />
         <div className="min-w-0 flex-1 truncate font-medium">{m.name}</div>
         <Badge tone={m.online ? 'ok' : 'neutral'}>
           <PresenceDot online={m.online} className="h-1.5 w-1.5" />
@@ -242,20 +246,26 @@ function suggestedTags(m: MachineInfo): string[] {
   return out.filter((t) => !m.tags.includes(t));
 }
 
-/** Tags and description: what the machine is for. Sessions get both in their machine card, and tag rules follow the tags. */
+/**
+ * Tags and description: what the machine is for. Sessions get both in their machine card, and tag rules
+ * follow the tags. The identity colour (spec §11.1) is edited here too: it marks the machine's sidebar group
+ * and the headers of its sessions.
+ */
 function MachinePurpose(props: { machine: MachineInfo; online: boolean }): ReactNode {
   const m = props.machine;
   const store = useStore();
   const [editing, setEditing] = useState(false);
   const [tags, setTags] = useState('');
   const [description, setDescription] = useState('');
+  const [color, setColor] = useState<LabelColor | undefined>(undefined);
   const save = useAction(async () => {
-    await store.setMachine({ machineId: m.id, tags: parseTags(tags).map((t) => t.toLowerCase()), description });
+    await store.setMachine({ machineId: m.id, tags: parseTags(tags).map((t) => t.toLowerCase()), description, color: color ?? '' });
     setEditing(false);
   });
   const start = (): void => {
     setTags(m.tags.join(', '));
     setDescription(m.description ?? '');
+    setColor(m.color);
     setEditing(true);
   };
   const current = parseTags(tags).map((t) => t.toLowerCase());
@@ -277,6 +287,12 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
               ) : (
                 <span className="text-xs text-muted">No tags</span>
               )}
+              {m.color ? (
+                <Badge title="Identity colour: the machine's sidebar stripe and its session headers">
+                  <LabelDot color={m.color} />
+                  {LABEL_COLOR_NAME[m.color].toLowerCase()}
+                </Badge>
+              ) : null}
             </div>
             {m.description ? (
               <p className="text-sm whitespace-pre-wrap">{m.description}</p>
@@ -284,7 +300,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
               <p className="text-xs text-muted">No description. Say what this machine is for; every session started here is told.</p>
             )}
           </div>
-          <Button size="sm" variant="ghost" icon="edit" disabled={!props.online} onClick={start} title={props.online ? 'Edit tags and description' : 'The machine is offline'}>
+          <Button size="sm" variant="ghost" icon="edit" disabled={!props.online} onClick={start} title={props.online ? 'Edit tags, description and colour' : 'The machine is offline'}>
             Edit
           </Button>
         </div>
@@ -316,6 +332,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
       <Field label="What it's for" hint="Every session started on this machine gets this in its machine card.">
         <Textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="Work laptop with production access. Production investigations happen here." />
       </Field>
+      <LabelColorField value={color} onChange={setColor} label="Machine colour" hint="A stripe down its sidebar group and on the headers of its sessions, so you can tell machines apart at a glance." />
       <ErrorText error={save.error} />
       <div className="flex justify-end gap-2">
         <Button variant="ghost" onClick={() => setEditing(false)}>

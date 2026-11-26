@@ -18,6 +18,7 @@ import type {
   KnowledgeItemInfo,
   KnowledgeScope,
   KnowledgeSettings,
+  LabelColor,
   Logger,
   MachineInfo,
   MachineRole,
@@ -586,6 +587,7 @@ export class BizziStore {
         return;
       }
       case 'workspace.created':
+      case 'workspace.updated':
         this.patch({ workspaces: { ...this.state.workspaces, [ev.data.workspace.id]: ev.data.workspace } });
         return;
       case 'workspace.removed': {
@@ -872,6 +874,13 @@ export class BizziStore {
     this.patch({ workspaces: withoutKey(this.state.workspaces, workspaceId) });
   }
 
+  /** Rename a workspace or set its identity colour and icon (spec §11.1; `''` clears); `workspace.updated` follows. */
+  async setWorkspace(params: MethodParams<'workspace.set'>): Promise<WorkspaceInfo> {
+    const { workspace } = await this.client.request('workspace.set', params);
+    this.patch({ workspaces: { ...this.state.workspaces, [workspace.id]: workspace } });
+    return workspace;
+  }
+
   /** `git worktree add` + a workspace of kind 'worktree' under the repo workspace. */
   async createWorktree(params: MethodParams<'worktree.create'>): Promise<WorkspaceInfo> {
     const { workspace } = await this.client.request('worktree.create', params);
@@ -1130,8 +1139,8 @@ export class BizziStore {
     return settings;
   }
 
-  /** Set a machine's tags and/or description (knowledge.md §9); `machine.updated` follows. */
-  async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string }): Promise<MachineInfo> {
+  /** Set a machine's tags, description and/or identity colour (knowledge.md §9, spec §11.1); `machine.updated` follows. */
+  async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string; color?: LabelColor | '' }): Promise<MachineInfo> {
     const { machineId, ...rest } = params;
     const { machine } = await this.client.request('machine.set', { ...this.target(machineId), ...rest });
     // Keep the hub's view of presence; only the user fields changed.
@@ -1140,6 +1149,8 @@ export class BizziStore {
     if (prev) {
       if (machine.description) next.description = machine.description;
       else delete next.description;
+      if (machine.color) next.color = machine.color;
+      else delete next.color;
     }
     const p: Partial<BizziState> = { machines: { ...this.state.machines, [machine.id]: next } };
     if (this.state.machine?.id === machine.id) p.machine = next;

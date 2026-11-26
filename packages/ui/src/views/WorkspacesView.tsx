@@ -8,6 +8,7 @@ import { useIsWide } from '../app/hooks.ts';
 import { useMachine, useMachineOnline, useTargetMachineId } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
+import { WorkspaceTile } from '../components/labels.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Checkbox, Empty, Spinner } from '../components/ui.tsx';
 import { routeHref } from '../lib/router.ts';
@@ -94,7 +95,10 @@ export function WorkspaceRow(props: { workspace: WorkspaceInfo; foreign: boolean
           <Icon name={w.kind === 'git' ? 'git' : 'folder'} size={18} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="truncate font-medium">{w.name}</div>
+          <div className="flex min-w-0 items-center gap-1.5">
+            <WorkspaceTile workspace={w} />
+            <span className="truncate font-medium">{w.name}</span>
+          </div>
           <div className="truncate font-mono text-xs text-muted">{w.path}</div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-1">

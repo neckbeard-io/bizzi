@@ -160,6 +160,9 @@ export interface GlobalEventMap {
   'device.updated': { device: DeviceInfo };
   /** User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them. */
   'prefs.updated': { prefs: UserPrefs };
+  // ---- identity colour and icon (spec §11.1 "Identity colour")
+  /** A workspace's user fields changed (`workspace.set`): the whole new record. */
+  'workspace.updated': { workspace: WorkspaceInfo };
 }
 
 export type SessionEventType = keyof SessionEventMap;

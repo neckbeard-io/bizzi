@@ -54,6 +54,15 @@
   --state-failed: #dc2626;
   --state-idle: #6b6b76;
   --radius: 0.5rem;
+  /* Identity colours (spec §11.1), DEFAULT_LABELS in defaults.ts; resolveTheme derives them per theme. */
+  --label-red: #dc2626;
+  --label-orange: #c2410c;
+  --label-yellow: #a16207;
+  --label-green: #15803d;
+  --label-teal: #0f766e;
+  --label-blue: #2563eb;
+  --label-purple: #9333ea;
+  --label-pink: #db2777;
   color-scheme: light;
 }
 
@@ -103,6 +112,14 @@
   --state-failed: #f87171;
   --state-idle: #9a9aa6;
   --radius: 0.5rem;
+  --label-red: #f87171;
+  --label-orange: #fb923c;
+  --label-yellow: #facc15;
+  --label-green: #4ade80;
+  --label-teal: #2dd4bf;
+  --label-blue: #60a5fa;
+  --label-purple: #c084fc;
+  --label-pink: #f472b6;
   color-scheme: dark;
 }
 

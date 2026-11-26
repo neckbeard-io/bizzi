@@ -1,6 +1,8 @@
 // Theme + mode → every token filled in (theming.md §2, §3 step 3, §8). Pure: the DOM side is apply.ts.
 import { contrast, deltaE, ensureContrast, isDark, mix } from './color.ts';
-import { DEFAULT_ANSI, DEFAULT_COLORS } from './defaults.ts';
+import { LABEL_COLORS } from '@bizzi/protocol';
+import type { LabelColor } from '@bizzi/protocol';
+import { DEFAULT_ANSI, DEFAULT_COLORS, DEFAULT_LABELS } from './defaults.ts';
 import { deriveFromTones } from './fiveTone.ts';
 import { CHORUS_COLOR_KEYS, STATE_KEYS } from './types.ts';
 import type { Ansi16, ColorKey, Density, ResolvedColors, ResolvedTerminal, ResolvedTheme, StateKey, Theme, ThemeColors, ThemeMode, ThemeVariant } from './types.ts';
@@ -9,6 +11,8 @@ import type { Ansi16, ColorKey, Density, ResolvedColors, ResolvedTerminal, Resol
 export const STATE_MIN_CONTRAST = 3;
 /** …and be at least this far apart from each other (CIE76 ΔE). */
 export const STATE_MIN_DISTANCE = 12;
+/** Identity colours (stripes, dots, icon tiles) are graphics: WCAG 1.4.11's 3:1 on sidebar, card and page. */
+export const LABEL_MIN_CONTRAST = 3;
 /** Derived status colours (ok/warn/err/info) are text; they're nudged to this against `card`. */
 export const STATUS_MIN_CONTRAST = 4.5;
 
@@ -195,6 +199,8 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   }
   Object.assign(colors, states.set);
 
+  const labels = resolveLabels(dark, [colors.sidebar, card, bg], fg);
+
   // Terminal (§8): the theme's palette, else derived from its UI colours.
   const termBg = t.background ?? bg;
   const termFg = t.foreground ?? fg;
@@ -217,7 +223,20 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   };
 
   const layout = { ...theme.layout, ...variant.layout };
-  return { id: theme.id, name: theme.name, variant: key, dark, colors, terminal, layout, notes };
+  return { id: theme.id, name: theme.name, variant: key, dark, colors, terminal, labels, layout, notes };
+}
+
+/** bizzi's identity palette for this polarity, each nudged toward the foreground until it reads on every surface. */
+export function resolveLabels(dark: boolean, surfaces: readonly string[], fg: string): Record<LabelColor, string> {
+  const base = DEFAULT_LABELS[dark ? 'dark' : 'light'];
+  const out = {} as Record<LabelColor, string>;
+  for (const name of LABEL_COLORS) {
+    let c = base[name];
+    // Twice round: a step that fixes one surface can't undo another (they sit on the same side of fg).
+    for (let i = 0; i < 2; i++) for (const s of surfaces) c = ensureContrast(c, s, LABEL_MIN_CONTRAST, fg);
+    out[name] = c;
+  }
+  return out;
 }
 
 /** Phones keep at least comfortable density for 44 px hit targets (§7, spec §11.1). */
@@ -241,6 +260,7 @@ export function themeCssVars(r: ResolvedTheme): Record<string, string> {
   out['--terminal-cursor'] = t.cursor;
   out['--terminal-cursor-accent'] = t.cursorAccent;
   out['--terminal-selection'] = t.selection;
+  for (const [name, v] of Object.entries(r.labels)) out[`--label-${name}`] = v;
   const l = r.layout;
   if (l.fontHeading) out['--font-heading'] = l.fontHeading;
   if (l.composerRadius) out['--composer-radius'] = l.composerRadius;

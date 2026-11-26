@@ -2,7 +2,7 @@
 // It speaks the real wire protocol through a WebSocket-like object, so the client code path is the same.
 // By default it plays a hub with two machines (this laptop online, server-a offline); `role: 'node'`
 // makes it a single node instead.
-import { BizziError, GLOBAL_CHANNEL, PROTOCOL_VERSION, isMachineTag, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, LABEL_COLORS, PROTOCOL_VERSION, isLabelColor, isLabelIcon, isMachineTag, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
 import type {
   AgentKind,
   ApprovalDecisionKind,
@@ -474,6 +474,11 @@ export class MockCore implements MockHost {
           if (text) next.description = text;
           else delete next.description;
         }
+        if (p.color !== undefined) {
+          if (p.color === '') delete next.color;
+          else if (isLabelColor(p.color)) next.color = p.color;
+          else throw new BizziError('bad_request', `color must be one of ${LABEL_COLORS.join(', ')}`);
+        }
         this.machineMap.set(m.id, next);
         this.emit(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...next } } });
         return { machine: { ...next } };
@@ -506,6 +511,30 @@ export class MockCore implements MockHost {
         this.workspaceMap.delete(wid);
         this.emit(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: wid } });
         return {};
+      }
+      case 'workspace.set': {
+        // Like the node (spec §11.1): name, colour and icon; '' clears colour or icon.
+        const w = this.workspaceOnline(p.workspaceId);
+        const next: WorkspaceInfo = { ...w };
+        if (p.name !== undefined) {
+          const name = String(p.name).trim();
+          if (!name || name.length > 200) throw new BizziError('bad_request', 'name must be 1–200 characters');
+          next.name = name;
+        }
+        if (p.color !== undefined) {
+          if (p.color === '') delete next.color;
+          else if (isLabelColor(p.color)) next.color = p.color;
+          else throw new BizziError('bad_request', `color must be one of ${LABEL_COLORS.join(', ')}`);
+        }
+        if (p.icon !== undefined) {
+          const icon = String(p.icon).trim();
+          if (!icon) delete next.icon;
+          else if (isLabelIcon(icon)) next.icon = icon;
+          else throw new BizziError('bad_request', 'icon must be one or two characters or an emoji, without spaces');
+        }
+        this.workspaceMap.set(w.id, next);
+        this.emit(GLOBAL_CHANNEL, { type: 'workspace.updated', data: { workspace: { ...next } } });
+        return { workspace: { ...next } };
       }
       case 'worktree.create': {
         const from = this.workspaceOnline(p.workspaceId);

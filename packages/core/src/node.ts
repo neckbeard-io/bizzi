@@ -10,6 +10,7 @@ import {
   type AgentKind,
   type ChannelEvent,
   type GlobalEventBody,
+  type LabelColor,
   type Logger,
   type MachineInfo,
   type MethodName,
@@ -25,8 +26,11 @@ import { nullLogger } from './logger.ts';
 import {
   applyMachineUserFields,
   buildMachineInfo,
+  parseLabelColor,
+  parseLabelIcon,
   parseMachineDescription,
   parseMachineTags,
+  parseWorkspaceName,
   readMachineUserFields,
   type MachineUserFields,
 } from './machine.ts';
@@ -470,6 +474,8 @@ class Node implements BizziNode {
         const next: MachineUserFields = { tags: p.tags === undefined ? cur.tags : parseMachineTags(p.tags) };
         const description = p.description === undefined ? cur.description : parseMachineDescription(p.description);
         if (description) next.description = description;
+        const color = p.color === undefined ? cur.color : parseLabelColor(p.color);
+        if (color) next.color = color;
         this.#store.setMeta(MACHINE_USER_META, JSON.stringify(next));
         applyMachineUserFields(this.machine, next);
         const machineJson = JSON.stringify(this.machine);
@@ -510,6 +516,13 @@ class Node implements BizziNode {
         ws.remove(id);
         this.orchestration.settings.forget(id);
         return {};
+      },
+      'workspace.set': (p) => {
+        const fields: { name?: string; color?: LabelColor | ''; icon?: string } = {};
+        if (p.name !== undefined) fields.name = parseWorkspaceName(p.name);
+        if (p.color !== undefined) fields.color = parseLabelColor(p.color) ?? '';
+        if (p.icon !== undefined) fields.icon = parseLabelIcon(p.icon) ?? '';
+        return { workspace: ws.update(reqString(p, 'workspaceId'), fields) };
       },
       'worktree.create': async (p) => {
         const opts: MethodParams<'worktree.create'> = { workspaceId: reqString(p, 'workspaceId'), branch: reqString(p, 'branch') };

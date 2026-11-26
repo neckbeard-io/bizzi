@@ -2,6 +2,7 @@
 // fallbacks for tokens a theme leaves out and the derivation can't fill (§3 step 3), and for state
 // colours that fail the contrast checks. Keep in sync with the :root / [data-theme='dark'] blocks in
 // src/index.css, which paint before any theme is applied.
+import type { LabelColor } from '@bizzi/protocol';
 import type { Ansi16, ResolvedColors, ThemeMode } from './types.ts';
 
 export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
@@ -98,6 +99,34 @@ export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
     stateFailed: '#f87171',
     stateIdle: '#9a9aa6',
     radius: '0.5rem',
+  },
+};
+
+/**
+ * Identity colours (spec §11.1 "Identity colour"), by the background's polarity. resolveTheme nudges them
+ * toward the foreground until each clears LABEL_MIN_CONTRAST on the theme's sidebar, cards and page, so a
+ * light theme gets darker inks and a dark theme lighter ones. Keep in sync with `--label-*` in index.css.
+ */
+export const DEFAULT_LABELS: Record<ThemeMode, Record<LabelColor, string>> = {
+  light: {
+    red: '#dc2626',
+    orange: '#c2410c',
+    yellow: '#a16207',
+    green: '#15803d',
+    teal: '#0f766e',
+    blue: '#2563eb',
+    purple: '#9333ea',
+    pink: '#db2777',
+  },
+  dark: {
+    red: '#f87171',
+    orange: '#fb923c',
+    yellow: '#facc15',
+    green: '#4ade80',
+    teal: '#2dd4bf',
+    blue: '#60a5fa',
+    purple: '#c084fc',
+    pink: '#f472b6',
   },
 };
 

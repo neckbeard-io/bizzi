@@ -204,6 +204,11 @@ export class Relay {
       case 'workspace.created':
         if (ev.data.workspace.machineId === machineId) this.store.putWorkspace(ev.data.workspace);
         break;
+      case 'workspace.updated':
+        // Only a workspace the index already gives this machine (spec §11.1 identity colour, renames).
+        if (ev.data.workspace.machineId === machineId && this.store.workspaceMachine(ev.data.workspace.id) === machineId) this.store.putWorkspace(ev.data.workspace);
+        else body = undefined;
+        break;
       case 'workspace.removed':
         if (this.store.workspaceMachine(ev.data.workspaceId) === machineId) this.store.deleteWorkspace(ev.data.workspaceId);
         break;

@@ -16,6 +16,7 @@ import type {
   KnowledgeScope,
   KnowledgeScopeLevel,
   KnowledgeSettings,
+  LabelColor,
   LoginMode,
   MachineInfo,
   MachineRole,
@@ -93,10 +94,14 @@ export interface Methods {
 
   'machines.list': { params: Empty; result: { machines: MachineInfo[] } };
   /**
-   * Set a machine's user-owned fields (knowledge.md §9.1–9.2): `tags` replaces the list, `description`
-   * replaces the text (`''` clears it). Emits `machine.updated`.
+   * Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list,
+   * `description` replaces the text (`''` clears it), `color` sets the identity colour (`''` clears it).
+   * Emits `machine.updated`.
    */
-  'machine.set': { params: MachineTarget & { tags?: string[]; description?: string }; result: { machine: MachineInfo } };
+  'machine.set': {
+    params: MachineTarget & { tags?: string[]; description?: string; color?: LabelColor | '' };
+    result: { machine: MachineInfo };
+  };
   'agents.list': { params: MachineTarget & { refresh?: boolean }; result: { agents: AgentListing[] } };
 
   'workspaces.list': { params: MachineTarget; result: { workspaces: WorkspaceInfo[] } };
@@ -343,6 +348,16 @@ export interface Methods {
   'route.score': {
     params: MachineTarget & { text: string; options: string[] };
     result: { probabilities: number[]; letterMass: number; ms: number; model: string };
+  };
+
+  // ---- identity colour and icon (spec §11.1 "Identity colour")
+  /**
+   * Set a workspace's user-owned fields: `name` renames it (bizzi's registry only, the directory is
+   * untouched), `color` and `icon` set its identity (`''` clears either). Emits `workspace.updated`.
+   */
+  'workspace.set': {
+    params: { workspaceId: string; name?: string; color?: LabelColor | ''; icon?: string };
+    result: { workspace: WorkspaceInfo };
   };
 
   // ---- hub only (see hub.ts for the HTTP pairing/auth API)

@@ -1,7 +1,7 @@
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { BizziError, GLOBAL_CHANNEL, newId, type WorkspaceInfo } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, newId, type LabelColor, type WorkspaceInfo } from '@bizzi/protocol';
 import type { EventBus } from './bus.ts';
 import { branchExists, dirtyPaths, gitToplevel, isInsideGitRepo, isValidBranchName, runGit } from './git.ts';
 import type { Store } from './store.ts';
@@ -73,6 +73,27 @@ export class Workspaces {
     this.#store.deleteWorkspace(id);
     this.#byId.delete(id);
     this.#bus.append(GLOBAL_CHANNEL, { type: 'workspace.removed', data: { workspaceId: id } });
+  }
+
+  /**
+   * Set user fields (already validated; `''` clears `color` / `icon`). Persists and emits
+   * `workspace.updated` only when something changed. Returns the current record.
+   */
+  update(id: string, fields: { name?: string; color?: LabelColor | ''; icon?: string }): WorkspaceInfo {
+    const cur = this.get(id);
+    const next: WorkspaceInfo = { ...cur };
+    if (fields.name !== undefined) next.name = fields.name;
+    for (const k of ['color', 'icon'] as const) {
+      const v = fields[k];
+      if (v === undefined) continue;
+      if (v) (next as Record<typeof k, string>)[k] = v;
+      else delete next[k];
+    }
+    if (JSON.stringify(next) === JSON.stringify(cur)) return cur;
+    this.#store.putWorkspace(next);
+    this.#byId.set(id, next);
+    this.#bus.append(GLOBAL_CHANNEL, { type: 'workspace.updated', data: { workspace: next } });
+    return next;
   }
 
   /** Worktree workspaces created from `id`. */

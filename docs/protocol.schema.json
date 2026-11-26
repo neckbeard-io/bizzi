@@ -47,7 +47,7 @@
       }
     },
     "machine.set": {
-      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2): `tags` replaces the list, `description` replaces the text (`''` clears it). Emits `machine.updated`.",
+      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list, `description` replaces the text (`''` clears it), `color` sets the identity colour (`''` clears it). Emits `machine.updated`.",
       "params": {
         "$ref": "#/$defs/params:machine.set"
       },
@@ -539,6 +539,15 @@
         "$ref": "#/$defs/result:route.score"
       }
     },
+    "workspace.set": {
+      "description": "Set a workspace's user-owned fields: `name` renames it (bizzi's registry only, the directory is untouched), `color` and `icon` set its identity (`''` clears either). Emits `workspace.updated`.",
+      "params": {
+        "$ref": "#/$defs/params:workspace.set"
+      },
+      "result": {
+        "$ref": "#/$defs/result:workspace.set"
+      }
+    },
     "pairing.create": {
       "description": "Create a one-time pairing code for a new device or node.",
       "params": {
@@ -849,6 +858,12 @@
         "description": "User-wide preferences changed (from `prefs.set` on any device); emitted by the server that stores them.",
         "data": {
           "$ref": "#/$defs/global:prefs.updated"
+        }
+      },
+      "workspace.updated": {
+        "description": "A workspace's user fields changed (`workspace.set`): the whole new record.",
+        "data": {
+          "$ref": "#/$defs/global:workspace.updated"
         }
       }
     }
@@ -1912,6 +1927,21 @@
               "$ref": "#/$defs/global:prefs.updated"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "const": "workspace.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/global:workspace.updated"
+            }
+          }
         }
       ]
     },
@@ -1930,7 +1960,8 @@
         "widget.updated",
         "widget.removed",
         "device.updated",
-        "prefs.updated"
+        "prefs.updated",
+        "workspace.updated"
       ]
     },
     "InputBlock": {
@@ -2375,6 +2406,20 @@
         "defaultAgentScope"
       ]
     },
+    "LabelColor": {
+      "description": "A palette name, not a CSS colour: each theme resolves it (`--label-<name>`) so it reads on that theme's sidebar and cards, light or dark.",
+      "type": "string",
+      "enum": [
+        "red",
+        "orange",
+        "yellow",
+        "green",
+        "teal",
+        "blue",
+        "purple",
+        "pink"
+      ]
+    },
     "LoginMode": {
       "type": "string",
       "enum": [
@@ -2424,6 +2469,10 @@
         "description": {
           "description": "User-written paragraph about what the machine is for; part of the machine card (knowledge.md §9.2).",
           "type": "string"
+        },
+        "color": {
+          "description": "User-chosen identity colour (spec §11.1 \"Identity colour\"); set with `machine.set`.",
+          "$ref": "#/$defs/LabelColor"
         },
         "online": {
           "type": "boolean"
@@ -2553,6 +2602,7 @@
         "knowledge.sync.push",
         "route.suggest",
         "route.score",
+        "workspace.set",
         "pairing.create",
         "devices.list",
         "device.revoke",
@@ -3983,6 +4033,25 @@
               "type": "string"
             },
             "method": {
+              "const": "workspace.set"
+            },
+            "params": {
+              "$ref": "#/$defs/params:workspace.set"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
               "const": "pairing.create"
             },
             "params": {
@@ -5271,6 +5340,14 @@
         },
         "createdAt": {
           "type": "string"
+        },
+        "color": {
+          "description": "User-chosen identity colour (spec §11.1 \"Identity colour\"); set with `workspace.set`. A worktree without one shows its repo's.",
+          "$ref": "#/$defs/LabelColor"
+        },
+        "icon": {
+          "description": "User-chosen icon in place of the name's first letter: one or two characters or an emoji (`isLabelIcon`).",
+          "type": "string"
         }
       },
       "required": [
@@ -5468,6 +5545,17 @@
       },
       "required": [
         "workspaceId"
+      ]
+    },
+    "global:workspace.updated": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace"
       ]
     },
     "params:agent.deleteSecret": {
@@ -6150,6 +6238,16 @@
             },
             "description": {
               "type": "string"
+            },
+            "color": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LabelColor"
+                },
+                {
+                  "const": ""
+                }
+              ]
             }
           }
         }
@@ -6684,6 +6782,33 @@
       "type": "object",
       "properties": {
         "workspaceId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "workspaceId"
+      ]
+    },
+    "params:workspace.set": {
+      "type": "object",
+      "properties": {
+        "workspaceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "color": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LabelColor"
+            },
+            {
+              "const": ""
+            }
+          ]
+        },
+        "icon": {
           "type": "string"
         }
       },
@@ -7482,6 +7607,17 @@
     },
     "result:workspace.remove": {
       "$ref": "#/$defs/Empty"
+    },
+    "result:workspace.set": {
+      "type": "object",
+      "properties": {
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace"
+      ]
     },
     "result:workspaces.list": {
       "type": "object",

@@ -4,8 +4,9 @@ import { selectSessionPrompt } from '@bizzi/client';
 import type { SessionStatus } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
-import { useMachine, useMachineOnline } from '../../app/machine.ts';
+import { useMachine, useMachineOnline, useShowMachine } from '../../app/machine.ts';
 import { Icon } from '../../components/icons.tsx';
+import { MachineChip, WorkspaceTile, stripeStyle } from '../../components/labels.tsx';
 import { PageHeader } from '../../components/layout.tsx';
 import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
 import { STATUS_LABEL, machinePresence } from '../../lib/format.ts';
@@ -45,6 +46,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const isLogin = useBizzi((s) => s.timelines[sessionId]?.login != null);
   const machine = useMachine(session?.machineId);
   const online = useMachineOnline(session?.machineId);
+  const showMachine = useShowMachine(machine);
   const workspace = useBizzi((s) => (session ? (s.workspaces?.[session.workspaceId] ?? null) : null));
   const planCount = useBizzi((s) => s.timelines[sessionId]?.plan?.filter((p) => p.status !== 'completed').length ?? 0);
   const fileCount = useBizzi((s) => Object.keys(s.timelines[sessionId]?.files ?? {}).length);
@@ -136,15 +138,23 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
     <div className="flex h-full flex-col">
       <PageHeader
         title={session.title || 'Untitled session'}
+        style={stripeStyle(machine?.color)}
         subtitle={
-          <span>
-            <span className="capitalize">{session.agent}</span>
-            {session.model ? ` · ${session.model}` : ''}
+          <span className="inline-flex max-w-full min-w-0 items-center gap-1">
+            <span className="shrink-0 capitalize">{session.agent}</span>
+            {session.model ? <span className="shrink-0">· {session.model}</span> : null}
+            {showMachine && machine ? (
+              <>
+                <span className="shrink-0">·</span>
+                <MachineChip machine={machine} />
+              </>
+            ) : null}
             {workspace ? (
               <>
-                {' · '}
-                <a className="hover:underline" href={`#/w/${encodeURIComponent(workspace.id)}`}>
-                  {workspace.name}
+                <span className="shrink-0">·</span>
+                <a className="inline-flex min-w-0 items-center gap-1 hover:underline" href={`#/w/${encodeURIComponent(workspace.id)}`}>
+                  <WorkspaceTile workspace={workspace} />
+                  <span className="truncate">{workspace.name}</span>
                 </a>
               </>
             ) : null}
