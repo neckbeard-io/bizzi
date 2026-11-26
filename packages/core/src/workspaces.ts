@@ -1,3 +1,4 @@
+import { statSync } from 'node:fs';
 import { mkdir, realpath, stat } from 'node:fs/promises';
 import os from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -34,6 +35,22 @@ export class Workspaces {
     const ws = this.#byId.get(id);
     if (!ws) throw new BizziError('not_found', `workspace ${id} not found`);
     return ws;
+  }
+
+  /**
+   * Throws unless the workspace's directory exists on this machine. An agent spawned in a missing cwd
+   * fails with ENOENT, which agent CLIs misreport as a missing or broken binary.
+   */
+  assertPresent(ws: WorkspaceInfo): void {
+    const st = (() => {
+      try {
+        return statSync(ws.path);
+      } catch {
+        return undefined;
+      }
+    })();
+    if (!st) throw new BizziError('not_found', `the folder of workspace ${ws.name} (${ws.path}) does not exist on this machine`, { workspaceId: ws.id });
+    if (!st.isDirectory()) throw new BizziError('bad_request', `workspace ${ws.name} (${ws.path}) is not a directory`, { workspaceId: ws.id });
   }
 
   /**

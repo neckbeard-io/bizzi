@@ -530,6 +530,7 @@ export class Sessions {
   async create(p: MethodParams<'session.create'>, helper?: HelperOptions, extras?: CreateExtras): Promise<SessionInfo> {
     this.#assertAccepting();
     const ws = this.#d.workspaces.get(p.workspaceId);
+    this.#d.workspaces.assertPresent(ws);
     if (!AGENT_KINDS.includes(p.agent)) throw new BizziError('bad_request', `unknown agent ${String(p.agent)}`);
     const mode = p.mode ?? this.#d.registry.defaultMode(p.agent);
     const adapter = mode && this.#d.registry.select(p.agent, mode);
@@ -1120,6 +1121,7 @@ export class Sessions {
         }
       }
       const ws = this.#d.workspaces.get(rt.info.workspaceId);
+      this.#d.workspaces.assertPresent(ws);
       const extra = this.#d.prepareStart ? await this.#d.prepareStart({ ...rt.info }, ws) : {};
       const agentEnv = this.#d.agentEnv ? await this.#d.agentEnv(rt.info.agent) : {};
       const opts: StartSessionOptions = { ...extra, sessionId, mode: rt.info.mode, cwd: ws.path };

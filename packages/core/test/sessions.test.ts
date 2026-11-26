@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { rmSync } from 'node:fs';
 import { test } from 'node:test';
 import { BizziError, GLOBAL_CHANNEL, sessionChannel, type SessionInfo } from '@bizzi/protocol';
 import type { BizziNode } from '../src/index.ts';
@@ -190,6 +191,21 @@ test('start failure marks the session failed', async (t) => {
     node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text: 'x' }] }),
     rejectsWith('agent_unavailable'),
   );
+});
+
+test('a workspace whose folder is gone refuses new sessions and fails resumes with a clear reason', async (t) => {
+  const { node, workspace } = await setup(t);
+  const session = await idleSession(node, workspace.id);
+  const ch = record(node, sessionChannel(session.id));
+  await node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text: '/crash' }] });
+  await waitFor(() => node.sessions.get(session.id).session.status === 'failed');
+  rmSync(workspace.path, { recursive: true, force: true });
+  await assert.rejects(node.call('session.create', { workspaceId: workspace.id, agent: 'claude' }), (err: unknown) => {
+    return err instanceof BizziError && err.code === 'not_found' && err.message.includes('does not exist on this machine');
+  });
+  // The restart on the next send hits the same check instead of spawning the agent in a missing cwd.
+  await assert.rejects(node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text: 'again' }] }));
+  await waitFor(() => ch.events.some((e) => e.type === 'error' && /does not exist on this machine/.test(e.data.message)));
 });
 
 test('adapter selection by agent and mode; agents.list merges and caches', async (t) => {
