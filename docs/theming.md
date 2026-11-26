@@ -6,7 +6,7 @@ Companion to [spec.md](spec.md) §11. bizzi adopts the theme model from Chorus (
 
 - Chorus and Terax are both Apache-2.0. Cobalt2 (Wes Bos) is MIT: keep its copyright notice in `NOTICE`. bizzi can reuse the theme model, the converter and the theme definitions with attribution: keep each theme's `author`, and add a `NOTICE` entry naming both projects.
 - **base16 schemes** each carry their author's license (mostly MIT, from the tinted-theming ecosystem). Record the license per scheme when vendoring them.
-- **flax** (`neckbeard-io/flax`, the user's own Flutter music player) is GPL-3.0 with a single contributor. The palettes are the user's to reuse under whatever license bizzi ends up with (bizzi has no license yet). The color values are mostly the canonical public palettes (Dracula, Nord, Catppuccin, Gruvbox).
+- **flax** (`neckbeard-io/flax`, the user's own Flutter music player) is GPL-3.0 with a single contributor. The palettes are the user's to reuse under bizzi's Apache-2.0 license. The color values are mostly the canonical public palettes (Dracula, Nord, Catppuccin, Gruvbox).
 - **Don't ship Chorus's house palette** (deep teal and emerald, "Chorus Default") as bizzi's look: that's Chorus's identity, not a generic theme. bizzi keeps its own default.
 
 ## 2. Theme model (from Chorus)
