@@ -18,6 +18,7 @@ import type { SessionInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { useAction, useIsWide } from '../app/hooks.ts';
 import { useMachineOnline } from '../app/machine.ts';
+import { MachineChip, WorkspaceTile } from '../components/labels.tsx';
 import { Icon } from '../components/icons.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
 import { Button, Card, Empty, ErrorText, StatusBadge } from '../components/ui.tsx';
@@ -38,7 +39,6 @@ export function InboxView(): ReactNode {
   const unsupported = useBizzi(selectUnsupportedAgents, unsupportedEqual);
   const wide = useIsWide();
   const sessions = useBizzi((s) => s.sessions);
-  const workspaces = useBizzi((s) => s.workspaces);
   const machines = useBizzi((s) => s.machines);
   const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
   const suggestions = useBizzi(selectKnowledgeSuggestionCount);
@@ -89,13 +89,16 @@ export function InboxView(): ReactNode {
       <div className="flex flex-col gap-4">
         {entries.map(({ sessionId, item }) => {
           const s = sessions[sessionId];
-          const ws = s && workspaces?.[s.workspaceId];
           return (
             <div key={`${sessionId}:${item.id}`}>
               <a href={routeHref({ name: 'session', sessionId, tab: 'chat' })} className="mb-1.5 flex items-center gap-2 text-xs text-muted hover:text-fg">
                 <span className="font-medium text-fg">{s?.title ?? sessionId}</span>
-                {ws ? <span>· {ws.name}</span> : null}
-                {multiMachine && s ? <span>· {machines[s.machineId]?.name ?? s.machineId}</span> : null}
+                {s ? (
+                  <>
+                    <span>·</span>
+                    <Where session={s} />
+                  </>
+                ) : null}
                 {s ? <span className="capitalize">· {s.agent}</span> : null}
                 <span className="ml-auto">{formatRelative(item.ts)}</span>
               </a>
@@ -161,11 +164,39 @@ function WaitingRow(props: { session: SessionInfo }): ReactNode {
     <Card className="flex items-center gap-2 p-3 hover:bg-panel-2">
       <span className="min-w-0 flex-1">
         <span className="block truncate">{s.title ?? s.id}</span>
-        <span className="block truncate text-xs text-muted">
-          {AGENT_LABEL[s.agent]}: {reason}
+        <span className="flex min-w-0 items-center gap-1 text-xs text-muted">
+          <Where session={s} />
+          <span className="truncate">· {AGENT_LABEL[s.agent]}: {reason}</span>
         </span>
       </span>
       <StatusBadge status={s.status} prompt={prompt} />
     </Card>
+  );
+}
+
+/**
+ * "▣ acme-shop · ▪ mac-mini": the session's workspace tile and name, then its machine (in its colour) when
+ * there are several machines or this one has a colour (spec §11.1 "Identity colour").
+ */
+function Where(props: { session: SessionInfo }): ReactNode {
+  const ws = useBizzi((st) => st.workspaces?.[props.session.workspaceId] ?? null);
+  const machine = useBizzi((st) => st.machines[props.session.machineId] ?? null);
+  const several = useBizzi((st) => st.role === 'hub' && Object.keys(st.machines).length > 1);
+  const showMachine = machine !== null && (several || machine.color !== undefined);
+  return (
+    <>
+      {ws ? (
+        <span className="inline-flex min-w-0 shrink items-center gap-1">
+          <WorkspaceTile workspace={ws} />
+          <span className="truncate">{ws.name}</span>
+        </span>
+      ) : null}
+      {showMachine ? (
+        <>
+          <span className="shrink-0">·</span>
+          <MachineChip machine={machine} tags={false} className="shrink" />
+        </>
+      ) : null}
+    </>
   );
 }
