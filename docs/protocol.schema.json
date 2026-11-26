@@ -210,7 +210,7 @@
       }
     },
     "session.set": {
-      "description": "A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces the session's budget (`{}` clears it); a session held for budget accepts sends again once within it.",
+      "description": "A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces the session's budget (`{}` clears it); a session held for budget accepts sends again once within it. / /** Change a session's settings. `title` renames it (also on an ended session; '' clears it); a title set here is kept over titles the agent reports later.",
       "params": {
         "$ref": "#/$defs/params:session.set"
       },
@@ -9539,6 +9539,9 @@
         },
         "budget": {
           "$ref": "#/$defs/SessionBudget"
+        },
+        "title": {
+          "type": "string"
         }
       },
       "required": [

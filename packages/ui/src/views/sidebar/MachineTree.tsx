@@ -17,6 +17,7 @@ import {
 import type { SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
 import type { MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
 import { openAddWorkspace } from '../../app/addWorkspace.ts';
+import { contextMenuHandler } from '../../app/contextMenu.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
@@ -29,6 +30,7 @@ import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.t
 import { routeHref } from '../../lib/router.ts';
 import { AGENT_LABEL, MARK_LABEL, MARK_SYMBOL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
 import { loadJson, saveJson } from '../../lib/storage.ts';
+import { machineMenu, workspaceMenu } from '../menus.ts';
 
 type Variant = 'desktop' | 'phone';
 
@@ -85,6 +87,7 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
         <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-0 z-10 w-0.5 rounded-full" style={{ backgroundColor: labelVar(m.color) }} />
       ) : null}
       <div
+        onContextMenu={contextMenuHandler(() => machineMenu(store, m, { collapsed, onToggle: () => props.onToggle(m.id) }), m.name)}
         className={cx(
           'group relative flex items-center rounded-md pr-1.5',
           phone ? 'min-h-11' : 'h-8',
@@ -210,7 +213,15 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
   };
 
   return (
-    <div ref={ref} onMouseEnter={onEnter} onMouseLeave={onLeave} className={cx('rounded-md', props.active && (phone ? 'bg-panel-2' : 'bg-sidebar-accent'))} style={{ paddingLeft: props.depth * 14 }}>
+    <div
+      ref={ref}
+      onMouseEnter={onEnter}
+      onMouseLeave={onLeave}
+      onContextMenu={contextMenuHandler(() => {
+        onLeave();
+        return workspaceMenu(store, w, online);
+      }, w.name)}
+      className={cx('rounded-md', props.active && (phone ? 'bg-panel-2' : 'bg-sidebar-accent'))} style={{ paddingLeft: props.depth * 14 }}>
       <a
         href={routeHref({ name: 'workspace', workspaceId: w.id })}
         className={cx('flex items-center gap-2 rounded-md pr-2 pl-2', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]', props.active ? 'font-medium text-fg' : 'text-fg/90')}

@@ -2,6 +2,7 @@ import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import type { KeyboardEvent as ReactKeyboardEvent, PointerEvent as ReactPointerEvent, ReactNode, RefObject } from 'react';
 import { selectKnowledgeSuggestionCount, selectMachineList, selectWaitingCount } from '@bizzi/client';
 import { openAddWorkspace } from '../app/addWorkspace.ts';
+import { ContextMenuHost, GlobalDialogs, ToastHost } from '../components/ContextMenu.tsx';
 import { useBizzi, useBizziContext } from '../app/context.tsx';
 import { navigate, useIsWide, useRoute, useTheme } from '../app/hooks.ts';
 import type { ThemePref } from '../app/hooks.ts';
@@ -17,7 +18,7 @@ import { desktopRedirect, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { SIDEBAR_MIN, keyWidth, manualMax, clampManual, sidebarWidth } from '../lib/sidebarWidth.ts';
 import { AddWorkspaceDialog } from './AddWorkspaceDialog.tsx';
-import { Logo } from './ConnectScreen.tsx';
+import { Logo } from '../components/Logo.tsx';
 import { InboxView } from './InboxView.tsx';
 import { MachinesView } from './MachinesView.tsx';
 import { MachineView } from './MachineView.tsx';
@@ -107,6 +108,9 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
         </div>
         <UsageBar />
         <AddWorkspaceDialog />
+        <ContextMenuHost />
+        <GlobalDialogs />
+        <ToastHost />
       </div>
     );
   }
@@ -117,6 +121,9 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
       <div className="min-h-0 flex-1">{main}</div>
       {fullScreen ? null : <BottomNav route={shown} />}
       <AddWorkspaceDialog />
+      <ContextMenuHost />
+      <GlobalDialogs />
+      <ToastHost />
     </div>
   );
 }
@@ -273,19 +280,25 @@ function Sidebar(props: { route: Route }): ReactNode {
   const pref = useSidebarPref();
   const windowWidth = useWindowWidth();
   const treeRef = useRef<HTMLDivElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
   const natural = useTreeWidth(treeRef, pref.mode === 'auto');
-  const width = sidebarWidth(pref, natural === null ? null : natural + TREE_CHROME, windowWidth);
+  // The header (name, connection status, nav icons) must fit too, or the status gets cut off.
+  const header = useTreeWidth(headerRef, pref.mode === 'auto');
+  const content = natural === null ? null : Math.max(natural + TREE_CHROME, header ?? 0);
+  const width = sidebarWidth(pref, content, windowWidth);
 
   return (
     <aside className="relative flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground" style={{ width }} data-sidebar>
       <TitleBarStrip />
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-        <Logo size={24} />
+      <div ref={headerRef} className="flex items-center gap-2 px-3 pt-3 pb-2">
+        <Logo size={28} />
         <div className="min-w-0 flex-1">
           <div className="truncate text-sm font-semibold">bizzi</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted">
             <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', conn === 'open' ? 'bg-ok' : conn === 'reconnecting' ? 'bg-warn' : 'bg-muted')} />
-            <span className="truncate">{status}</span>
+            <span className="truncate" title={status}>
+              {status}
+            </span>
           </div>
         </div>
         <HeaderNav route={props.route} />

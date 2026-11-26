@@ -242,6 +242,11 @@ export class FakeSession implements AdapterSession {
     return [...this.#approvals.keys()];
   }
 
+  /** Emit any event as the agent would (tests). */
+  emitEvent(body: Parameters<EmitFn>[0]): void {
+    this.#emit(body);
+  }
+
   agentSessionRef(): string | undefined {
     return this.opts.mode === 'terminal' ? undefined : this.#ref;
   }

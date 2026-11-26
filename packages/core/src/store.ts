@@ -24,6 +24,8 @@ export interface SessionState {
   spent?: Spent;
   /** Set while the session is held at a turn boundary because a budget was reached (the reason text). */
   budgetBlocked?: string;
+  /** The user renamed the session (`session.set` title): agent-reported titles no longer replace it. */
+  titleByUser?: boolean;
   /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
   queued?: boolean;
   /**

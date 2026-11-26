@@ -196,8 +196,12 @@ export interface Methods {
    * A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces
    * the session's budget (`{}` clears it); a session held for budget accepts sends again once within it.
    */
+  /**
+   * Change a session's settings. `title` renames it (also on an ended session; '' clears it); a title set
+   * here is kept over titles the agent reports later.
+   */
   'session.set': {
-    params: { sessionId: string; model?: string; permissionMode?: string; effort?: string; budget?: SessionBudget };
+    params: { sessionId: string; model?: string; permissionMode?: string; effort?: string; budget?: SessionBudget; title?: string };
     result: { session: SessionInfo };
   };
   'approval.respond': { params: { sessionId: string; approvalId: string } & ApprovalDecision; result: Empty };

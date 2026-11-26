@@ -576,6 +576,20 @@ export class Sessions {
     return { ...rt.info };
   }
 
+  /** A user's rename (`session.set` title): kept over agent-reported titles from now on. Works on ended sessions. */
+  #rename(rt: Runtime, raw: string): void {
+    if (rt.deleted) throw new BizziError('not_found', `session ${rt.info.id} not found`);
+    const title = raw.trim();
+    rt.state.titleByUser = true;
+    if ((rt.info.title ?? '') === title) {
+      this.#persist(rt);
+      return;
+    }
+    if (title) rt.info.title = title;
+    else delete rt.info.title;
+    this.#changed(rt, new Date().toISOString());
+  }
+
   /** Start a helper registered with `queued` (its concurrency slot is free now). */
   startQueued(id: string): void {
     const rt = this.#get(id);
@@ -775,6 +789,9 @@ export class Sessions {
    */
   async set(p: MethodParams<'session.set'>): Promise<SessionInfo> {
     const rt = this.#get(p.sessionId);
+    if (p.title !== undefined) this.#rename(rt, p.title);
+    const { title: _title, sessionId: _id, ...rest } = p;
+    if (Object.values(rest).every((v) => v === undefined)) return { ...rt.info };
     this.#assertOpen(rt);
     if (rt.restarting) {
       await this.#waitForRestart(rt);
@@ -1705,6 +1722,7 @@ export class Sessions {
         break;
       case 'session.info':
         for (const k of ['agentSessionRef', 'model', 'permissionMode', 'effort', 'title'] as const) {
+          if (k === 'title' && rt.state.titleByUser) continue;
           const v = body.data[k];
           if (v !== undefined && info[k] !== v) {
             info[k] = v;

@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { getNative, hubHttpBase, pairWithHub, parsePairLink } from '@bizzi/client';
 import type { FetchLike } from '@bizzi/client';
 import { useAction } from '../app/hooks.ts';
+import { Logo } from '../components/Logo.tsx';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
 import { TitleBarStrip } from '../components/layout.tsx';
@@ -296,12 +297,3 @@ function NodeForm(props: { onConnect: (t: ConnectionTarget) => void }): ReactNod
   );
 }
 
-export function Logo(props: { size?: number }): ReactNode {
-  const s = props.size ?? 28;
-  return (
-    <svg width={s} height={s} viewBox="0 0 32 32" aria-hidden="true">
-      <rect x="1" y="1" width="30" height="30" rx="8" fill="var(--primary)" />
-      <path d="M10 8v16h7a4.5 4.5 0 0 0 1.6-8.7A4 4 0 0 0 15.5 8z M13 11h2.5a1.5 1.5 0 0 1 0 3H13z M13 17h3.5a1.8 1.8 0 0 1 0 3.8H13z" fill="var(--primary-foreground)" fillRule="evenodd" />
-    </svg>
-  );
-}

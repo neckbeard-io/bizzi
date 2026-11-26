@@ -1182,7 +1182,7 @@ export class BizziStore {
       });
   }
 
-  async setSession(sessionId: string, opts: { model?: string; permissionMode?: string; effort?: string }): Promise<SessionInfo> {
+  async setSession(sessionId: string, opts: { model?: string; permissionMode?: string; effort?: string; title?: string }): Promise<SessionInfo> {
     const { session } = await this.client.request('session.set', { sessionId, ...opts });
     this.upsertSession(session);
     return session;

@@ -4,6 +4,7 @@ import { selectSessionPrompt } from '@bizzi/client';
 import type { SessionStatus } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
+import { menuButtonHandler } from '../../app/contextMenu.ts';
 import { useIsHub, useMachine, useMachineOnline, useShowMachine } from '../../app/machine.ts';
 import { Icon } from '../../components/icons.tsx';
 import { MachineChip, WorkspaceTile, stripeStyle } from '../../components/labels.tsx';
@@ -14,6 +15,7 @@ import { statusSourceLabel } from '../../lib/states.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
 import { ForkToMachine } from './ForkToMachine.tsx';
+import { sessionMenu } from '../menus.ts';
 import { HelperTree } from './HelperTree.tsx';
 import { PlanPanel } from './PlanPanel.tsx';
 import { SessionControls } from './SessionControls.tsx';
@@ -172,6 +174,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             {isHub && !terminal ? (
               <IconButton icon="machine" label="Fork to another machine" disabled={!online} onClick={() => setShowForkTo((v) => !v)} className={cx(showForkTo && 'bg-panel-2 text-fg')} />
             ) : null}
+            <IconButton icon="more" label="More session actions" onClick={menuButtonHandler(() => sessionMenu(store, session, online), session.title || 'Untitled session')} />
             <IconButton
               icon="trash"
               label="Delete session"

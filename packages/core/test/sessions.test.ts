@@ -208,6 +208,22 @@ test('a workspace whose folder is gone refuses new sessions and fails resumes wi
   await waitFor(() => ch.events.some((e) => e.type === 'error' && /does not exist on this machine/.test(e.data.message)));
 });
 
+test('rename: kept over agent titles, works on ended sessions, empty clears', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const session = await idleSession(node, workspace.id);
+  fake.sessions[0]!.emitEvent({ type: 'session.info', data: { title: 'agent title' } });
+  await waitFor(() => node.sessions.get(session.id).session.title === 'agent title');
+  assert.equal((await node.call('session.set', { sessionId: session.id, title: '  Mine  ' })).session.title, 'Mine');
+  fake.sessions[0]!.emitEvent({ type: 'session.info', data: { title: 'agent again', model: 'fake-model-large' } });
+  await waitFor(() => node.sessions.get(session.id).session.model === 'fake-model-large');
+  assert.equal(node.sessions.get(session.id).session.title, 'Mine');
+  await node.call('session.stop', { sessionId: session.id });
+  assert.equal((await node.call('session.set', { sessionId: session.id, title: 'After end' })).session.title, 'After end');
+  assert.equal((await node.call('session.set', { sessionId: session.id, title: '' })).session.title, undefined);
+  await assert.rejects(node.call('session.set', { sessionId: session.id, model: 'x' }), rejectsWith('conflict'));
+});
+
 test('adapter selection by agent and mode; agents.list merges and caches', async (t) => {
   const structured = new FakeAdapter({ agent: 'claude' });
   const terminal = new FakeAdapter({ agent: 'claude', modes: ['terminal'] });

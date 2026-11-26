@@ -674,6 +674,11 @@ class Node implements BizziNode {
         }
         // An empty object (or null) clears the budget.
         if (p.budget !== undefined) params.budget = parseBudget(p.budget) ?? {};
+        const title = optString(p, 'title');
+        if (title !== undefined) {
+          if (title.length > 200) throw new BizziError('bad_request', 'title is too long (200 characters at most)');
+          params.title = title;
+        }
         return { session: await s.set(params) };
       },
       'session.restart': (p) => {
