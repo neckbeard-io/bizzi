@@ -15,15 +15,15 @@ import {
   shell,
   systemPreferences,
   Tray,
-  type MenuItemConstructorOptions,
 } from 'electron';
 import type { LogLevel, ServeReady } from '@bizzi/protocol';
 import { createLogger, fileSink, stderrSink } from '../core/log.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
 import { resolveCoreEntry, resolveCoreRuntime, resolveDataDir } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
-import { IPC_BOOTSTRAP, IPC_CHROME, type Bootstrap } from '../shared/ipc.ts';
+import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
 import { buildCsp } from './csp.ts';
+import { appMenu } from './menu.ts';
 import { trayIcon } from './tray.ts';
 import { APP_ORIGIN, handleAppProtocol, registerAppScheme, resolveUiSource, uiEntryUrl } from './ui.ts';
 
@@ -35,6 +35,9 @@ const env = process.env;
 if (env['BIZZI_USER_DATA_DIR']) app.setPath('userData', env['BIZZI_USER_DATA_DIR']);
 
 const appDir = app.getAppPath();
+/** The bee icons (scripts/icons.ts); inside app.asar when packaged. */
+const assetsDir = join(appDir, 'assets');
+const appIcon = join(assetsDir, 'icon.png');
 const dataDir = resolveDataDir(env);
 const logFile = join(dataDir, 'logs', 'core.log');
 // Desktop log lines go to our stderr and into the core's log file (its stderr channel).
@@ -166,8 +169,27 @@ async function onReady(): Promise<void> {
   powerMonitor.on('suspend', () => log.log('info', 'system suspend', { component: 'power' }));
   powerMonitor.on('resume', () => log.log('info', 'system resume', { component: 'power' }));
 
-  Menu.setApplicationMenu(Menu.buildFromTemplate(appMenu()));
-  tray = new Tray(trayIcon(process.platform));
+  app.setAboutPanelOptions({
+    applicationName: 'bizzi',
+    applicationVersion: app.getVersion(),
+    version: `Electron ${process.versions.electron}`,
+    copyright: 'bizzi contributors',
+    ...(isMac ? {} : { iconPath: appIcon }),
+  });
+  // Packaged builds carry the icon in the bundle; in dev the Dock would show Electron's.
+  if (isMac && !app.isPackaged) app.dock?.setIcon(appIcon);
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      appMenu(process.platform, {
+        navigate: (hash) => openRoute(hash),
+        back: () => win?.webContents.navigationHistory.goBack(),
+        forward: () => win?.webContents.navigationHistory.goForward(),
+        showCoreLog: () => shell.showItemInFolder(logFile),
+        openDataDir: () => void shell.openPath(dataDir),
+      }),
+    ),
+  );
+  tray = new Tray(trayIcon(process.platform, assetsDir));
   tray.setToolTip('bizzi');
   if (!isMac) tray.on('click', () => showWindow());
   updateTray(manager.status);
@@ -239,6 +261,7 @@ function createWindow(): void {
     minHeight: 480,
     show: false,
     title: 'bizzi',
+    ...(isMac ? {} : { icon: appIcon }),
     ...windowChromeOptions(titleBar, chrome),
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
@@ -278,15 +301,14 @@ function showWindow(): void {
   void app.dock?.show();
 }
 
-function appMenu(): MenuItemConstructorOptions[] {
-  return [
-    ...(isMac ? [{ role: 'appMenu' } as const] : []),
-    { role: 'fileMenu' },
-    { role: 'editMenu' },
-    { role: 'viewMenu' },
-    { role: 'windowMenu' },
-    { role: 'help', submenu: [{ label: 'Show Core Log', click: () => shell.showItemInFolder(logFile) }] },
-  ];
+/** A menu item's UI route: bring the window up, then let the preload set the hash once the page is there. */
+function openRoute(hash: string): void {
+  if (!isMenuRoute(hash)) return;
+  showWindow();
+  const wc = win?.webContents;
+  if (!wc) return;
+  if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC_NAVIGATE, hash));
+  else wc.send(IPC_NAVIGATE, hash);
 }
 
 function updateTray(status: CoreStatus): void {

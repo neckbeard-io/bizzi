@@ -67,15 +67,31 @@ that origin (CORS).
 
 ## Shell behavior
 
-Single-instance lock. On macOS a menu bar icon is drawn in code; closing the window hides it (and
-the Dock icon), and Quit exits. `bizzi://` is registered for packaged builds (Info.plist/registry
+Single-instance lock. On macOS a menu bar icon (the bee, a template image) stays up; closing the
+window hides it (and the Dock icon), and Quit exits. Windows and Linux get the color bee in the tray.
+
+The application menu (`src/main/menu.ts`) is bizzi's own: the bizzi app menu on macOS (About,
+Settings… ⌘,, Hide, Quit), File (New Prompt… ⌘N, Add Workspace… ⇧⌘N, Pair a Device…), Edit, View
+(Machines ⌘1, Inbox ⌘2, Knowledge ⌘3, reload, zoom, full screen), Go (Back ⌘[, Forward ⌘]), Window
+and Help (Show Core Log, Open Data Folder). Items that open part of the UI send a hash route
+(`#/inbox`) over `bizzi:navigate`; the preload sets it only if it is a `#/…` route.
+
+Icons: `assets/icon.svg` and `assets/tray.svg` are the sources. `npm run icons -w @bizzi/desktop`
+(rsvg-convert, and iconutil on macOS) renders `assets/*.png` (runtime: tray, window and dev Dock
+icon) and `build-resources/icon.{png,icns,ico}` (electron-builder). The outputs are committed.
+
+In dev on macOS, the menu bar name and the Dock icon come from the app bundle, so `npm run dev`
+launches `.dev-app/bizzi.app`: a cloned Electron.app with `CFBundleName` bizzi and the bee icon,
+signed again ad hoc and rebuilt when Electron or the icon changes. `BIZZI_DEV_PLAIN_ELECTRON=1`
+runs plain Electron. `bizzi://` is registered for packaged builds (Info.plist/registry
 via electron-builder). In dev it is registered only with `BIZZI_REGISTER_PROTOCOL=1`. Deep links
 currently only bring the window forward.
 
 ## Scripts
 
 ```sh
-npm run dev -w @bizzi/desktop        # esbuild main/preload -> out/, launch Electron
+npm run dev -w @bizzi/desktop        # esbuild main/preload -> out/, launch Electron (as bizzi.app on macOS)
+npm run icons -w @bizzi/desktop      # render assets/*.svg to the PNG / icns / ico icons
 npm test -w @bizzi/desktop           # node:test, uses test/fixtures/stub-core.ts
 npm run pack -w @bizzi/desktop       # build + stage + electron-builder --dir (unpacked, unsigned)
 npm run dist:mac|dist:linux|dist:win # dmg (arm64+x64) | AppImage+deb | nsis
@@ -105,4 +121,4 @@ npm run dev -w @bizzi/desktop
   addons must be installed per arch, so mac arm64 and x64 need separate staging (per-arch CI
   runners). **Stub.**
 - Signing and notarization (mac), including the bundled `node` binary: not yet (`identity: null`).
-- App icon: Electron's default for now.
+- App icon: the bee (`build-resources/icon.{icns,ico,png}`). **Done.**

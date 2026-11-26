@@ -11,6 +11,7 @@ directories:
   buildResources: build-resources
 files:
   - out/**
+  - assets/*.png
   - package.json
 asar: true
 npmRebuild: false

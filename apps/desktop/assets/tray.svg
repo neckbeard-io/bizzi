@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32">
+  <!-- bizzi menu bar / tray icon: a bee silhouette. Black on transparent: a macOS template image. -->
+  <defs>
+    <mask id="body" maskUnits="userSpaceOnUse" x="-16" y="-16" width="32" height="32">
+      <rect x="-16" y="-16" width="32" height="32" fill="#fff"/>
+      <rect x="-8" y="1.4" width="16" height="2.2" fill="#000"/>
+      <rect x="-8" y="5.8" width="16" height="2.2" fill="#000"/>
+    </mask>
+  </defs>
+  <g transform="translate(16 16.6) rotate(24) scale(0.95)">
+    <ellipse cx="-6.6" cy="-1.6" rx="2.7" ry="4.2" transform="rotate(-55 -6.6 -1.6)" fill="none" stroke="#000" stroke-width="1.7"/>
+    <ellipse cx="6.6" cy="-1.6" rx="2.7" ry="4.2" transform="rotate(55 6.6 -1.6)" fill="none" stroke="#000" stroke-width="1.7"/>
+    <ellipse cx="0" cy="3" rx="4.6" ry="6.8" fill="#000" mask="url(#body)"/>
+    <circle cx="0" cy="-6.4" r="3" fill="#000"/>
+    <path d="M-1.5 9.4 L0 12.6 L1.5 9.4 Z" fill="#000"/>
+  </g>
+</svg>
