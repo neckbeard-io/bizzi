@@ -2,16 +2,18 @@ import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { PIPELINE_STATUS_LABEL, fanoutGroupsEqual, pipelinesEqual, selectAgents, selectFanoutGroups, selectNestedSessions, selectPipelines, selectSessionPrompt, shallowEqual, treeRowsEqual } from '@bizzi/client';
 import { BizziError } from '@bizzi/protocol';
-import type { AgentKind, AgentListing, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
+import type { AgentKind, AgentListing, LabelColor, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { navigate, useAction } from '../app/hooks.ts';
-import { useMachine, useMachineOnline } from '../app/machine.ts';
+import { useMachine, useMachineOnline, useShowMachine } from '../app/machine.ts';
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { Icon } from '../components/icons.tsx';
+import { LabelColorField, MachineChip, WorkspaceTile, stripeStyle } from '../components/labels.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
-import { Badge, Button, Card, Disclosure, Empty, ErrorText, Field, Input, Modal, Select, Spinner, StatusBadge, cx } from '../components/ui.tsx';
+import { Badge, Button, Card, Disclosure, Empty, ErrorText, Field, IconButton, Input, Modal, Select, Spinner, StatusBadge, cx } from '../components/ui.tsx';
 import { WidgetRow } from '../components/Widget.tsx';
 import { formatRelative } from '../lib/format.ts';
+import { iconInputError, workspaceMonogram } from '../lib/labels.ts';
 import { routeHref } from '../lib/router.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, aheadBehind } from '../lib/states.ts';
 import { FanoutDialog } from './fanout/FanoutDialog.tsx';
@@ -34,7 +36,8 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
   const pipelines = useBizzi((s) => selectPipelines(s, props.workspaceId), pipelinesEqual);
   const online = useMachineOnline(ws?.machineId);
   const machine = useMachine(ws?.machineId);
-  const multiMachine = useBizzi((s) => s.role === 'hub' && Object.keys(s.machines).length > 1);
+  const showMachine = useShowMachine(machine);
+  const [editing, setEditing] = useState(false);
   const remove = useAction(async () => {
     await store.removeWorkspace(props.workspaceId);
     navigate({ name: 'workspaces' }, { replace: true });
@@ -70,11 +73,22 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
     <Page
       header={
         <PageHeader
-          title={ws.name}
+          style={stripeStyle(machine?.color)}
+          title={
+            <span className="flex min-w-0 items-center gap-2">
+              <WorkspaceTile workspace={ws} size="md" />
+              <span className="truncate">{ws.name}</span>
+            </span>
+          }
           subtitle={
-            <span>
-              {multiMachine && machine ? <span>{machine.name} · </span> : null}
-              <span className="font-mono">{ws.path}</span>
+            <span className="inline-flex max-w-full min-w-0 items-center gap-1">
+              {showMachine && machine ? (
+                <>
+                  <MachineChip machine={machine} />
+                  <span className="shrink-0">·</span>
+                </>
+              ) : null}
+              <span className="truncate font-mono">{ws.path}</span>
             </span>
           }
           back={() => navigate({ name: 'workspaces' })}
@@ -83,6 +97,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
               <Button size="sm" variant="ghost" icon="bolt" disabled={!online} onClick={() => setPipeline(true)} title="Pipeline: planner → implementer → reviewer, one stage after another, with gates you approve">
                 <span className="hidden sm:inline">Pipeline</span>
               </Button>
+              <IconButton icon="edit" label="Name, colour and icon" disabled={!online} onClick={() => setEditing(true)} />
               {ws.kind !== 'dir' ? (
                 <Button size="sm" variant="ghost" icon="tree" disabled={!online} onClick={() => setFanout(true)} title="Fan out: the same prompt to several agents, each in its own worktree, then compare">
                   <span className="hidden sm:inline">Fan out</span>
@@ -102,6 +117,7 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
       }
     >
       <OfflineMachineBanner machineId={ws.machineId} className="mb-3" />
+      {editing ? <WorkspaceIdentityDialog workspace={ws} onClose={() => setEditing(false)} /> : null}
       {creating && online ? <NewSessionForm workspaceId={ws.id} onCancel={() => setCreating(false)} /> : null}
       <RepoLine workspace={ws} git={git} worktrees={worktrees} />
       <WidgetRow placement="workspace" machineId={ws.machineId} className="mb-3" />
@@ -194,6 +210,70 @@ export function WorkspaceView(props: { workspaceId: string }): ReactNode {
 }
 
 /** Branch, ahead/behind and the worktrees made from this repo. */
+/** Rename the workspace and pick its identity colour and icon (spec §11.1); stored on its node, replicated by the hub. */
+function WorkspaceIdentityDialog(props: { workspace: WorkspaceInfo; onClose: () => void }): ReactNode {
+  const w = props.workspace;
+  const store = useStore();
+  const [name, setName] = useState(w.name);
+  const [color, setColor] = useState<LabelColor | undefined>(w.color);
+  const [icon, setIcon] = useState(w.icon ?? '');
+  const iconError = iconInputError(icon);
+  const parent = useBizzi((s) => (w.kind === 'worktree' && w.parentWorkspaceId ? (s.workspaces?.[w.parentWorkspaceId] ?? null) : null));
+  const valid = name.trim() !== '' && iconError === null;
+  const save = useAction(async () => {
+    await store.setWorkspace({ workspaceId: w.id, name: name.trim(), color: color ?? '', icon: icon.trim() });
+    props.onClose();
+  });
+  const preview: WorkspaceInfo = { ...w, name: name.trim() || w.name };
+  if (color) preview.color = color;
+  else delete preview.color;
+  if (icon.trim() && !iconError) preview.icon = icon.trim();
+  else delete preview.icon;
+  return (
+    <Modal
+      title="Name, colour and icon"
+      onClose={props.onClose}
+      footer={
+        <>
+          <Button variant="ghost" onClick={props.onClose}>
+            Cancel
+          </Button>
+          <Button variant="primary" busy={save.busy} disabled={!valid} onClick={() => void save.run()}>
+            Save
+          </Button>
+        </>
+      }
+    >
+      <form
+        className="grid gap-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (valid) void save.run();
+        }}
+      >
+        <Field label="Name" hint="bizzi's name for it; the directory isn't renamed.">
+          <Input value={name} onChange={(e) => setName(e.target.value)} maxLength={200} autoFocus />
+        </Field>
+        <LabelColorField
+          value={color}
+          onChange={setColor}
+          label="Workspace colour"
+          hint={!color && parent?.color ? `None set: it shows ${parent.name}'s colour.` : 'On its sidebar tile and in headers; readable in every theme.'}
+        />
+        <Field label="Icon" hint={iconError ?? 'One or two characters or an emoji, in place of the first letter.'}>
+          <div className="flex items-center gap-2">
+            <Input value={icon} onChange={(e) => setIcon(e.target.value)} maxLength={16} placeholder={workspaceMonogram({ name: preview.name })} className="w-24" spellCheck={false} autoCapitalize="off" />
+            <WorkspaceTile workspace={preview} size="md" />
+            <span className="min-w-0 truncate text-sm">{preview.name}</span>
+          </div>
+        </Field>
+        <button type="submit" hidden />
+      </form>
+      <ErrorText error={save.error} />
+    </Modal>
+  );
+}
+
 function RepoLine(props: { workspace: WorkspaceInfo; git: { branch?: string; ahead: number; behind: number; dirty: boolean } | null; worktrees: WorkspaceInfo[] }): ReactNode {
   const { workspace: w, git, worktrees } = props;
   const branch = git?.branch ?? w.branch;

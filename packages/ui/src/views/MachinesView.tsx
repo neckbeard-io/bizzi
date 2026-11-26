@@ -6,6 +6,7 @@ import { navigate, useIsWide } from '../app/hooks.ts';
 import { useTargetMachineId } from '../app/machine.ts';
 import { Icon } from '../components/icons.tsx';
 import { PresenceDot } from '../components/MachineSwitcher.tsx';
+import { LabelDot } from '../components/labels.tsx';
 import { Page, PageHeader } from '../components/layout.tsx';
 import { Badge, Button, Card, Empty, Spinner, cx } from '../components/ui.tsx';
 import { machinePresence } from '../lib/format.ts';
@@ -94,7 +95,10 @@ function MachineTile(props: { machine: MachineInfo }): ReactNode {
         <div className="flex items-center gap-2">
           <PresenceDot online={m.online} />
           <div className="min-w-0 flex-1">
-            <div className="truncate font-medium">{m.name}</div>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <LabelDot color={m.color} className="h-2.5 w-2.5" />
+              <span className="truncate font-medium">{m.name}</span>
+            </div>
             <div className="truncate text-xs text-muted">
               {m.hostname} · {machinePresence(m)}
             </div>

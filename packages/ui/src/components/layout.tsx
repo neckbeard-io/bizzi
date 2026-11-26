@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import { useIsWide } from '../app/hooks.ts';
 import { IconButton, cx } from './ui.tsx';
 
@@ -12,10 +12,10 @@ export function TitleBarStrip(props: { className?: string }): ReactNode {
   return <div aria-hidden className={cx('app-drag shrink-0', props.className)} style={{ height: bar.height }} data-titlebar />;
 }
 
-export function PageHeader(props: { title: ReactNode; subtitle?: ReactNode; back?: () => void; actions?: ReactNode; className?: string }): ReactNode {
+export function PageHeader(props: { title: ReactNode; subtitle?: ReactNode; back?: () => void; actions?: ReactNode; className?: string; style?: CSSProperties }): ReactNode {
   const wide = useIsWide();
   return (
-    <header className={cx('flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-2 md:px-5', props.className)}>
+    <header className={cx('flex min-h-14 shrink-0 items-center gap-2 border-b border-border bg-panel px-3 py-2 md:px-5', props.className)} style={props.style}>
       {props.back && !wide ? <IconButton icon="back" label="Back" onClick={props.back} className="-ml-1" /> : null}
       <div className="min-w-0 flex-1">
         <div className="truncate text-base font-semibold">{props.title}</div>

@@ -31,6 +31,8 @@ export interface MachineInfo {
   tags: string[];
   /** User-written paragraph about what the machine is for; part of the machine card (knowledge.md §9.2). */
   description?: string;
+  /** User-chosen identity colour (spec §11.1 "Identity colour"); set with `machine.set`. */
+  color?: LabelColor;
   online: boolean;
   roles: MachineRole[];
   bizziVersion: string;
@@ -123,6 +125,10 @@ export interface WorkspaceInfo {
   /** kind 'container': how its container is built and run (topology.md §7). */
   container?: WorkspaceContainer;
   createdAt: string;
+  /** User-chosen identity colour (spec §11.1 "Identity colour"); set with `workspace.set`. A worktree without one shows its repo's. */
+  color?: LabelColor;
+  /** User-chosen icon in place of the name's first letter: one or two characters or an emoji (`isLabelIcon`). */
+  icon?: string;
 }
 
 export interface SessionInfo {
@@ -719,6 +725,38 @@ export interface ContainerStatus {
   idleUntil?: string;
   /** Why the daemon couldn't answer (state `unreachable`). */
   error?: string;
+}
+
+// ---- identity colour and icon (spec §11.1 "Identity colour")
+
+/**
+ * A palette name, not a CSS colour: each theme resolves it (`--label-<name>`) so it reads on that theme's
+ * sidebar and cards, light or dark.
+ */
+export type LabelColor = 'red' | 'orange' | 'yellow' | 'green' | 'teal' | 'blue' | 'purple' | 'pink';
+export const LABEL_COLORS: readonly LabelColor[] = ['red', 'orange', 'yellow', 'green', 'teal', 'blue', 'purple', 'pink'];
+
+export function isLabelColor(v: unknown): v is LabelColor {
+  return typeof v === 'string' && (LABEL_COLORS as readonly string[]).includes(v);
+}
+
+/** Longest workspace name `workspace.set` accepts, in characters. */
+export const MAX_WORKSPACE_NAME = 200;
+
+/**
+ * A workspace icon: one or two user-perceived characters (an emoji, `AB`, `λ`), at most 16 UTF-16 units,
+ * no whitespace or control characters. Callers trim first.
+ */
+export function isLabelIcon(v: unknown): v is string {
+  if (typeof v !== 'string' || v.length === 0 || v.length > 16) return false;
+  // Whitespace, controls, and invisible or direction-changing format characters (ZWJ stays: emoji sequences).
+  if (/[\s\p{Cc}\u200b\u200e\u200f\u202a-\u202e\u2060-\u2064\u2066-\u2069\ufeff]/u.test(v)) return false;
+  return graphemeCount(v) <= 2;
+}
+
+function graphemeCount(v: string): number {
+  if (typeof Intl.Segmenter === 'function') return [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(v)].length;
+  return [...v].length;
 }
 
 // ---- hub: devices and pairing

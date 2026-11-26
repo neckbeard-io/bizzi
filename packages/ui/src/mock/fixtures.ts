@@ -10,6 +10,7 @@ export const MACHINE: MachineInfo = {
   headful: true,
   alwaysOn: false,
   tags: ['prod-access'],
+  color: 'blue',
   description: 'Work laptop with production access (kube contexts, VPN). Production investigations happen here.',
   online: true,
   roles: ['node'],
@@ -26,6 +27,7 @@ export const SERVER: MachineInfo = {
   headful: false,
   alwaysOn: true,
   tags: ['docker'],
+  color: 'orange',
   online: false,
   roles: ['node'],
   bizziVersion: '0.0.1',
@@ -41,6 +43,7 @@ export const MINI: MachineInfo = {
   headful: true,
   alwaysOn: true,
   tags: ['gui', 'xcode'],
+  color: 'green',
   description: 'Always-on Mac for Xcode builds, simulators and screenshots. No production access.',
   online: true,
   roles: ['node'],
@@ -236,8 +239,8 @@ const T0 = Date.parse('2026-11-05T09:00:00Z');
 export const iso = (offsetMin: number): string => new Date(T0 + offsetMin * 60_000).toISOString();
 
 export const WORKSPACES: WorkspaceInfo[] = [
-  { id: 'w_acme', machineId: MACHINE.id, name: 'acme-shop', path: '/Users/dev/src/acme-shop', kind: 'git', projectId: 'p_acme', createdAt: iso(-60 * 24 * 7) },
-  { id: 'w_notes', machineId: MACHINE.id, name: 'research-notes', path: '/Users/dev/research/notes', kind: 'dir', createdAt: iso(-60 * 24 * 2) },
+  { id: 'w_acme', machineId: MACHINE.id, name: 'acme-shop', path: '/Users/dev/src/acme-shop', kind: 'git', projectId: 'p_acme', color: 'purple', createdAt: iso(-60 * 24 * 7) },
+  { id: 'w_notes', machineId: MACHINE.id, name: 'research-notes', path: '/Users/dev/research/notes', kind: 'dir', icon: '📚', createdAt: iso(-60 * 24 * 2) },
   { id: 'w_infra', machineId: SERVER.id, name: 'infra', path: '/srv/infra', kind: 'git', createdAt: iso(-60 * 24 * 30) },
   {
     id: 'w_acme_oauth',

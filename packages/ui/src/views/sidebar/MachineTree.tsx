@@ -20,10 +20,12 @@ import { openAddWorkspace } from '../../app/addWorkspace.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
+import { WorkspaceTile } from '../../components/labels.tsx';
 import { PresenceDot } from '../../components/MachineSwitcher.tsx';
 import { AgentMark, MarkCount, MarkDot } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
 import { formatRelative } from '../../lib/format.ts';
+import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
 import { AGENT_LABEL, MARK_LABEL, MARK_SYMBOL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
 import { loadJson, saveJson } from '../../lib/storage.ts';
@@ -75,8 +77,13 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
   const phone = variant === 'phone';
   const totals = machineTotalsLabel(summary);
   const unsupported = summary.unsupported.map((a) => AGENT_LABEL[a]).join(', ');
+  const tags = machineTagsLabel(m);
   return (
-    <section className={cx(!summary.online && 'opacity-60')}>
+    <section className={cx('relative', !summary.online && 'opacity-60')}>
+      {m.color ? (
+        // Identity stripe (spec §11.1): the machine's colour down the left edge of its whole group.
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-0 z-10 w-0.5 rounded-full" style={{ backgroundColor: labelVar(m.color) }} />
+      ) : null}
       <div
         className={cx(
           'group relative flex items-center rounded-md pr-1.5',
@@ -97,7 +104,7 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
           href={routeHref({ name: 'machine', machineId: m.id })}
           onClick={() => store.selectMachine(m.id)}
           className={cx('flex min-w-0 flex-1 items-center gap-1.5 self-stretch rounded-md', phone ? 'text-sm' : 'text-xs')}
-          title={`Open ${m.name} (${m.hostname}${summary.online ? '' : ', offline'})`}
+          title={`Open ${m.name} (${m.hostname}${summary.online ? '' : ', offline'}${m.tags.length ? `; tags: ${m.tags.join(', ')}` : ''}${m.color ? `; ${LABEL_COLOR_NAME[m.color].toLowerCase()}` : ''})`}
           aria-current={props.active ? 'page' : undefined}
         >
           <PresenceDot online={summary.online} className="h-1.5 w-1.5" />
@@ -139,6 +146,11 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
           </span>
         )}
       </div>
+      {tags && !phone ? (
+        <div data-fit-ignore className="-mt-1 truncate pl-7 text-[11px] text-muted" title={`Tags: ${m.tags.join(', ')}`}>
+          {tags}
+        </div>
+      ) : null}
       {!collapsed && summary.staleSessions > 0 && !phone ? (
         <div data-fit-ignore className="truncate pl-7 text-[11px] text-muted">
           {pendingUpdatesLabel(summary.staleSessions)}
@@ -205,7 +217,7 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
         title={w.path}
         {...(phone ? longPress : {})}
       >
-        <WorkspaceIcon workspace={w} />
+        <WorkspaceTile workspace={w} />
         <span className="min-w-[4.5rem] truncate">{w.kind === 'worktree' && w.branch ? w.branch : w.name}</span>
         {branch && w.kind !== 'worktree' ? (
           <span className="min-w-0 shrink-[4] truncate font-mono text-[11px] text-muted">
@@ -241,16 +253,6 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
         </Modal>
       ) : null}
     </div>
-  );
-}
-
-function WorkspaceIcon(props: { workspace: WorkspaceInfo }): ReactNode {
-  const w = props.workspace;
-  if (w.kind === 'worktree') return <Icon name="branch" size={13} className="shrink-0 text-muted" />;
-  return (
-    <span className="flex h-4 w-4 shrink-0 items-center justify-center rounded bg-panel-2 text-[10px] font-semibold text-muted uppercase" aria-hidden="true">
-      {w.name.slice(0, 1)}
-    </span>
   );
 }
 
