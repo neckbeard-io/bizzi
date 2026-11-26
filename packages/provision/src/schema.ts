@@ -326,8 +326,10 @@ function rangeStr(): Schema<string> {
 const remedySchema = obj<RemedySpec>({
   kind: lit('upgrade', 'migrate', 'restart-service'),
   title: str(),
+  id: opt(str({ pattern: /^[a-z0-9-]+$/ })),
   method: opt(str({ pattern: /^[a-z0-9-]+$/ })),
   command: opt(str()),
+  steps: opt(arr(stepSchema, { min: 1 })),
 });
 
 const supportSchema = obj<SupportSpec>({
@@ -451,8 +453,21 @@ function semanticChecks(r: Recipe, issues: string[]): void {
     for (const id of r.support.migrate?.from ?? []) {
       if (!ids.has(id)) issues.push(`support.migrate.from: unknown method "${id}"`);
     }
+    const remedyIds = new Set<string>();
     r.support.unsupported?.remedies?.forEach((rem, i) => {
-      if (rem.method && !ids.has(rem.method)) issues.push(`support.unsupported.remedies[${i}].method: unknown method "${rem.method}"`);
+      const rp = `support.unsupported.remedies[${i}]`;
+      if (rem.method && !ids.has(rem.method)) issues.push(`${rp}.method: unknown method "${rem.method}"`);
+      if (rem.id !== undefined) {
+        if (remedyIds.has(rem.id)) issues.push(`${rp}.id: duplicate remedy id "${rem.id}"`);
+        remedyIds.add(rem.id);
+      }
+      if (rem.steps) {
+        if (rem.kind !== 'upgrade') issues.push(`${rp}.steps: only upgrade remedies run steps`);
+        if (rem.id === undefined) issues.push(`${rp}: a remedy with steps needs an id`);
+        rem.steps.forEach((s, si) => {
+          if ((s.run === undefined) === (s.argv === undefined)) issues.push(`${rp}.steps[${si}]: exactly one of run/argv is required`);
+        });
+      }
     });
   }
 

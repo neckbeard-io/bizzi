@@ -38,7 +38,7 @@ For each agent or tool, per OS × arch (`darwin-arm64`, `linux-x64-musl`, …, w
 
 - **detect**: binary names, extra search paths, and a version command plus regex.
 - **latest**: version sources, in order.
-- **support** (agents): supported and tested version ranges, the unsupported reason and remedies, and which methods to offer migration from.
+- **support** (agents): supported and tested version ranges, the unsupported reason and remedies, and which methods to offer migration from. An `upgrade` remedy with an `id` and `steps` runs those steps instead of its method's update (`planInstall(…, { remedy: id })`). Its verify step then fails unless the installed version is inside `versions`. Steps never reach the listing.
 - **methods**: install methods in preference order. Each has a kind (`script`, `brew`, `npm` or `binary`), platform filters, `requires`, `targetDir`/`binDir`, whether it is `pinnable`, `pathHints` (to tell which method installed a binary), `watch` (paths that change on update; Homebrew and npm package dirs are added automatically), and `install`/`update`/`uninstall` steps. Each step has `run` (sh) or `argv`, plus `requiresSudo`, `env`, `cwd`, `timeoutMs`, `allowFailure` and `when: pinned|unpinned`.
 - **login**: the interactive command (run it in a PTY and feed the output through the scanner), plus headless alternatives: an API key env var, a long-lived token command, device code, a secret on stdin, a config file, or copying credentials over.
 - **auth**: a status command (`format`, exit codes, JSON fields or regexes, and whether it is side-effect free), heuristic `rules` (env vars, files, JSON field equals), and which state to report when nothing matched.

@@ -120,8 +120,12 @@ test('mock 1.2: provisioning alerts, migrate, policies, restart a stale session'
   await until(() => store.getState().jobs[job.jobId]?.done === true);
   await until(() => store.getState().agents.m_laptop?.find((a) => a.agent === 'claude')?.method === 'installer');
 
-  // Upgrade OpenCode v1 → v2 clears the alert.
-  const up = await store.installAgent({ machineId: 'm_laptop', agent: 'opencode', action: 'update' });
+  // A plain update keeps OpenCode on v1; the upgrade remedy moves it to v2 and clears the alert.
+  const plain = await store.installAgent({ machineId: 'm_laptop', agent: 'opencode', action: 'update' });
+  assert.ok(!plain.plan?.steps.some((st) => st.command === 'opencode upgrade --major'));
+  await until(() => store.getState().jobs[plain.jobId]?.done === true);
+  assert.equal(store.getState().agents.m_laptop?.find((a) => a.agent === 'opencode')?.support, 'unsupported');
+  const up = await store.installAgent({ machineId: 'm_laptop', agent: 'opencode', action: 'update', remedy: 'major' });
   assert.ok(up.plan?.steps.some((st) => st.command === 'opencode upgrade --major'));
   await until(() => store.getState().agents.m_laptop?.find((a) => a.agent === 'opencode')?.support === 'ok');
 

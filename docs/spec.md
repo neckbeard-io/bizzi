@@ -298,7 +298,7 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 
 - `unsupported` raises an alert: a banner on the machine, an inbox item, and a warning on the machine header in the sidebar (§11.1).
 - Structured sessions refuse to start on an unsupported install (`BizziError`); terminal mode is offered instead.
-- Remedies are actions you confirm, never automatic, because they change your own install. OpenCode v1 → **Upgrade to v2** (`opencode upgrade --major`, or the v2 installer).
+- Remedies are actions you confirm, never automatic, because they change your own install. OpenCode v1 → **Upgrade to v2** (`opencode upgrade --major`, or the v2 installer). An upgrade remedy runs its own steps (`agent.plan` / `agent.install` with the remedy's `id`), not the method's plain update, which keeps v1 on the latest 1.x. The job fails unless the installed version ends up supported.
 - `untested` (newer than the adapter's tested range) is a quiet note, not an alert.
 
 **Install method and migration.** A recipe's method order is its preference (Claude: native first). The probe identifies the method from the binary's real path (`pathHints`), seeing through wrapper shims (e.g. a terminal app's `claude` shim on PATH) to the binary they launch. When an install uses a non-preferred method that updates worse (Claude via Homebrew or npm), bizzi offers **Switch to the native installer**:

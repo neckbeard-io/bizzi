@@ -72,13 +72,8 @@ export function mockPlan(agent: AgentKind, action: InstallAction, m: MachineInfo
     case 'opencode':
       if (action === 'install')
         return plan('script', [step('script', 'Run the install script', 'curl -fsSL https://opencode.ai/install | bash'), step('verify', 'Verify the binary', 'opencode --version')]);
-      if (action === 'update' && current?.version?.startsWith('1.'))
-        return plan(
-          'script',
-          [step('upgrade', 'Upgrade to OpenCode v2', 'opencode upgrade --major'), step('service', 'Restart the background service', 'opencode service restart'), step('verify', 'Verify the binary', 'opencode --version')],
-          ['v2 keeps your providers and sessions; v1-only plugins need updating.', 'Sessions running on v1 restart on v2 at their next safe point.'],
-        );
-      if (action === 'update') return plan('script', [step('upgrade', 'Upgrade in place', 'opencode upgrade'), step('verify', 'Verify the binary', 'opencode --version')]);
+      // On v1 this stays on the latest 1.x; moving to v2 is a remedy (`remedy: 'major'`).
+      if (action === 'update') return plan('script', [step('upgrade', 'Upgrade in place', 'opencode upgrade --method curl'), step('verify', 'Verify the binary', 'opencode --version')]);
       return plan('script', [step('remove', 'Remove the install directory', 'rm -rf ~/.opencode')]);
     case 'agy':
       if (!mac) {
@@ -191,7 +186,9 @@ export class MockProvision implements MockModule {
       case 'agent.plan': {
         await this.host.sleep(250);
         const agent = this.agentParam(params);
-        return { plan: mockPlan(agent, this.actionParam(params), m, typeof params.method === 'string' ? params.method : undefined, this.listing(m.id, agent)) };
+        const action = this.actionParam(params);
+        const listing = this.listing(m.id, agent);
+        return { plan: this.remedyPlan(agent, action, params, listing) ?? mockPlan(agent, action, m, typeof params.method === 'string' ? params.method : undefined, listing) };
       }
       case 'agent.migrate': {
         const agent = this.agentParam(params);
@@ -220,9 +217,10 @@ export class MockProvision implements MockModule {
         const listing = this.listing(m.id, agent);
         if (action === 'install' && listing?.installed) throw new BizziError('conflict', `${agent} is already installed`);
         if (action !== 'install' && !listing?.installed) throw new BizziError('conflict', `${agent} is not installed`);
-        const plan = mockPlan(agent, action, m, typeof params.method === 'string' ? params.method : undefined, listing);
+        const remedy = this.remedyPlan(agent, action, params, listing);
+        const plan = remedy ?? mockPlan(agent, action, m, typeof params.method === 'string' ? params.method : undefined, listing);
         const jobId = `job_${(++this.jobCounter).toString(36)}${Date.now().toString(36).slice(-4)}`;
-        if (params.dryRun !== true) setTimeout(() => void this.runJob(jobId, m, agent, action, plan, 1000), 0);
+        if (params.dryRun !== true) setTimeout(() => void this.runJob(jobId, m, agent, action, plan, 1000, 0, remedy !== undefined), 0);
         return { jobId, plan };
       }
       case 'agent.login': {
@@ -260,6 +258,20 @@ export class MockProvision implements MockModule {
       default:
         throw new BizziError('unsupported', `mock does not implement ${method}`);
     }
+  }
+
+  /** A remedy's own steps (agent.plan / agent.install with `remedy`), or undefined without one. */
+  private remedyPlan(agent: AgentKind, action: InstallAction, params: Record<string, unknown>, listing: AgentListing | undefined): InstallPlan | undefined {
+    if (typeof params.remedy !== 'string') return undefined;
+    const r = listing?.remedies?.find((x) => x.id === params.remedy);
+    if (!r || r.kind !== 'upgrade' || !r.command) throw new BizziError('not_found', `${agent} has no remedy "${params.remedy}"`);
+    return {
+      target: agent,
+      action,
+      method: r.method ?? listing?.method ?? 'script',
+      steps: [step('remedy', r.title, r.command), step('verify', 'Verify the binary', `${agent} --version`)],
+      notes: [`Fails unless ${agent} ends up at a supported version`],
+    };
   }
 
   private agentParam(params: Record<string, unknown>): AgentKind {
@@ -301,7 +313,7 @@ export class MockProvision implements MockModule {
     this.patchListing(machineId, agent, (l) => ({ ...l, staleSessions: this.staleCount(machineId, agent, l.version) }));
   }
 
-  private async runJob(jobId: string, m: MachineInfo, agent: AgentKind, action: InstallAction | 'migrate', plan: InstallPlan, stepMs: number, minSteps = 0): Promise<void> {
+  private async runJob(jobId: string, m: MachineInfo, agent: AgentKind, action: InstallAction | 'migrate', plan: InstallPlan, stepMs: number, minSteps = 0, remedied = false): Promise<void> {
     // The demo job pads the plan with a resolve step so it runs long enough to be seen mid-way.
     const steps = [...plan.steps];
     while (steps.length < minSteps) steps.unshift(step(`resolve${steps.length}`, steps.length % 2 ? 'Check prerequisites' : 'Resolve the latest version'));
@@ -336,7 +348,8 @@ export class MockProvision implements MockModule {
           next.notes = ['installed by bizzi; log in to use it'];
           next.method = plan.method;
         }
-        if (l.support === 'unsupported') {
+        // Like the real node: only a remedy's own steps (e.g. a major upgrade) leave an unsupported version.
+        if (l.support === 'unsupported' && remedied) {
           next.support = 'ok';
           delete next.supportReason;
           next.remedies = (l.remedies ?? []).filter((r) => r.kind !== 'upgrade');

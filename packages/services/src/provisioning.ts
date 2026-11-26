@@ -55,7 +55,12 @@ export interface ProvisioningExtension extends NodeExtension {
 
 /** Map @bizzi/provision's plan to the wire `InstallPlan`. */
 export function toWirePlan(plan: InstallPlan): WirePlan {
-  const notes = [`${plan.methodLabel} on ${plan.platformKey}${plan.version ? `, version ${plan.version}` : ''}`, ...plan.warnings];
+  const expect = plan.steps.find((s) => s.expectVersion)?.expectVersion;
+  const notes = [
+    `${plan.methodLabel} on ${plan.platformKey}${plan.version ? `, version ${plan.version}` : ''}`,
+    ...(expect ? [`Fails unless ${expect.displayName} ends up at ${expect.range}`] : []),
+    ...plan.warnings,
+  ];
   return {
     target: plan.recipe,
     action: plan.action,
@@ -101,6 +106,7 @@ export function createProvisioningExtension(opts: ProvisioningOptions): Provisio
     const planOpts: PlanOptions = { action };
     let method = optString(p, 'method');
     const version = optString(p, 'version');
+    const remedy = optString(p, 'remedy');
     if (action !== 'install') {
       // Update / uninstall an adopted install the way it was installed (e.g. the Homebrew formula
       // the binary came from, not the recipe's default formula).
@@ -116,6 +122,7 @@ export function createProvisioningExtension(opts: ProvisioningOptions): Provisio
     }
     if (method) planOpts.method = method;
     if (version) planOpts.version = version;
+    if (remedy) planOpts.remedy = remedy;
     if (opts.recipes) planOpts.recipes = opts.recipes;
     if (opts.env) planOpts.env = opts.env;
     if (opts.home) planOpts.home = opts.home;
@@ -148,6 +155,7 @@ export function createProvisioningExtension(opts: ProvisioningOptions): Provisio
       agent: installPlan.agent,
       action: installPlan.action,
       method: installPlan.method,
+      ...(installPlan.remedy ? { remedy: installPlan.remedy } : {}),
     });
     const res = await run(installPlan, runOpts);
     ctx.logger.log(res.ok ? 'info' : 'warn', 'install finished', { jobId, ok: res.ok, dryRun, error: res.error });

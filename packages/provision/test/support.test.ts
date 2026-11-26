@@ -59,8 +59,10 @@ test('support: OpenCode v1 is unsupported with upgrade remedies; newer than test
   const v1 = assessSupport(oc, '1.14.3');
   assert.equal(v1?.support, 'unsupported');
   assert.match(v1?.reason ?? '', /v1 is not supported/);
-  assert.deepEqual(v1?.remedies?.[0], { kind: 'upgrade', title: 'Upgrade to v2', command: 'opencode upgrade --major' });
+  assert.deepEqual(v1?.remedies?.[0], { kind: 'upgrade', id: 'major', title: 'Upgrade to v2', command: 'opencode upgrade --major' });
   assert.equal(v1?.remedies?.[1]?.method, 'script');
+  assert.equal(v1?.remedies?.[1]?.id, 'v2-installer');
+  assert.ok(v1?.remedies?.every((r) => !('steps' in r)), 'remedy steps stay in the recipe');
   assert.deepEqual(assessSupport(oc, '2.0.25'), { support: 'ok' });
   const newer = assessSupport(oc, '2.2.6');
   assert.equal(newer?.support, 'untested');

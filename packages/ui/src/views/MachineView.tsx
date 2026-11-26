@@ -39,7 +39,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
   const loadError = useBizzi((s) => (machineId ? (s.machineErrors[machineId] ?? null) : null));
   const serverVersion = useBizzi((s) => s.connection.serverVersion);
   const refresh = useAction(() => store.loadAgents(machineId, true));
-  const [plan, setPlan] = useState<{ agent: AgentKind; action: JobAction; method?: string } | null>(null);
+  const [plan, setPlan] = useState<{ agent: AgentKind; action: JobAction; method?: string; remedy?: AgentRemedy } | null>(null);
   const [secretFor, setSecretFor] = useState<AgentKind | null>(null);
   const clearSecretFor = useCallback(() => setSecretFor(null), []);
 
@@ -104,7 +104,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       ) : (
         <div className="grid gap-3 sm:grid-cols-2">
           {agents.map((a) => (
-            <AgentCard key={a.agent} machineId={machineId} online={online} agent={a} onPlan={(action, method) => setPlan(method ? { agent: a.agent, action, method } : { agent: a.agent, action })} onSecret={() => setSecretFor(a.agent)} />
+            <AgentCard key={a.agent} machineId={machineId} online={online} agent={a} onPlan={(action, method, remedy) => setPlan({ agent: a.agent, action, ...(method ? { method } : {}), ...(remedy ? { remedy } : {}) })} onSecret={() => setSecretFor(a.agent)} />
           ))}
         </div>
       )}
@@ -116,7 +116,7 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       <p className="mt-2 text-xs text-muted">Update and restart policies are on each agent's card above. App-wide settings (appearance, knowledge, devices) are under Settings.</p>
 
       {!hub ? <p className="mt-6 text-xs text-muted">Connected directly to this node. Other machines are reached through a hub.</p> : null}
-      {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} {...(plan.method ? { method: plan.method } : {})} onClose={() => setPlan(null)} /> : null}
+      {plan ? <PlanModal machineId={machineId} machineName={name} agent={plan.agent} action={plan.action} {...(plan.method ? { method: plan.method } : {})} {...(plan.remedy ? { remedy: plan.remedy } : {})} onClose={() => setPlan(null)} /> : null}
     </Page>
   );
 }
@@ -349,7 +349,7 @@ function MachinePurpose(props: { machine: MachineInfo; online: boolean }): React
 const AUTH_TONE = { ok: 'ok', missing: 'warn', expired: 'err', unknown: 'neutral' } as const;
 const AUTH_LABEL = { ok: 'signed in', missing: 'not signed in', expired: 'login expired', unknown: 'auth unknown' } as const;
 
-function AgentCard(props: { machineId: string; online: boolean; agent: AgentListing; onPlan: (action: JobAction, method?: string) => void; onSecret: () => void }): ReactNode {
+function AgentCard(props: { machineId: string; online: boolean; agent: AgentListing; onPlan: (action: JobAction, method?: string, remedy?: AgentRemedy) => void; onSecret: () => void }): ReactNode {
   const { agent: a, machineId, online } = props;
   const store = useStore();
   const job = useBizzi((s) => selectAgentJob(s, machineId, a.agent));
@@ -373,7 +373,7 @@ function AgentCard(props: { machineId: string; online: boolean; agent: AgentList
         {a.installed && a.billing ? <Badge title={BILLING_HINT[a.billing]}>{BILLING_LABEL[a.billing]}</Badge> : null}
         {a.installed ? <Badge tone={AUTH_TONE[a.auth]}>{AUTH_LABEL[a.auth]}</Badge> : <Badge>missing</Badge>}
       </div>
-      {a.installed ? <SupportNotice agent={a} disabled={disabled} onRemedy={(r) => props.onPlan(r.kind === 'migrate' ? 'migrate' : 'update', r.method)} /> : null}
+      {a.installed ? <SupportNotice agent={a} disabled={disabled} onRemedy={(r) => (r.kind === 'migrate' ? props.onPlan('migrate', r.method) : props.onPlan('update', r.id ? undefined : r.method, r.id ? r : undefined))} /> : null}
       {a.account ? (
         <div className="mt-2 flex items-center gap-1.5 truncate text-xs text-muted">
           <Icon name="user" size={12} />
@@ -481,7 +481,7 @@ function Remedies(props: { remedies: AgentRemedy[]; disabled: boolean; onRemedy:
   return (
     <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
       {props.remedies.map((r) => (
-        <Button key={`${r.kind}:${r.method ?? ''}`} size="sm" variant="secondary" icon={r.kind === 'migrate' ? 'refresh' : 'upload'} disabled={props.disabled} onClick={() => props.onRemedy(r)} title={r.command ? `Runs: ${r.command}` : undefined}>
+        <Button key={r.id ?? `${r.kind}:${r.method ?? ''}`} size="sm" variant="secondary" icon={r.kind === 'migrate' ? 'refresh' : 'upload'} disabled={props.disabled} onClick={() => props.onRemedy(r)} title={r.command ? `Runs: ${r.command}` : undefined}>
           {r.title}
         </Button>
       ))}

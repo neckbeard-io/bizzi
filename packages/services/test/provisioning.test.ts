@@ -33,6 +33,23 @@ latest:
   - type: npm
     package: "@example/fake-oc"
     verified: true
+support:
+  versions: ">=2.0.0"
+  unsupported:
+    reason: Fake OpenCode v1 is not supported
+    remedies:
+      - kind: upgrade
+        id: stuck
+        title: Upgrade that stays on v1
+        steps:
+          - description: Rewrite the v1 binary
+            run: printf '#!/bin/sh\\necho "bizzi-fake-oc 1.9.0"\\n' > {{toolsDir}}/fakeoc/bin/bizzi-fake-oc
+      - kind: upgrade
+        id: major
+        title: Upgrade to v2
+        steps:
+          - description: Write the v2 binary
+            run: printf '#!/bin/sh\\necho "bizzi-fake-oc 2.0.1"\\n' > {{toolsDir}}/fakeoc/bin/bizzi-fake-oc
 methods:
   - id: echo
     kind: script
@@ -169,6 +186,30 @@ describe('provisioning extension', () => {
     // Output lines carry the step they belong to.
     const hello = ofA.find((p) => p.message === 'installing latest')!;
     assert.deepEqual([hello.step, hello.total], [1, 4]);
+  });
+
+  it('a remedy runs its own steps and fails unless the version ends up supported', async () => {
+    const { ext } = setup();
+    const h = await harness({ extensions: [ext] });
+    after(() => h.close());
+    const { plan } = await h.call(ext, 'agent.plan', { agent: 'opencode', action: 'update', remedy: 'major' });
+    assert.deepEqual(
+      plan.steps.map((s: { title: string }) => s.title),
+      ['Write the v2 binary', 'Verify Fake OpenCode runs'],
+    );
+    assert.ok(plan.notes.includes('Fails unless Fake OpenCode ends up at >=2.0.0'));
+    await assert.rejects(h.call(ext, 'agent.plan', { agent: 'opencode', action: 'update', remedy: 'nope' }), code('not_found'));
+
+    await h.call(ext, 'agent.install', { agent: 'opencode', action: 'install' });
+    const stuck = await h.call(ext, 'agent.install', { agent: 'opencode', action: 'update', remedy: 'stuck' });
+    const major = await h.call(ext, 'agent.install', { agent: 'opencode', action: 'update', remedy: 'major' });
+    await ext.idle();
+    const stuckDone = progress(h, stuck.jobId).at(-1)!;
+    assert.equal(stuckDone.ok, false);
+    assert.match(stuckDone.message ?? '', /Fake OpenCode is still 1\.9\.0; bizzi needs >=2\.0\.0/);
+    const majorEvents = progress(h, major.jobId);
+    assert.equal(majorEvents.at(-1)?.ok, true);
+    assert.ok(majorEvents.some((p) => p.stage === 'output' && p.message === 'bizzi-fake-oc 2.0.1'));
   });
 
   it('agent.setSecret / agent.secrets / agent.deleteSecret, injected into the agent env', async () => {

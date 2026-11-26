@@ -166,3 +166,34 @@ test('fake recipe: when-conditions, defaults and dry-run text', () => {
   assert.equal(unpinned.steps[3]?.command, 'echo argv latest');
   assert.equal(planInstall('fake', parsePlatform('darwin-arm64'), { ...all, recipes, verify: false }).steps.at(-1)?.phase, 'main');
 });
+
+test('opencode v1: a plain update stays on the method; remedies run their own steps and require v2', () => {
+  const mac = parsePlatform('darwin-arm64');
+  const update = planInstall('opencode', mac, { ...all, action: 'update', method: 'script' });
+  assert.deepEqual(commands(update), ['opencode upgrade --method curl', 'opencode --version']);
+  assert.equal(update.remedy, undefined);
+  assert.equal(update.steps.at(-1)?.expectVersion, undefined, 'a plain update does not check the major version');
+
+  const major = planInstall('opencode', mac, { ...all, action: 'update', method: 'script', remedy: 'major' });
+  assert.deepEqual(commands(major), ['opencode upgrade --major', 'opencode --version']);
+  assert.equal(major.remedy, 'major');
+  assert.equal(major.method, 'script');
+  assert.equal(major.steps[0]?.id, 'opencode.remedy.major.1');
+  assert.deepEqual(major.steps.at(-1)?.expectVersion, { regex: 'v?(\\d+\\.\\d+\\.\\d+(?:-[0-9A-Za-z.]+)?)', range: '>=2.0.0', displayName: 'OpenCode' });
+
+  // The installer remedy names its method, which wins over the adopted one.
+  const installer = planInstall('opencode', mac, { ...all, action: 'update', method: 'brew', remedy: 'v2-installer', installedPath: '/opt/homebrew/Cellar/opencode/1.19.6/bin/opencode' });
+  assert.equal(installer.method, 'script');
+  assert.deepEqual(commands(installer), ['curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path', 'opencode --version']);
+  assert.ok(installer.steps.at(-1)?.expectVersion);
+
+  // A remedy always verifies, even when the caller turns verification off.
+  assert.ok(planInstall('opencode', mac, { ...all, action: 'update', remedy: 'major', verify: false }).steps.at(-1)?.expectVersion);
+});
+
+test('remedy errors: unknown id, no steps, uninstall', () => {
+  const mac = parsePlatform('darwin-arm64');
+  assert.throws(() => planInstall('opencode', mac, { ...all, action: 'update', remedy: 'nope' }), (e: unknown) => e instanceof BizziError && e.code === 'not_found');
+  assert.throws(() => planInstall('claude', mac, { ...all, action: 'update', remedy: 'major' }), (e: unknown) => e instanceof BizziError && e.code === 'not_found');
+  assert.throws(() => planInstall('opencode', mac, { ...all, action: 'uninstall', remedy: 'major' }), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
+});

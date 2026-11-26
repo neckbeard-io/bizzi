@@ -2,6 +2,7 @@ import { statSync } from 'node:fs';
 import type { Logger } from '@bizzi/protocol';
 import { execCapture } from './exec.ts';
 import { augmentedEnv, homeDir } from './path.ts';
+import { satisfies } from './versions.ts';
 import type { InstallPlan, InstallProgress, PlannedStep, RunResult, StepResult } from './types.ts';
 
 export interface RunOptions {
@@ -79,7 +80,8 @@ export async function runPlan(plan: InstallPlan, opts: RunOptions = {}): Promise
     const r = await runStep(step, { ...env, ...step.env }, stepCwd, opts, (line) => {
       if (opts.streamOutput !== false) emit('output', line.length > MAX_LINE ? `${line.slice(0, MAX_LINE)}…` : line);
     });
-    const ok = r.code === 0 && !r.timedOut && !r.aborted && !r.error;
+    const versionError = r.code === 0 && step.expectVersion ? checkVersion(step.expectVersion, `${r.stdout}\n${r.stderr}`) : undefined;
+    const ok = r.code === 0 && !r.timedOut && !r.aborted && !r.error && !versionError;
     results.push(
       stepResult(step, {
         skipped: false,
@@ -91,13 +93,15 @@ export async function runPlan(plan: InstallPlan, opts: RunOptions = {}): Promise
       }),
     );
     if (!ok) {
-      const why = r.error
-        ? `could not start: ${r.error}`
-        : r.timedOut
-          ? `timed out after ${step.timeoutMs} ms`
-          : r.aborted
-            ? 'aborted'
-            : `exit ${r.code ?? r.signal}`;
+      const why = versionError
+        ? versionError
+        : r.error
+          ? `could not start: ${r.error}`
+          : r.timedOut
+            ? `timed out after ${step.timeoutMs} ms`
+            : r.aborted
+              ? 'aborted'
+              : `exit ${r.code ?? r.signal}`;
       if (step.allowFailure) {
         emit('warning', `${label}: ${why} (allowed to fail)`);
         continue;
@@ -106,6 +110,13 @@ export async function runPlan(plan: InstallPlan, opts: RunOptions = {}): Promise
     }
   }
   return finish(true);
+}
+
+/** Undefined when the output shows a version inside the range; otherwise why not. */
+function checkVersion(e: NonNullable<PlannedStep['expectVersion']>, output: string): string | undefined {
+  const version = new RegExp(e.regex).exec(output)?.[1];
+  if (!version) return `could not read the ${e.displayName} version (bizzi needs ${e.range})`;
+  return satisfies(version, e.range) ? undefined : `${e.displayName} is still ${version}; bizzi needs ${e.range}`;
 }
 
 function isDir(p: string): boolean {

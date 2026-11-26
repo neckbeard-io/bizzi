@@ -93,7 +93,8 @@ export function assessSupport(recipe: Recipe, version: string | undefined): Supp
   if (!satisfies(version, spec.versions)) {
     const reason = spec.unsupported?.reason ?? `${recipe.displayName} ${version} is not supported (bizzi supports ${spec.versions})`;
     const remedies = spec.unsupported?.remedies;
-    return { support: 'unsupported', reason, ...(remedies?.length ? { remedies: remedies.map((r) => ({ ...r })) } : {}) };
+    // Steps stay in the recipe; the listing carries the remedy's id for agent.plan / agent.install.
+    return { support: 'unsupported', reason, ...(remedies?.length ? { remedies: remedies.map(({ steps: _steps, ...r }) => r) } : {}) };
   }
   if (spec.tested) {
     const tested = parseRange(spec.tested);

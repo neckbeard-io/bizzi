@@ -128,3 +128,20 @@ test('loadRecipes: overrides win, names must match files, tool references are ch
   // Missing override dirs are fine.
   assert.ok(loadRecipes([BUILTIN_RECIPES_DIR, join(dir, 'does-not-exist')]).get('codex'));
 });
+
+test('schema checks remedies that run steps', () => {
+  const support = (remedy: Record<string, unknown>) => (r: Record<string, any>) => {
+    r.support = { versions: '>=2.0.0', unsupported: { reason: 'old', remedies: [remedy] } };
+  };
+  const step = { description: 'Upgrade', argv: ['fake', 'upgrade'] };
+  assert.deepEqual(issuesFor(support({ kind: 'upgrade', id: 'up', title: 'Upgrade', steps: [step] })), []);
+  assert.match(issuesFor(support({ kind: 'upgrade', title: 'Upgrade', steps: [step] })).join('\n'), /remedy with steps needs an id/);
+  assert.match(issuesFor(support({ kind: 'migrate', id: 'm', title: 'Switch', steps: [step] })).join('\n'), /only upgrade remedies run steps/);
+  assert.match(issuesFor(support({ kind: 'upgrade', id: 'up', title: 'Upgrade', steps: [{ description: 'x' }] })).join('\n'), /steps\[0\]: exactly one of run\/argv/);
+  assert.match(
+    issuesFor((r) => {
+      r.support = { versions: '>=2.0.0', unsupported: { reason: 'old', remedies: [{ kind: 'upgrade', id: 'up', title: 'A' }, { kind: 'upgrade', id: 'up', title: 'B' }] } };
+    }).join('\n'),
+    /duplicate remedy id "up"/,
+  );
+});

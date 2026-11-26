@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { currentPlatform, parseRecipe, planInstall, RecipeSet, runPlan, type InstallProgress } from '../src/index.ts';
+import { currentPlatform, parseRecipe, planInstall, RecipeSet, runPlan, type InstallPlan, type InstallProgress } from '../src/index.ts';
 import { isolatedEnv, recipesWithFake, tempDir } from './helpers.ts';
 
 const platform = currentPlatform();
@@ -175,4 +175,47 @@ test('a missing working directory fails the step with a clear error', async () =
   const res = await runPlan(plan, { env });
   assert.equal(res.ok, false);
   assert.match(res.error ?? '', /working directory .*\/nope does not exist/);
+});
+
+test('a verify step with expectVersion fails while the version is outside the range', async () => {
+  const { home, env } = setup();
+  const plan = (output: string): InstallPlan => ({
+    agent: 'opencode',
+    recipe: 'opencode',
+    action: 'update',
+    method: 'script',
+    methodLabel: 'Install script',
+    platform,
+    platformKey: 'test',
+    remedy: 'major',
+    targetDir: home,
+    extraPath: [],
+    requiresSudo: false,
+    warnings: [],
+    steps: [
+      {
+        id: 'opencode.verify',
+        recipe: 'opencode',
+        phase: 'verify',
+        description: 'Verify OpenCode runs',
+        command: 'echo',
+        argv: ['echo', output],
+        env: {},
+        requiresSudo: false,
+        timeoutMs: 10_000,
+        allowFailure: false,
+        expectVersion: { regex: 'v?(\\d+\\.\\d+\\.\\d+)', range: '>=2.0.0', displayName: 'OpenCode' },
+      },
+    ],
+  });
+  const old = await runPlan(plan('1.19.6'), { env, cwd: home });
+  assert.equal(old.ok, false);
+  assert.match(old.error ?? '', /OpenCode is still 1\.19\.6; bizzi needs >=2\.0\.0/);
+  assert.equal(old.steps[0]?.ok, false);
+  assert.equal(old.steps[0]?.exitCode, 0);
+
+  const unreadable = await runPlan(plan('hello'), { env, cwd: home });
+  assert.match(unreadable.error ?? '', /could not read the OpenCode version/);
+
+  assert.equal((await runPlan(plan('opencode v2.0.25'), { env, cwd: home })).ok, true);
 });

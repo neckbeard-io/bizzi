@@ -183,7 +183,10 @@ export const AGENTS: AgentListing[] = [
     billing: 'budgetless',
     support: 'unsupported',
     supportReason: 'OpenCode v1 is not supported; bizzi drives v2 only.',
-    remedies: [{ kind: 'upgrade', title: 'Upgrade to v2', method: 'script', command: 'opencode upgrade --major' }],
+    remedies: [
+      { kind: 'upgrade', id: 'major', title: 'Upgrade to v2', command: 'opencode upgrade --major' },
+      { kind: 'upgrade', id: 'v2-installer', title: 'Upgrade to v2 with the v2 installer', method: 'script', command: 'curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path' },
+    ],
     updatePolicy: 'notify',
     restartPolicy: 'ask',
     capabilities: OPENCODE_CAPS,

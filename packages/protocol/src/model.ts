@@ -94,6 +94,11 @@ export interface AgentRemedy {
   /** upgrade: move to a supported version · migrate: switch to the preferred install method · restart-service: restart a stale shared server. */
   kind: 'upgrade' | 'migrate' | 'restart-service';
   title: string;
+  /**
+   * Recipe remedy id. Pass it as `remedy` to `agent.plan` / `agent.install` to run the remedy's own
+   * steps (e.g. a major-version upgrade) instead of the method's plain update.
+   */
+  id?: string;
   /** Target method for 'migrate' / 'upgrade'. */
   method?: string;
   /** Shell command shown to the user, when there's a single one. */

@@ -245,12 +245,13 @@ export interface Methods {
   // ---- provisioning (docs/spec.md §7)
   /** Preview the steps for installing / updating / uninstalling an agent. */
   'agent.plan': {
-    params: MachineTarget & { agent: AgentKind; action: InstallAction; method?: string; version?: string };
+    /** `remedy`: an `AgentRemedy.id` from the listing; plans that remedy's steps (spec §7). */
+    params: MachineTarget & { agent: AgentKind; action: InstallAction; method?: string; version?: string; remedy?: string };
     result: { plan: InstallPlan };
   };
   /** Run a plan; progress streams as `install.progress` (global channel) with this jobId. */
   'agent.install': {
-    params: MachineTarget & { agent: AgentKind; action: InstallAction; method?: string; version?: string; dryRun?: boolean };
+    params: MachineTarget & { agent: AgentKind; action: InstallAction; method?: string; version?: string; remedy?: string; dryRun?: boolean };
     result: { jobId: string; plan: InstallPlan };
   };
   /** Start a login flow as a terminal-mode session; it emits `login.prompt` / `login.completed`. */

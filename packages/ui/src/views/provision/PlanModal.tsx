@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { JobAction } from '@bizzi/client';
-import type { AgentKind, InstallPlan } from '@bizzi/protocol';
+import type { AgentKind, AgentRemedy, InstallPlan } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
@@ -12,10 +12,20 @@ import { JobProgress } from './JobProgress.tsx';
 /**
  * Preview what an install / update / uninstall will run (agent.plan), then run it (agent.install) and
  * follow its install.progress events. `migrate` previews with `agent.migrate` dry-run and runs `agent.migrate`
- * (spec §7: switch to the preferred install method). Closing the dialog never stops the job.
+ * (spec §7: switch to the preferred install method). A `remedy` with an id plans and runs that remedy's
+ * own steps (e.g. a major-version upgrade). Closing the dialog never stops the job.
  */
-export function PlanModal(props: { machineId: string | null; machineName: string; agent: AgentKind; action: JobAction; method?: string; onClose: () => void }): ReactNode {
+export function PlanModal(props: {
+  machineId: string | null;
+  machineName: string;
+  agent: AgentKind;
+  action: JobAction;
+  method?: string;
+  remedy?: AgentRemedy;
+  onClose: () => void;
+}): ReactNode {
   const { machineId, agent, action, onClose, method } = props;
+  const remedyId = props.remedy?.id;
   const store = useStore();
   const [plan, setPlan] = useState<InstallPlan | null>(null);
   const [planError, setPlanError] = useState<unknown>(null);
@@ -27,7 +37,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
     const preview =
       action === 'migrate'
         ? store.migrateAgent({ machineId, agent, dryRun: true, ...(method ? { toMethod: method } : {}) }).then((r) => r.plan)
-        : store.planAgent({ machineId, agent, action, ...(method ? { method } : {}) });
+        : store.planAgent({ machineId, agent, action, ...(method ? { method } : {}), ...(remedyId ? { remedy: remedyId } : {}) });
     preview.then(
       (p) => live && setPlan(p),
       (e: unknown) => live && setPlanError(e),
@@ -35,7 +45,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
     return () => {
       live = false;
     };
-  }, [store, machineId, agent, action, method]);
+  }, [store, machineId, agent, action, method, remedyId]);
 
   const run = useAction(async () => {
     if (action === 'migrate') {
@@ -44,7 +54,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
       setPlan(p);
       return;
     }
-    const j = await store.installAgent({ machineId, agent, action, ...(plan?.method ? { method: plan.method } : {}) });
+    const j = await store.installAgent({ machineId, agent, action, ...(plan?.method ? { method: plan.method } : {}), ...(remedyId ? { remedy: remedyId } : {}) });
     setJobId(j.jobId);
     if (j.plan) setPlan(j.plan);
   });
@@ -59,7 +69,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
       wide
       title={
         <span>
-          {verb} <span className="capitalize">{agent}</span> <span className="font-normal text-muted">on {props.machineName}</span>
+          {remedyId && props.remedy ? props.remedy.title : verb} <span className="capitalize">{agent}</span> <span className="font-normal text-muted">on {props.machineName}</span>
         </span>
       }
       onClose={onClose}
@@ -74,7 +84,7 @@ export function PlanModal(props: { machineId: string | null; machineName: string
               Cancel
             </Button>
             <Button variant={action === 'uninstall' ? 'danger' : 'primary'} icon={action === 'uninstall' ? 'trash' : 'download'} disabled={!plan} busy={run.busy} onClick={() => void run.run()}>
-              {action === 'migrate' ? `Switch to ${plan?.method ?? method ?? 'the preferred method'}` : verb}
+              {action === 'migrate' ? `Switch to ${plan?.method ?? method ?? 'the preferred method'}` : remedyId && props.remedy ? props.remedy.title : verb}
             </Button>
           </>
         )

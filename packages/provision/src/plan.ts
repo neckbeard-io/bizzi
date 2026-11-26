@@ -5,7 +5,7 @@ import { augmentedPath, findExecutable, homeDir, toolsDir as defaultToolsDir } f
 import { currentPlatform, methodSupports, platformKey, resolveRecipePlatform } from './platform.ts';
 import { defaultRecipes, type RecipeSet } from './recipes.ts';
 import { brewBinFor, render, renderPath, shellQuote, TemplateError, type TemplateVars } from './template.ts';
-import type { InstallAction, InstallPlan, MethodSpec, Platform, PlannedStep, Recipe, StepSpec } from './types.ts';
+import type { InstallAction, InstallPlan, MethodSpec, Platform, PlannedStep, Recipe, RemedySpec, StepSpec } from './types.ts';
 
 export interface PlanOptions {
   /** Recipe method id; default: the first method for this platform whose requirements are met. */
@@ -28,6 +28,11 @@ export interface PlanOptions {
    * Homebrew formula / cask and npm prefix the binary actually came from (`brewFormula`, …).
    */
   installedPath?: string;
+  /**
+   * Id of a `support.unsupported.remedies` entry. Its `steps` replace the method's steps (its
+   * `method`, when set, replaces `method`), and the verify step requires a supported version.
+   */
+  remedy?: string;
 }
 
 const VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+_-]{0,63}$/;
@@ -62,18 +67,20 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
   const tools = defaultToolsDir({ env, home, ...(opts.toolsDir ? { toolsDir: opts.toolsDir } : {}) });
   const hasCommand = opts.hasCommand ?? defaultHasCommand(env, home, tools, platform);
 
-  const candidates = recipe.methods.filter((m) => methodSupports(m.platforms, plat.key) && stepsFor(m, action));
+  const remedy = opts.remedy !== undefined ? findRemedy(recipe, opts.remedy, action) : undefined;
+  const candidates = recipe.methods.filter((m) => methodSupports(m.platforms, plat.key) && (remedy || stepsFor(m, action)));
   const warnings: string[] = [];
   let method: MethodSpec | undefined;
-  if (opts.method) {
-    method = candidates.find((m) => m.id === opts.method);
+  const wanted = remedy?.method ?? opts.method;
+  if (wanted) {
+    method = candidates.find((m) => m.id === wanted);
     if (!method) {
-      const exists = recipe.methods.some((m) => m.id === opts.method);
+      const exists = recipe.methods.some((m) => m.id === wanted);
       throw new BizziError(
         exists ? 'unsupported' : 'not_found',
         exists
-          ? `method "${opts.method}" of ${recipe.displayName} does not support ${action} on ${key}`
-          : `${recipe.displayName} has no method "${opts.method}"`,
+          ? `method "${wanted}" of ${recipe.displayName} does not support ${action} on ${key}`
+          : `${recipe.displayName} has no method "${wanted}"`,
       );
     }
   } else {
@@ -99,7 +106,7 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
     libc: platform.libc ?? '',
     platform: plat.key,
     brewBin: brewBinFor(platform.os, platform.arch),
-    ...(opts.installedPath && action !== 'install' ? installFacts(opts.installedPath) : {}),
+    ...(opts.installedPath && action !== 'install' && (!remedy?.method || remedy.method === opts.method) ? installFacts(opts.installedPath) : {}),
     ...(plat.spec.vars ?? {}),
   };
 
@@ -124,14 +131,16 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
     }
   }
 
-  const specs = (stepsFor(method, action) ?? []).filter((s) => matchesWhen(s, version));
-  specs.forEach((s, i) => steps.push(renderStep(s, vars, recipe, `${recipe.name}.${method.id}.${action}.${i + 1}`)));
+  const specs = (remedy ? (remedy.steps ?? []) : (stepsFor(method, action) ?? [])).filter((s) => matchesWhen(s, version));
+  const stepPrefix = remedy ? `${recipe.name}.remedy.${remedy.id}` : `${recipe.name}.${method.id}.${action}`;
+  specs.forEach((s, i) => steps.push(renderStep(s, vars, recipe, `${stepPrefix}.${i + 1}`)));
 
   const binDir = renderOrThrow(() => renderPath(method.binDir ?? method.targetDir, vars), recipe);
   if (action !== 'uninstall') extraPath.unshift(binDir);
 
-  if (action !== 'uninstall' && opts.verify !== false) {
+  if (action !== 'uninstall' && (opts.verify !== false || remedy)) {
     const argv = [recipe.detect.binaries[0] as string, ...recipe.detect.version.args];
+    const range = remedy ? recipe.support?.versions : undefined;
     steps.push({
       id: `${recipe.name}.verify`,
       recipe: recipe.name,
@@ -143,6 +152,7 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
       requiresSudo: false,
       timeoutMs: VERIFY_TIMEOUT,
       allowFailure: false,
+      ...(range ? { expectVersion: { regex: recipe.detect.version.regex, range, displayName: recipe.displayName } } : {}),
     });
   }
 
@@ -155,12 +165,22 @@ function planRecipe(name: string, platform: Platform, opts: PlanOptions, seen: S
     platform,
     platformKey: plat.key,
     ...(version ? { version } : {}),
+    ...(remedy ? { remedy: opts.remedy as string } : {}),
     targetDir: renderOrThrow(() => renderPath(method.targetDir, vars), recipe),
     extraPath: [...new Set(extraPath)],
     requiresSudo: steps.some((s) => s.requiresSudo),
     steps,
     warnings,
   };
+}
+
+/** A remedy that runs its own steps; only `upgrade` remedies with steps can be planned. */
+function findRemedy(recipe: Recipe, id: string, action: InstallAction): RemedySpec & { id: string } {
+  const r = recipe.support?.unsupported?.remedies?.find((x) => x.id === id);
+  if (!r) throw new BizziError('not_found', `${recipe.displayName} has no remedy "${id}"`);
+  if (r.kind !== 'upgrade' || !r.steps?.length) throw new BizziError('unsupported', `${recipe.displayName} remedy "${id}" has no steps to run`);
+  if (action === 'uninstall') throw new BizziError('bad_request', `remedy "${id}" can't be used to uninstall`);
+  return r as RemedySpec & { id: string };
 }
 
 function stepsFor(m: MethodSpec, action: InstallAction): StepSpec[] | undefined {

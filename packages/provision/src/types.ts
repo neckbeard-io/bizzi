@@ -201,8 +201,12 @@ export interface PlatformSpec {
   notes?: string[];
 }
 
-/** A confirmable fix shown with a probe (protocol `AgentRemedy`). */
-export type RemedySpec = AgentRemedy;
+/**
+ * A confirmable fix shown with a probe (protocol `AgentRemedy`). An `upgrade` remedy with `steps`
+ * runs those instead of its method's update steps; the plan then fails unless the installed
+ * version ends up inside `support.versions`. `steps` never cross the wire.
+ */
+export type RemedySpec = AgentRemedy & { steps?: StepSpec[] };
 
 /** Which installed versions bizzi supports (spec §7 "Supported versions"). */
 export interface SupportSpec {
@@ -261,6 +265,11 @@ export interface PlannedStep {
   requiresSudo: boolean;
   timeoutMs: number;
   allowFailure: boolean;
+  /**
+   * Verify steps only: read the version from the output with `regex` (first group) and fail the
+   * step unless it satisfies `range`.
+   */
+  expectVersion?: { regex: string; range: string; displayName: string };
 }
 
 export interface InstallPlan {
@@ -273,6 +282,8 @@ export interface InstallPlan {
   platform: Platform;
   platformKey: string;
   version?: string;
+  /** Id of the recipe remedy whose steps this plan runs. */
+  remedy?: string;
   targetDir: string;
   /** Directories prepended to PATH while the plan runs (e.g. a freshly installed managed Node). */
   extraPath: string[];

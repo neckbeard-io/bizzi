@@ -49,14 +49,23 @@ support:
   tested: ">=2.0.0 <2.1.0"
   unsupported:
     reason: OpenCode v1 is not supported; bizzi drives the v2 server API only (terminal mode still works)
+    # Each remedy runs its own steps; a plain update keeps v1 on the latest 1.x.
     remedies:
       - kind: upgrade
+        id: major
         title: Upgrade to v2
         command: opencode upgrade --major
+        steps:
+          - description: Upgrade OpenCode to the next major version
+            argv: [opencode, upgrade, --major]
       - kind: upgrade
+        id: v2-installer
         title: Upgrade to v2 with the v2 installer
         method: script
         command: curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
+        steps:
+          - description: Run the OpenCode 2 installer (latest)
+            run: curl -fsSL https://opencode.ai/v2/install | bash -s -- --no-modify-path
   notes: [The structured adapter was tested with 2.0.25.]
 
 methods:

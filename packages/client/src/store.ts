@@ -1152,14 +1152,14 @@ export class BizziStore {
 
   // ---------------------------------------------------------------- provisioning
 
-  async planAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string }): Promise<InstallPlan> {
+  async planAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string; remedy?: string }): Promise<InstallPlan> {
     const { machineId, ...rest } = params;
     const { plan } = await this.client.request('agent.plan', { ...this.target(machineId), ...rest });
     return plan;
   }
 
   /** Start an install/update/uninstall; progress lands in `jobs[jobId]`. */
-  async installAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string }): Promise<InstallJob> {
+  async installAgent(params: { machineId?: string | null; agent: AgentKind; action: InstallAction; method?: string; version?: string; remedy?: string }): Promise<InstallJob> {
     const { machineId, ...rest } = params;
     const t = this.target(machineId);
     const { jobId, plan } = await this.client.request('agent.install', { ...t, ...rest });
