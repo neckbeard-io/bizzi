@@ -25,13 +25,13 @@ import { contextMenuHandler, menuButtonHandler } from '../../app/contextMenu.ts'
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { isMac, startDefaultSession } from '../../app/hotkeys.ts';
 import { reopenSessionFlow } from '../../app/sessionActions.ts';
-import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
+import { navigate, useAge, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { WorkspaceTile } from '../../components/labels.tsx';
 import { PresenceDot } from '../../components/MachineSwitcher.tsx';
 import { AgentMark, MarkCount, MarkDot, NeedsYouBadge, StateSymbol, agentMarkWidth } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
-import { formatRelative, keepAwakeSummary } from '../../lib/format.ts';
+import { formatAgeShort, formatRelative, keepAwakeSummary } from '../../lib/format.ts';
 import { HOTKEYS, hotkeyLabel } from '../../lib/hotkeys.ts';
 import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
@@ -47,6 +47,13 @@ type Variant = 'desktop' | 'phone';
 const COLLAPSED_KEY = 'bizzi.sidebar.collapsed';
 const FOLDED_KEY = 'bizzi.sidebar.folded';
 const HELPERS_FOLDED_KEY = 'bizzi.sidebar.helpersFolded';
+
+/**
+ * Row highlights stay neutral (a lighter panel and a thin foreground edge), so color in the sidebar only
+ * ever means identity (workspace tiles, machine stripes, agent marks) or a warning, never "selected".
+ */
+const ROW_SELECTED = 'bg-row-selected text-fg shadow-[inset_2px_0_0_var(--foreground)]';
+const ROW_HOVER = 'hover:bg-row-hover';
 
 /**
  * A file tree (spec §11.1): machines, their workspaces, and under each workspace its open sessions, a folded
@@ -145,14 +152,14 @@ function MachineSection(props: {
     <section className={cx('relative', !summary.online && 'opacity-60')}>
       {m.color ? (
         // Identity stripe (spec §11.1): the machine's color down the left edge of its whole group.
-        <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-0 z-10 w-0.5 rounded-full" style={{ backgroundColor: labelVar(m.color) }} />
+        <span aria-hidden="true" className="pointer-events-none absolute inset-y-1 left-0 z-10 w-[3px] rounded-full" style={{ backgroundColor: labelVar(m.color) }} />
       ) : null}
       <div
         onContextMenu={contextMenuHandler(() => machineMenu(store, m, { collapsed, onToggle: () => props.onToggle(m.id) }), m.name)}
         className={cx(
           'group relative flex items-center rounded-md pr-1.5',
           phone ? 'min-h-11' : 'h-8',
-          props.active ? (phone ? 'bg-panel-2' : 'bg-sidebar-accent text-sidebar-accent-foreground') : phone ? 'active:bg-panel-2' : 'hover:bg-sidebar-accent/70',
+          props.active ? (phone ? 'bg-panel-2' : ROW_SELECTED) : phone ? 'active:bg-panel-2' : ROW_HOVER,
         )}
       >
         <button
@@ -189,7 +196,7 @@ function MachineSection(props: {
         </a>
         {phone ? null : (
           // Hover actions overlay the totals, so they never change the row's width.
-          <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 items-center gap-0.5 rounded-md bg-sidebar-accent pl-1 group-focus-within:flex group-hover:flex">
+          <span className={cx('absolute top-1/2 right-1 hidden -translate-y-1/2 items-center gap-0.5 rounded-md pl-1 group-focus-within:flex group-hover:flex', props.active ? 'bg-row-selected' : 'bg-row-hover')}>
             <button
               type="button"
               className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40"
@@ -331,7 +338,7 @@ function WorkspaceNode(props: {
         className={cx(
           'group relative flex items-center rounded-md pr-2',
           phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]',
-          highlighted ? (phone ? 'bg-panel-2' : 'bg-sidebar-accent') : phone ? 'active:bg-panel-2' : 'hover:bg-sidebar-accent/70',
+          highlighted ? (phone ? 'bg-panel-2' : ROW_SELECTED) : phone ? 'active:bg-panel-2' : ROW_HOVER,
           here ? 'font-medium text-fg' : 'text-fg/90',
         )}
       >
@@ -370,7 +377,7 @@ function WorkspaceNode(props: {
         </a>
         {phone ? null : (
           // Overlays the marks on hover, so it never changes the row's width.
-          <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 items-center rounded-md bg-sidebar-accent pl-1 group-focus-within:flex group-hover:flex">
+          <span className={cx('absolute top-1/2 right-1 hidden -translate-y-1/2 items-center rounded-md pl-1 group-focus-within:flex group-hover:flex', highlighted ? 'bg-row-selected' : 'bg-row-hover')}>
             <button
               type="button"
               className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40"
@@ -388,7 +395,7 @@ function WorkspaceNode(props: {
         <a
           data-fit-ignore
           href={routeHref({ name: 'session', sessionId: row.urgent.sessionId, tab: 'chat' })}
-          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-10 text-xs text-muted hover:text-fg', phone ? 'min-h-11 hover:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
+          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-10 text-xs text-muted hover:text-fg', phone ? 'min-h-11 hover:bg-panel-2' : `h-6 ${ROW_HOVER}`)}
           title={`${AGENT_LABEL[row.urgent.agent]}: ${row.urgent.text}`}
         >
           <StateSymbol state={row.urgent.state} size={12} />
@@ -420,7 +427,7 @@ function WorkspaceNode(props: {
                   <a
                     key={`ended:${item.parentId}`}
                     href={routeHref({ name: 'session', sessionId: item.parentId, tab: 'chat' })}
-                    className={cx('flex items-center rounded-md pr-2 text-[11px] text-muted hover:text-fg', phone ? 'min-h-9 active:bg-panel-2' : 'h-5 hover:bg-sidebar-accent/70')}
+                    className={cx('flex items-center rounded-md pr-2 text-[11px] text-muted hover:text-fg', phone ? 'min-h-9 active:bg-panel-2' : `h-5 ${ROW_HOVER}`)}
                     style={{ paddingLeft: nestPadding(item.indent) + CARET_SLOT + (phone ? 24 : 20) }}
                     title="Helpers of this session that have ended: open it to see them"
                   >
@@ -455,7 +462,7 @@ function WorkspaceNode(props: {
             <button
               type="button"
               data-fit-ignore
-              className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
+              className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : `h-6 ${ROW_HOVER}`)}
               title={`Worktrees with no sessions: ${idleWorktrees.map((t) => t.branch ?? t.name).join(', ')}. Click to remove them.`}
               onClick={menuButtonHandler(
                 () =>
@@ -530,7 +537,7 @@ function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expand
       }, l.title)}
       className={cx(
         'flex items-start rounded-md',
-        props.active ? (phone ? 'bg-panel-2 font-medium text-fg' : 'bg-sidebar-accent font-medium text-sidebar-accent-foreground') : phone ? 'text-fg/85 active:bg-panel-2' : 'text-fg/85 hover:bg-sidebar-accent/70',
+        props.active ? (phone ? 'bg-panel-2 font-medium text-fg' : `${ROW_SELECTED} font-medium`) : phone ? 'text-fg/85 active:bg-panel-2' : `text-fg/85 ${ROW_HOVER}`,
       )}
       style={{ paddingLeft: nestPadding(props.indent) }}
     >
@@ -567,6 +574,7 @@ function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expand
               {helpers}
             </span>
           ) : null}
+          <ActivityAge updatedAt={l.updatedAt} working={l.state === 'working'} />
           {ctx.known ? <ContextBar view={ctx} /> : null}
         </span>
         {reason || l.state === 'waiting' ? (
@@ -595,7 +603,7 @@ function EndedGroup(props: { sessions: SessionInfo[]; phone: boolean; online: bo
       <button
         type="button"
         onClick={() => setShown(!open)}
-        className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
+        className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : `h-6 ${ROW_HOVER}`)}
         aria-expanded={open}
         title={open ? 'Hide ended sessions' : 'Show ended sessions: read them, or reopen one to take messages again'}
       >
@@ -612,7 +620,7 @@ function EndedGroup(props: { sessions: SessionInfo[]; phone: boolean; online: bo
                 onContextMenu={contextMenuHandler(() => sessionMenu(store, x, props.online), title)}
                 className={cx(
                   'group relative flex items-center rounded-md',
-                  active ? (phone ? 'bg-panel-2 text-fg' : 'bg-sidebar-accent text-sidebar-accent-foreground') : phone ? 'text-muted active:bg-panel-2' : 'text-muted hover:bg-sidebar-accent/70 hover:text-fg',
+                  active ? (phone ? 'bg-panel-2 text-fg' : ROW_SELECTED) : phone ? 'text-muted active:bg-panel-2' : `text-muted ${ROW_HOVER} hover:text-fg`,
                 )}
               >
                 <a
@@ -629,7 +637,7 @@ function EndedGroup(props: { sessions: SessionInfo[]; phone: boolean; online: bo
                   type="button"
                   className={cx(
                     'flex shrink-0 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40',
-                    phone ? 'h-11 w-9' : 'absolute top-1/2 right-1 hidden h-6 w-6 -translate-y-1/2 bg-sidebar-accent group-focus-within:flex group-hover:flex',
+                    phone ? 'h-11 w-9' : cx('absolute top-1/2 right-1 hidden h-6 w-6 -translate-y-1/2 group-focus-within:flex group-hover:flex', active ? 'bg-row-selected' : 'bg-row-hover'),
                   )}
                   title={`Reopen ${title}: it takes messages again`}
                   aria-label={`Reopen ${title}`}
@@ -647,6 +655,28 @@ function EndedGroup(props: { sessions: SessionInfo[]; phone: boolean; online: bo
 }
 
 /**
+ * How long since the session last did something ("now", "4m", "2h", "3d"), muted; "now" while a turn runs.
+ * Ticks on the shared clock, so a row re-renders only when its label changes.
+ */
+function ActivityAge(props: { updatedAt: string; working: boolean }): ReactNode {
+  const age = useAge(props.working ? undefined : props.updatedAt, formatAgeShort);
+  const label = props.working ? 'now' : age;
+  if (!label) return null;
+  return (
+    <span className="w-6 shrink-0 text-right text-[10px] font-normal text-muted tabular-nums" title={props.working ? 'Working now' : `Last activity ${formatRelative(props.updatedAt)}`}>
+      {label}
+    </span>
+  );
+}
+
+type ContextTone = Extract<ContextView, { known: true }>['tone'];
+
+// Context meters are a quiet grey until they matter, then vivid amber or red (with a bolder number), so a
+// colored bar always means "look at this".
+const CONTEXT_FILL: Record<ContextTone, string> = { neutral: 'bg-muted/60', warn: 'bg-[#ffb000]', err: 'bg-[#ff2d3d]' };
+const CONTEXT_TEXT: Record<ContextTone, string> = { neutral: 'font-normal text-muted', warn: 'font-semibold text-warn', err: 'font-semibold text-err' };
+
+/**
  * How full the session's context window is, read exactly like the session header's bar (`contextView`):
  * the fill is the share of the usable window, the number the share of the whole window.
  */
@@ -656,9 +686,9 @@ function ContextBar(props: { view: Extract<ContextView, { known: true }> }): Rea
   return (
     <span className="flex shrink-0 items-center gap-1" role="meter" aria-label={`Context ${v.label}`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
       <span className="relative h-1 w-8 overflow-hidden rounded-full bg-sidebar-border">
-        <span className={cx('absolute inset-y-0 left-0 rounded-full', v.tone === 'err' ? 'bg-err' : v.tone === 'warn' ? 'bg-warn' : 'bg-accent')} style={{ width: `${Math.max(Math.round(v.fill * 100), 4)}%` }} />
+        <span className={cx('absolute inset-y-0 left-0 rounded-full', CONTEXT_FILL[v.tone])} style={{ width: `${Math.max(Math.round(v.fill * 100), 4)}%` }} />
       </span>
-      <span className={cx('w-7 text-right text-[10px] font-normal tabular-nums', v.tone === 'neutral' ? 'text-muted' : v.tone === 'warn' ? 'text-warn' : 'text-err')}>{pct}%</span>
+      <span className={cx('w-7 text-right text-[10px] tabular-nums', CONTEXT_TEXT[v.tone])}>{pct}%</span>
     </span>
   );
 }

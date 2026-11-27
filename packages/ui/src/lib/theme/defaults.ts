@@ -106,27 +106,30 @@ export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
  * Identity colors (spec §11.1 "Identity color"), by the background's polarity. resolveTheme nudges them
  * toward the foreground until each clears LABEL_MIN_CONTRAST on the theme's sidebar, cards and page, so a
  * light theme gets darker inks and a dark theme lighter ones. Keep in sync with `--label-*` in index.css.
+ *
+ * Saturated on purpose (neon on dark) and spread in lightness as well as hue, so the eight stay apart under
+ * simulated deuteranopia and protanopia too: blue/purple and teal/pink differ in lightness, not only hue.
  */
 export const DEFAULT_LABELS: Record<ThemeMode, Record<LabelColor, string>> = {
   light: {
-    red: '#dc2626',
-    orange: '#c2410c',
-    yellow: '#a16207',
-    green: '#15803d',
-    teal: '#0f766e',
-    blue: '#2563eb',
-    purple: '#9333ea',
-    pink: '#db2777',
+    red: '#ff1f3d',
+    orange: '#b53b00',
+    yellow: '#a68a00',
+    green: '#00994d',
+    teal: '#00809c',
+    blue: '#0047d6',
+    purple: '#9e00ff',
+    pink: '#e0008a',
   },
   dark: {
-    red: '#f87171',
-    orange: '#fb923c',
-    yellow: '#facc15',
-    green: '#4ade80',
-    teal: '#2dd4bf',
-    blue: '#60a5fa',
-    purple: '#c084fc',
-    pink: '#f472b6',
+    red: '#ff2c4f',
+    orange: '#ff8b00',
+    yellow: '#ffef0c',
+    green: '#00ff7f',
+    teal: '#1afcff',
+    blue: '#5faaff',
+    purple: '#9659ff',
+    pink: '#ff00b1',
   },
 };
 

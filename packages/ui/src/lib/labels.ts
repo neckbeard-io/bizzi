@@ -28,6 +28,29 @@ export function workspaceColor(w: WorkspaceInfo, workspaces: Record<string, Work
   return undefined;
 }
 
+/**
+ * A stable palette color for something that has none set, from its id (FNV-1a), so neighbouring
+ * workspaces usually differ without anyone picking colors. Shown only; never saved.
+ */
+export function autoLabelColor(id: string): LabelColor {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < id.length; i++) {
+    h ^= id.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return LABEL_COLORS[(h >>> 0) % LABEL_COLORS.length]!;
+}
+
+/**
+ * The color a workspace's tile shows: its own or its repo's (`workspaceColor`), else an automatic one from
+ * the repo's id (a worktree matches its repo).
+ */
+export function workspaceTileColor(w: WorkspaceInfo, workspaces: Record<string, WorkspaceInfo> | null | undefined): LabelColor {
+  const set = workspaceColor(w, workspaces);
+  if (set) return set;
+  return autoLabelColor(w.kind === 'worktree' && w.parentWorkspaceId ? w.parentWorkspaceId : w.id);
+}
+
 /** The workspace tile's text: its icon, else the first character of its name (uppercased). */
 export function workspaceMonogram(w: Pick<WorkspaceInfo, 'name' | 'icon'>): string {
   if (w.icon) return w.icon;
