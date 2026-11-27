@@ -1139,6 +1139,11 @@ export class BizziStore {
     await this.client.request('session.stop', { sessionId });
   }
 
+  /** A fresh conversation in the same session (`/clear`): the agent forgets everything so far. */
+  async clearSession(sessionId: string): Promise<void> {
+    await this.client.request('session.clear', { sessionId });
+  }
+
   /** Restart the agent process on the installed version at the next safe point (updates.md §5). */
   async restartSession(sessionId: string): Promise<void> {
     await this.client.request('session.restart', { sessionId });

@@ -152,6 +152,11 @@ export interface CompactItem extends ItemBase {
   after?: number;
 }
 
+/** `/clear`: the agent starts a fresh conversation from here (`context.cleared`). */
+export interface ClearedItem extends ItemBase {
+  kind: 'cleared';
+}
+
 export interface RawItem extends ItemBase {
   kind: 'raw';
   agent: AgentKind;
@@ -173,6 +178,7 @@ export type TimelineItem =
   | SubagentItem
   | RestartItem
   | CompactItem
+  | ClearedItem
   | RawItem;
 
 export type TimelineItemKind = TimelineItem['kind'];
@@ -610,6 +616,12 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       if (ev.data.after !== undefined) item.after = ev.data.after;
       d.put(item);
       if (tl.context && ev.data.after !== undefined) tl.context = { ...tl.context, used: ev.data.after };
+      return;
+    }
+    case 'context.cleared': {
+      d.put({ ...base(d, `cleared:${ev.seq}`, ev), kind: 'cleared' });
+      // The new conversation reports its own context once it starts.
+      tl.context = null;
       return;
     }
     case 'account.usage':

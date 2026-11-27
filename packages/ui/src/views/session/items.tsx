@@ -25,9 +25,11 @@ import { useAction } from '../../app/hooks.ts';
 import { DiffBlock } from '../../components/DiffView.tsx';
 import { Icon } from '../../components/icons.tsx';
 import type { IconName } from '../../components/icons.tsx';
-import { Badge, Button, Disclosure, ErrorText, Input, Spinner, Textarea, cx } from '../../components/ui.tsx';
+import { Badge, Button, Disclosure, ErrorText, Input, Modal, Spinner, Textarea, cx } from '../../components/ui.tsx';
+import { lineCount, shouldCollapse } from '../../lib/attachments.ts';
 import { diffStats, parseUnifiedDiff } from '../../lib/diff.ts';
 import { formatDuration, formatTokens, prettyJson, tail, usageSummary } from '../../lib/format.ts';
+import { dataUrl } from '../../lib/images.ts';
 import { EMPTY_DRAFT, answerText, buildAnswers, isOptional, isQuickPick, missingAnswers, setText, toggleOption } from '../../lib/questions.ts';
 import type { QuestionDraft } from '../../lib/questions.ts';
 import { Markdown } from './Markdown.tsx';
@@ -72,6 +74,14 @@ function ItemView(props: { sessionId: string; item: TimelineItem }): ReactNode {
       return <RestartRow item={item} />;
     case 'compact':
       return <CompactRow item={item} />;
+    case 'cleared':
+      return (
+        <div className="flex items-center gap-3 text-xs text-muted" role="separator">
+          <span className="h-px flex-1 bg-border" />
+          <span>context cleared · the agent starts fresh from here</span>
+          <span className="h-px flex-1 bg-border" />
+        </div>
+      );
   }
 }
 
@@ -112,7 +122,7 @@ function CompactRow(props: { item: CompactItem }): ReactNode {
 function UserBubble(props: { children: ReactNode }): ReactNode {
   return (
     <div className="flex justify-end">
-      <div className="max-w-[85%] rounded-2xl rounded-br-md bg-accent-soft px-3.5 py-2 whitespace-pre-wrap text-fg">{props.children}</div>
+      <div className="flex max-w-[85%] flex-col gap-2 rounded-2xl rounded-br-md bg-accent-soft px-3.5 py-2 break-words whitespace-pre-wrap text-fg">{props.children}</div>
     </div>
   );
 }
@@ -120,16 +130,50 @@ function UserBubble(props: { children: ReactNode }): ReactNode {
 function inputParts(input: readonly InputBlock[]): ReactNode[] {
   return input.map((b, i) =>
     b.type === 'text' ? (
-      <span key={i}>{b.text}</span>
+      <UserText key={i} text={b.text} />
     ) : b.type === 'file' ? (
-      <span key={i} className="font-mono text-xs">
-        @{b.path}{' '}
-      </span>
+      <div key={i} className="font-mono text-xs">
+        @{b.path}
+      </div>
     ) : (
-      <span key={i} className="text-xs text-muted">
-        [image]{' '}
-      </span>
+      <UserImage key={i} mediaType={b.mediaType} dataBase64={b.dataBase64} />
     ),
+  );
+}
+
+/** A user text block; long ones (usually pastes) start collapsed to a few lines. */
+function UserText(props: { text: string }): ReactNode {
+  const { text } = props;
+  const [open, setOpen] = useState(false);
+  if (!shouldCollapse(text)) return <div>{text}</div>;
+  const lines = lineCount(text);
+  return (
+    <div>
+      <div className={cx('relative', !open && 'max-h-[7.5rem] overflow-hidden')}>
+        {open ? text : text.split('\n').slice(0, 8).join('\n')}
+        {!open ? <div className="pointer-events-none absolute inset-x-0 bottom-0 h-8 bg-gradient-to-t from-accent-soft to-transparent" /> : null}
+      </div>
+      <button type="button" className="mt-1 text-xs text-muted hover:text-fg" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        {open ? 'Show less' : `Show all ${lines === 1 ? `${text.length} chars` : `${lines} lines`}`}
+      </button>
+    </div>
+  );
+}
+
+function UserImage(props: { mediaType: string; dataBase64: string }): ReactNode {
+  const [big, setBig] = useState(false);
+  const src = dataUrl(props.mediaType, props.dataBase64);
+  return (
+    <>
+      <button type="button" className="block overflow-hidden rounded-lg border border-border" onClick={() => setBig(true)} title="View image">
+        <img src={src} alt="Attached image" className="max-h-48 max-w-full object-contain" />
+      </button>
+      {big ? (
+        <Modal title="Image" onClose={() => setBig(false)} wide>
+          <img src={src} alt="Attached image" className="mx-auto max-h-[75vh] max-w-full object-contain" />
+        </Modal>
+      ) : null}
+    </>
   );
 }
 
@@ -148,14 +192,14 @@ function SteerRow(props: { item: SteerItem }): ReactNode {
       <span className="flex items-center gap-1 pr-1 text-[11px] text-muted">
         <Icon name="send" size={11} /> steered mid-turn
       </span>
-      <div className="max-w-[85%] rounded-2xl rounded-br-md border border-dashed border-accent/50 bg-accent-soft/60 px-3.5 py-2 whitespace-pre-wrap text-fg">{parts}</div>
+      <div className="flex max-w-[85%] flex-col gap-2 rounded-2xl rounded-br-md border border-dashed border-accent/50 bg-accent-soft/60 px-3.5 py-2 break-words whitespace-pre-wrap text-fg">{parts}</div>
     </div>
   );
 }
 
 function MessageRow(props: { item: MessageItem }): ReactNode {
   const m = props.item;
-  if (m.role === 'user') return <UserBubble>{m.text}</UserBubble>;
+  if (m.role === 'user') return <UserBubble><UserText text={m.text} /></UserBubble>;
   if (m.role === 'system') return <div className="text-xs whitespace-pre-wrap text-muted">{m.text}</div>;
   if (m.streaming) {
     // While streaming: plain pre-wrapped text (no markdown parse per delta).

@@ -371,3 +371,40 @@ test('a terminal whose process exited starts again on the next keystroke', async
   node.sessions.termInput(s.id, new TextEncoder().encode('y'));
   assert.deepEqual(term.sessions[1]?.terminalInput.map((d) => Buffer.from(d).toString()), ['y']);
 });
+
+test('session.clear starts a fresh agent conversation in the same session', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const session = await idleSession(node, workspace.id);
+  const ch = record(node, sessionChannel(session.id));
+  const oldRef = await waitFor(() => node.sessions.get(session.id).session.agentSessionRef, 5000, 'agent ref');
+
+  // Not while a turn runs.
+  await node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text: '/approve rm -rf build' }] });
+  await ch.waitFor('approval.requested');
+  await assert.rejects(node.call('session.clear', { sessionId: session.id }), rejectsWith('conflict'));
+  await node.call('session.interrupt', { sessionId: session.id });
+  await waitFor(() => node.sessions.get(session.id).session.status === 'idle', 5000, 'idle after interrupt');
+
+  await node.call('session.clear', { sessionId: session.id });
+  assert.equal(ch.find('context.cleared')?.data.previousRef, oldRef);
+  // A new process starts without resuming, and its ref becomes the session's.
+  await waitFor(() => fake.starts.length === 2, 5000, 'second start');
+  assert.equal(fake.starts[1]?.resumeRef, undefined);
+  const newRef = await waitFor(() => node.sessions.get(session.id).session.agentSessionRef, 5000, 'new ref');
+  assert.notEqual(newRef, oldRef);
+  await waitFor(() => node.sessions.get(session.id).session.status === 'idle', 5000, 'idle after clear');
+
+  const { turnId } = await node.call('session.send', { sessionId: session.id, input: [{ type: 'text', text: 'hello again' }] });
+  await ch.waitFor('turn.completed', (e) => e.data.turnId === turnId);
+  assert.equal(fake.starts.length, 2);
+});
+
+test('session.clear is refused for terminal sessions and ended sessions', async (t) => {
+  const { node, workspace } = await setup(t, [new FakeAdapter({ agent: 'claude' }), new FakeAdapter({ agent: 'shell', modes: ['terminal'] })]);
+  const term = await idleSession(node, workspace.id, { mode: 'terminal', agent: 'shell' });
+  await assert.rejects(node.call('session.clear', { sessionId: term.id }), rejectsWith('unsupported'));
+  const s = await idleSession(node, workspace.id);
+  await node.call('session.stop', { sessionId: s.id });
+  await assert.rejects(node.call('session.clear', { sessionId: s.id }), (e: unknown) => e instanceof BizziError);
+});

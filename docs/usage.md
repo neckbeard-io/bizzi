@@ -31,6 +31,7 @@ New event `context.updated { used, window, usable?, compactAt?, categories?: { i
 - `usable` = window minus the agent's compaction buffer, when known. Warnings key off `usable`, not `window`.
 - `categories` only where the agent reports them (Claude). bizzi adds its own row, **bizzi overhead**, for what bizzi injects (knowledge rules, the knowledge and agent-to-agent MCP tools), estimated from the tool schemas and instruction text it sends.
 - `context.compacted { before, after }` when the agent compacts.
+- `context.cleared { previousRef? }` after `session.clear` (`/clear` in the composer): the agent process is stopped and a fresh one starts without resuming, so the context starts from zero. The bizzi session, its timeline, spend and budget carry on; the context bar is empty until the new process reports.
 - Agents without data report nothing; the UI shows "context unknown", never a guess.
 
 ### 1.3 UI
