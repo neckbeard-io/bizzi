@@ -467,6 +467,15 @@ export class KnowledgeStore {
     return hits.slice(0, limit);
   }
 
+  /** Items whose `supersedes` names `id` (later versions, forget requests), oldest first. */
+  supersededBy(id: string): KnowledgeItem[] {
+    return (
+      this.#db
+        .prepare('SELECT * FROM items WHERE supersedes IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(items.supersedes) WHERE json_each.value = ?) ORDER BY hlc ASC')
+        .all(id) as Row[]
+    ).map(rowToItem);
+  }
+
   /** Items with this content hash, any status (deleted included, so forgotten items aren't revived). */
   findByContentHash(hash: string, statuses?: KnowledgeStatus[]): KnowledgeItem[] {
     let sql = 'SELECT * FROM items WHERE content_hash = ?';

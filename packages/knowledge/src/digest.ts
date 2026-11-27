@@ -93,7 +93,9 @@ export const TOOLS_NOTE =
   'machine, `project` = this project on every machine (the default), `machine` = this machine for every project, ' +
   '`global` = everywhere, `session` = this session only. When the user tells you to always or never do something, ' +
   'record it with `rule_add` and `userRequested: true`. Fix or retire outdated entries with `knowledge_update` / ' +
-  '`knowledge_forget`, using the ids in brackets. Never store secrets.';
+  '`knowledge_forget`, using the ids in brackets. `rules_in_effect` lists the rules that apply to you with their ids, ' +
+  '`knowledge_list` browses rules, memories and your pending suggestions, `knowledge_get` reads one in full, and ' +
+  '`knowledge_promote` proposes moving one to a wider scope. Approving suggestions is the user\'s. Never store secrets.';
 
 function oneLine(s: string): string {
   return s.replace(/\s+/g, ' ').trim();

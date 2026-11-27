@@ -74,6 +74,11 @@ export function isVisible(item: KnowledgeItem, ctx: KnowledgeContext): boolean {
   return scopeMatches(item.scope, ctx);
 }
 
+/** A pending suggestion written by this session: it may withdraw or amend it without review. */
+export function isOwnSuggestion(item: KnowledgeItem, sessionId: string | undefined): boolean {
+  return item.status === 'suggested' && sessionId !== undefined && item.source.sessionId === sessionId;
+}
+
 export function scopeEquals(a: KnowledgeScope, b: KnowledgeScope): boolean {
   const na = normalizeScope(a);
   const nb = normalizeScope(b);
