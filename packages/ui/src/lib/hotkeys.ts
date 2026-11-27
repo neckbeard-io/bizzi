@@ -1,7 +1,7 @@
 // App-wide keyboard shortcuts (Settings › Hotkeys): what each one does, how it reads on this platform,
 // and which keydown matches it. Pure; the listener and the per-device on/off switches are app/hotkeys.ts.
 
-export type HotkeyId = 'newWorkspace' | 'newSession' | 'closeSession';
+export type HotkeyId = 'newWorkspace' | 'newSession' | 'closeSession' | 'groupByState';
 
 export interface HotkeyDef {
   id: HotkeyId;
@@ -15,6 +15,7 @@ export const HOTKEYS: readonly HotkeyDef[] = [
   { id: 'newWorkspace', key: 'n', label: 'New workspace', description: 'Add a workspace on the machine you are on (the open page’s machine, else the selected one).' },
   { id: 'newSession', key: 't', label: 'New session', description: 'Start a session in the open workspace with the agent’s default profile (★), and open it.' },
   { id: 'closeSession', key: 'w', label: 'Close session', description: 'End the open session and go to the next one: the agent and its helpers stop, the history is kept, and it moves to Ended in the sidebar, where you can reopen it. Elsewhere in the desktop app it closes the window.' },
+  { id: 'groupByState', key: 'g', label: 'Toggle sidebar by state', description: 'Switch the sidebar between sessions by workspace and sessions by state (Needs you, Failed, Working, Done, Idle).' },
 ];
 
 export type HotkeyPrefs = Record<HotkeyId, boolean>;
@@ -69,4 +70,4 @@ export function matchHotkey(e: KeyLike, opts: { mac: boolean; prefs: HotkeyPrefs
 }
 
 /** Commands the desktop app's menu sends (preload → `bizzi:command` window event). */
-export const MENU_COMMANDS: Readonly<Record<string, HotkeyId>> = { 'new-workspace': 'newWorkspace', 'new-session': 'newSession', 'close-session': 'closeSession' };
+export const MENU_COMMANDS: Readonly<Record<string, HotkeyId>> = { 'new-workspace': 'newWorkspace', 'new-session': 'newSession', 'close-session': 'closeSession', 'group-by-state': 'groupByState' };

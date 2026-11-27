@@ -15,7 +15,7 @@ export const IPC_NAVIGATE = 'bizzi:navigate';
  */
 export const IPC_COMMAND = 'bizzi:command';
 
-export const MENU_COMMANDS = ['new-workspace', 'new-session', 'close-session'] as const;
+export const MENU_COMMANDS = ['new-workspace', 'new-session', 'close-session', 'group-by-state'] as const;
 export type MenuCommand = (typeof MENU_COMMANDS)[number];
 
 export function isMenuCommand(v: unknown): v is MenuCommand {

@@ -86,3 +86,32 @@ export function layoutSessionTree(lines: readonly SessionBreakdownLine[], folded
   flush(0);
   return out;
 }
+
+// ---- "By state" view
+
+/** How the sidebar lists sessions: the machine › workspace tree (default) or one list grouped by state. */
+export type SidebarGroupBy = 'workspace' | 'state';
+
+export function readGroupBy(raw: unknown): SidebarGroupBy {
+  return raw === 'state' ? 'state' : 'workspace';
+}
+
+/** Idle starts folded once it holds more sessions than this. */
+export const IDLE_FOLD_AT = 5;
+
+/** Sections folded or unfolded by hand, per device: true = folded, false = opened (beats the default). */
+export function readSectionFolds(raw: unknown): Record<string, boolean> {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, boolean> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) if (typeof v === 'boolean') out[k] = v;
+  return out;
+}
+
+/**
+ * Whether a "By state" section is folded: what you chose last, else only a long Idle starts folded. A section
+ * holding the open session stays open, so its row is visible.
+ */
+export function sectionFolded(key: string, count: number, folds: Readonly<Record<string, boolean>>, holdsActive: boolean): boolean {
+  if (holdsActive) return false;
+  return folds[key] ?? (key === 'idle' && count > IDLE_FOLD_AT);
+}

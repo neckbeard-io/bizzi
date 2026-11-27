@@ -14,12 +14,14 @@ import {
   selectMachineSummary,
   selectMachineWorkspaces,
   selectNestedSessions,
+  selectSessionsByState,
   selectWaitingCount,
   selectWorkspaceBreakdown,
   selectWorkspaceRow,
   selectWorktreeUse,
   sessionContext,
   sessionMarkState,
+  stateSectionsEqual,
   workspaceRowEqual,
 } from '../src/index.ts';
 import type { BizziState, Timeline } from '../src/index.ts';
@@ -350,4 +352,72 @@ test('helpers on another machine are not nested under their parent', () => {
   const st = state([sess('lead'), sess('remote', { spawnedBy: 'lead', machineId: 'm2', workspaceId: 'w9' })]);
   assert.deepEqual(selectWorkspaceBreakdown(st, 'w1').map((l) => l.sessionId), ['lead']);
   assert.deepEqual(selectWorkspaceBreakdown(st, 'w9').map((l) => l.sessionId), ['remote']);
+});
+
+test('by state: sessions of every workspace and machine in urgency sections, empty sections left out', () => {
+  const s = state(
+    [
+      sess('idle-old', { updatedAt: T(1) }),
+      sess('idle-new', { workspaceId: 'w2', updatedAt: T(5) }),
+      sess('wait-new', { status: 'waiting_input', updatedAt: T(9) }),
+      sess('wait-old', { status: 'waiting_approval', machineId: 'm2', workspaceId: 'w3', updatedAt: T(2) }),
+      sess('bg', { background: [{ id: 'b1', kind: 'shell', description: 'Wait for CI' }], updatedAt: T(8) }),
+      sess('run', { status: 'running', updatedAt: T(3) }),
+      sess('done', { lastSeq: 9, seenThrough: 5 }),
+      sess('gone', { status: 'ended' }),
+    ],
+    { workspaces: { w1: ws('w1'), w2: ws('w2'), w3: ws('w3', { machineId: 'm2' }) } },
+  );
+  const sections = selectSessionsByState(s);
+  assert.deepEqual(
+    sections.map((x) => [x.key, x.label, x.lines.map((l) => l.line.sessionId)]),
+    [
+      // Longest waiting first; everything else most recent first, working before background.
+      ['waiting', 'Needs you', ['wait-old', 'wait-new']],
+      ['working', 'Working', ['run', 'bg']],
+      ['done', 'Done', ['done']],
+      ['idle', 'Idle', ['idle-new', 'idle-old']],
+    ],
+  );
+  const waitOld = sections[0]!.lines[0]!;
+  assert.equal(waitOld.machineId, 'm2');
+  assert.equal(waitOld.workspaceId, 'w3');
+  assert.equal(sections[1]!.lines[1]!.line.reason, 'Wait for CI');
+});
+
+test('by state: helpers sit under their own state, naming their parent; the parent counts them', () => {
+  const s = state(
+    [
+      sess('parent', { title: 'Plan the release', updatedAt: T(1) }),
+      sess('h1', { spawnedBy: 'parent', status: 'waiting_approval', workspaceId: 'wt', createdAt: T(1) }),
+      sess('h2', { spawnedBy: 'parent', status: 'failed', createdAt: T(2) }),
+    ],
+    { workspaces: { w1: ws('w1'), wt: ws('wt', { kind: 'worktree', parentWorkspaceId: 'w1', branch: 'feat/x' }) } },
+  );
+  const sections = selectSessionsByState(s);
+  assert.deepEqual(
+    sections.map((x) => [x.key, x.lines.map((l) => l.line.sessionId)]),
+    [
+      ['waiting', ['h1']],
+      ['failed', ['h2']],
+      ['idle', ['parent']],
+    ],
+  );
+  const h1 = sections[0]!.lines[0]!;
+  assert.equal(h1.parentTitle, 'Plan the release');
+  assert.equal(h1.line.parentId, 'parent');
+  assert.equal(h1.workspaceId, 'wt');
+  assert.deepEqual(h1.line.elsewhere, { workspaceId: 'wt', label: 'feat/x' });
+  assert.equal(sections[2]!.lines[0]!.line.helpers, 2);
+  assert.equal(sections[2]!.lines[0]!.parentTitle, undefined);
+});
+
+test('by state: equality tracks what the view shows', () => {
+  const a = state([sess('x', { status: 'running' }), sess('y')]);
+  assert.ok(stateSectionsEqual(selectSessionsByState(a), selectSessionsByState({ ...a, sessions: { ...a.sessions } })));
+  const b = { ...a, sessions: { ...a.sessions, y: sess('y', { status: 'waiting_input' }) } };
+  assert.equal(stateSectionsEqual(selectSessionsByState(a), selectSessionsByState(b)), false);
+  const c = { ...a, sessions: { ...a.sessions, y: sess('y', { title: 'Renamed' }) } };
+  assert.equal(stateSectionsEqual(selectSessionsByState(a), selectSessionsByState(c)), false);
+  assert.deepEqual(selectSessionsByState(state([])), []);
 });
