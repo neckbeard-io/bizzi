@@ -168,6 +168,27 @@ export function Select(props: SelectHTMLAttributes<HTMLSelectElement>): ReactNod
   return <select className={cx(inputCls, widthCls(className), 'pr-7', className)} {...rest} />;
 }
 
+/**
+ * A select that looks like a text chip (label + chevron) for toolbars; the transparent native select on
+ * top still opens the platform menu and handles the keyboard.
+ */
+export function ChipSelect(props: SelectHTMLAttributes<HTMLSelectElement> & { display: ReactNode }): ReactNode {
+  const { display, className, disabled, ...rest } = props;
+  return (
+    <span
+      className={cx(
+        'relative inline-flex h-7 min-w-0 items-center gap-0.5 rounded-md px-1.5 text-xs text-muted hover:bg-panel-2 hover:text-fg has-[select:focus-visible]:bg-panel-2 has-[select:focus-visible]:text-fg',
+        disabled && 'opacity-50',
+        className,
+      )}
+    >
+      <span className="truncate">{display}</span>
+      <Icon name="chevronDown" size={12} className="shrink-0" />
+      <select className="absolute inset-0 h-full w-full cursor-pointer opacity-0 disabled:cursor-not-allowed" disabled={disabled} {...rest} />
+    </span>
+  );
+}
+
 export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>): ReactNode {
   const { className, ...rest } = props;
   return <textarea className={cx('w-full rounded-md border border-border bg-panel px-2.5 py-2 text-sm placeholder:text-muted/70 focus:border-accent focus:outline-none', className)} {...rest} />;

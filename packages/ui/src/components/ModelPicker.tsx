@@ -5,7 +5,7 @@ import type { ReactNode } from 'react';
 import { modelsKey } from '@bizzi/client';
 import type { AgentKind, ModelOption } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../app/context.tsx';
-import { IconButton, Input, Select, Spinner, cx } from './ui.tsx';
+import { ChipSelect, IconButton, Input, Select, Spinner, cx } from './ui.tsx';
 
 const OTHER = '\u0000other';
 
@@ -61,6 +61,8 @@ export function ModelPicker(props: {
   /** The capability's fixed list, used when the agent can't list its models. */
   fixed?: readonly string[];
   size?: 'sm' | 'md';
+  /** A text chip without the reload button, for toolbars such as the message box's. */
+  bare?: boolean;
   /** Text of the "no model" option. */
   defaultLabel?: string;
   className?: string;
@@ -71,7 +73,8 @@ export function ModelPicker(props: {
   const known = props.value === '' || list.some((m) => m.id === props.value);
   const [typing, setTyping] = useState(false);
   const free = typing || (!loading && list.length === 0);
-  const sm = props.size === 'sm';
+  const sm = props.size === 'sm' || !!props.bare;
+  const bare = !!props.bare;
   const hint = defaultModelHint(listed);
   const defaultText = `${props.defaultLabel ?? 'Agent default'}${hint ? ` · ${hint}` : ''}`;
 
@@ -132,38 +135,53 @@ export function ModelPicker(props: {
           </>
         ) : loading ? (
           <Spinner size={sm ? 12 : 14} className="text-muted" />
-        ) : (
+        ) : bare ? null : (
           refreshButton
         )}
       </div>
     );
   }
 
+  const options = (
+    <>
+      <option value="">{defaultText}</option>
+      {!known ? <option value={props.value}>{props.value}</option> : null}
+      {list.map((m) => (
+        <option key={m.id} value={m.id} title={m.description}>
+          {modelLabel(m)}
+        </option>
+      ))}
+      <option value={OTHER}>Other…</option>
+    </>
+  );
+  const onSelect = (value: string): void => {
+    if (value === OTHER) return setTyping(true);
+    props.onChange(value);
+    props.onCommit?.(value);
+  };
+
+  if (bare) {
+    const current = list.find((m) => m.id === props.value);
+    const shown = props.value === '' ? (hint ?? props.defaultLabel ?? 'default') : (current?.label ?? props.value);
+    return (
+      <div className={cx('flex min-w-0 items-center gap-1', props.className)}>
+        <ChipSelect display={shown} title={`Model: ${props.value || defaultText}`} aria-label="Model" value={props.value} onChange={(e) => onSelect(e.target.value)}>
+          {options}
+        </ChipSelect>
+        {loading ? <Spinner size={12} className="text-muted" /> : null}
+      </div>
+    );
+  }
+
   return (
     <div className={cx('flex items-center gap-1', props.className)}>
-      <Select
-        className={sm ? 'h-7 py-0 text-xs' : undefined}
-        value={props.value}
-        onChange={(e) => {
-          if (e.target.value === OTHER) return setTyping(true);
-          props.onChange(e.target.value);
-          props.onCommit?.(e.target.value);
-        }}
-      >
-        <option value="">{defaultText}</option>
-        {!known ? <option value={props.value}>{props.value}</option> : null}
-        {list.map((m) => (
-          <option key={m.id} value={m.id} title={m.description}>
-            {modelLabel(m)}
-          </option>
-        ))}
-        <option value={OTHER}>Other…</option>
+      <Select className={sm ? 'h-7 py-0 text-xs' : undefined} value={props.value} onChange={(e) => onSelect(e.target.value)}>
+        {options}
       </Select>
       {loading ? <Spinner size={sm ? 12 : 14} className="text-muted" /> : refreshButton}
     </div>
   );
 }
-
 /** Effort levels to offer for a model: the model's own when the agent says, else the agent's. */
 export function effortsFor(models: readonly ModelOption[] | undefined, model: string, agentEfforts: readonly string[] | undefined): readonly string[] {
   const id = model || models?.find((m) => m.isDefault)?.id;

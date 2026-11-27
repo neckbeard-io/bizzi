@@ -4,7 +4,8 @@ import { selectMachineOnline } from '@bizzi/client';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useIsWide } from '../../app/hooks.ts';
 import { CompletionMenu } from '../../components/CompletionMenu.tsx';
-import { Button, ErrorText, cx } from '../../components/ui.tsx';
+import { ModelPicker, effortsFor, useAgentModels } from '../../components/ModelPicker.tsx';
+import { Button, ChipSelect, ErrorText, Spinner, cx } from '../../components/ui.tsx';
 import { useDraft } from '../../lib/drafts.ts';
 import { formatCost, formatTokens, isBusy } from '../../lib/format.ts';
 import { applyCommand, builtinCommand, commandDetail, matchCommands, sessionCommands, slashQuery } from '../../lib/slash.ts';
@@ -142,56 +143,111 @@ export function Composer(props: { sessionId: string }): ReactNode {
             onDrop={closed ? undefined : draft.onDrop}
           >
             <AttachmentTray draft={draft} />
-            <div className="flex items-end gap-2">
+            <textarea
+              ref={ref}
+              rows={1}
+              value={text}
+              onChange={(e) => edit(e.target.value, e.target.selectionStart)}
+              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+              onKeyDown={onKey}
+              onPaste={draft.onPaste}
+              placeholder={placeholder}
+              disabled={closed}
+              className="block max-h-[200px] min-h-[36px] w-full resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-6 placeholder:text-muted/80 focus:outline-none md:text-sm"
+              aria-label="Message"
+            />
+            <div className="flex items-center gap-1">
               {caps?.images !== false ? <AttachImageButton draft={draft} disabled={closed} /> : null}
-              <textarea
-                ref={ref}
-                rows={1}
-                value={text}
-                onChange={(e) => edit(e.target.value, e.target.selectionStart)}
-                onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-                onKeyDown={onKey}
-                onPaste={draft.onPaste}
-                placeholder={placeholder}
-                disabled={closed}
-                className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-6 placeholder:text-muted/80 focus:outline-none md:text-sm"
-                aria-label="Message"
-              />
+              <SessionChips sessionId={sessionId} disabled={closed} />
+              <UsageText sessionId={sessionId} />
               {canInterrupt ? (
-                <Button variant="secondary" icon="stop" busy={interrupt.busy} onClick={() => void interrupt.run()} title="Interrupt the current turn">
+                <Button size="sm" variant="secondary" icon="stop" busy={interrupt.busy} onClick={() => void interrupt.run()} title="Interrupt the current turn">
                   <span className="hidden sm:inline">Stop</span>
                 </Button>
               ) : null}
-              <Button
-                variant="primary"
-                icon="send"
-                busy={send.busy}
-                disabled={disabled || !ready}
-                onClick={() => void send.run()}
-                title={busy ? 'Steer' : 'Send'}
-              >
+              <Button size="sm" variant="primary" icon="send" busy={send.busy} disabled={disabled || !ready} onClick={() => void send.run()} title={busy ? 'Steer' : 'Send'}>
                 <span className="hidden sm:inline">{busy ? 'Steer' : 'Send'}</span>
               </Button>
             </div>
           </div>
         </div>
-        <UsageFooter sessionId={sessionId} />
       </div>
     </div>
   );
 }
 
-/** Tokens and cost of the session. Context lives in the header's context bar (usage.md §1.3), never estimated here. */
-function UsageFooter(props: { sessionId: string }): ReactNode {
-  const usage = useBizzi((s) => s.timelines[props.sessionId]?.usage ?? null);
-  if (!usage) return <div className="h-5" />;
+/**
+ * Model and effort as chips in the message box's toolbar, each shown only when the agent can change it
+ * mid-session. A picked option applies at once; a typed model id on blur / Enter.
+ */
+function SessionChips(props: { sessionId: string; disabled: boolean }): ReactNode {
+  const { sessionId } = props;
+  const store = useStore();
+  const caps = useBizzi((s) => s.capabilities[sessionId] ?? null);
+  const session = useBizzi((s) => s.sessions[sessionId] ?? null);
+  const set = useAction((patch: { model?: string; effort?: string }) => store.setSession(sessionId, patch));
+  const [draft, setDraft] = useState<string | null>(null);
+  const canModel = !!caps && !!session && session.mode === 'structured' && caps.setModelMidSession && (caps.models === 'dynamic' || caps.models.length > 0);
+  const { models } = useAgentModels(session?.machineId, canModel ? session?.agent : '');
+  if (!caps || !session || session.mode !== 'structured') return null;
+  const model = session.model ?? '';
+  const efforts = effortsFor(models, model, caps.effort ?? undefined);
+  const error = set.error ? (set.error instanceof Error ? set.error.message : String(set.error)) : undefined;
   return (
-    <div className="flex h-5 items-center gap-3 px-1 pt-1 text-[11px] text-muted">
-      <span title="input / output tokens">
-        {formatTokens(usage.inputTokens)} in · {formatTokens(usage.outputTokens)} out
-      </span>
-      {usage.cacheReadTokens ? <span className="hidden sm:inline">{formatTokens(usage.cacheReadTokens)} cached</span> : null}
-      {usage.costUsd !== undefined ? <span>{formatCost(usage.costUsd)}</span> : null}
+    <div className={cx('flex min-w-0 items-center', props.disabled && 'pointer-events-none opacity-60')}>
+      {canModel ? (
+        <ModelPicker
+          bare
+          className="min-w-0"
+          machineId={session.machineId}
+          agent={session.agent}
+          value={draft ?? model}
+          defaultLabel="default model"
+          onChange={setDraft}
+          onCommit={(next) => {
+            setDraft(null);
+            if (next !== model) void set.run({ model: next });
+          }}
+          {...(Array.isArray(caps.models) ? { fixed: caps.models } : {})}
+        />
+      ) : null}
+      {efforts.length > 0 ? (
+        <ChipSelect display={session.effort ?? 'effort'} title="Effort" aria-label="Effort" value={session.effort ?? ''} onChange={(e) => void set.run({ effort: e.target.value })}>
+          {!session.effort ? <option value="">default effort</option> : null}
+          {efforts.map((m) => (
+            <option key={m} value={m}>
+              {m}
+            </option>
+          ))}
+        </ChipSelect>
+      ) : null}
+      {set.busy ? <Spinner size={11} className="ml-1 text-muted" /> : null}
+      {error ? (
+        <span className="ml-1 text-[11px] text-err" title={error}>
+          couldn't switch
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Tokens and cost of the session, filling the toolbar's middle and pushing the buttons right. Context lives
+ * in the header's context bar (usage.md §1.3), never estimated here.
+ */
+function UsageText(props: { sessionId: string }): ReactNode {
+  const usage = useBizzi((s) => s.timelines[props.sessionId]?.usage ?? null);
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-end gap-3 truncate px-2 text-[11px] text-muted">
+      {usage ? (
+        <>
+          <span className="hidden sm:inline" title="input / output tokens">
+            {formatTokens(usage.inputTokens)} in · {formatTokens(usage.outputTokens)} out
+          </span>
+          {usage.cacheReadTokens ? <span className="hidden md:inline">{formatTokens(usage.cacheReadTokens)} cached</span> : null}
+          {usage.costUsd !== undefined ? <span>{formatCost(usage.costUsd)}</span> : null}
+        </>
+      ) : null}
     </div>
   );
 }
