@@ -1,9 +1,10 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef } from 'react';
 import type { KeyboardEvent, ReactNode } from 'react';
 import { selectMachineOnline } from '@bizzi/client';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useIsWide } from '../../app/hooks.ts';
 import { Button, ErrorText, cx } from '../../components/ui.tsx';
+import { useDraft } from '../../lib/drafts.ts';
 import { formatCost, formatTokens, isBusy } from '../../lib/format.ts';
 
 export function Composer(props: { sessionId: string }): ReactNode {
@@ -14,7 +15,8 @@ export function Composer(props: { sessionId: string }): ReactNode {
   const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status ?? null);
   const activeTurn = useBizzi((s) => s.timelines[sessionId]?.activeTurnId ?? null);
   const online = useBizzi((s) => selectMachineOnline(s, s.sessions[sessionId]?.machineId));
-  const [text, setText] = useState('');
+  // Unsent text survives reloads and app restarts.
+  const [text, setText] = useDraft(sessionId);
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const busy = activeTurn !== null || isBusy(status);

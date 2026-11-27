@@ -17,6 +17,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Fixed
 - Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
+- Text you've typed but not sent stays in the composer, per session, when bizzi reloads, restarts or updates.
 - Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
 - Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
 
