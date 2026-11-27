@@ -143,6 +143,14 @@ From Chorus's `validateTheme`, applied to built-ins in tests and to imports at l
 - **`panelStyle` later** (floating islands, a flush IDE grid, a minimal split). It's a layout system, not a palette, and it waits on the desktop layout settling.
 - Radii, gaps and heading font apply as soon as they're defined.
 
+## 7a. Fonts
+
+- **Two fonts, one user-wide choice.** The interface font and the code font (code blocks, inline code, diffs, `font-mono` text and terminals) are stored with the theme and density in `prefs.*` (`uiFont`, `codeFont`), so every device follows them. They aren't theme tokens: a theme can't change your font.
+- **Values.** A family name, or `system` for the platform font. Unset or `''` means bizzi's default, and the settings store the default as `''` so a later change of default reaches everyone who never picked one. The server accepts at most 80 letters, digits, spaces and `_ . - + &` (no quotes, so a value can't break out of the CSS declaration).
+- **Defaults.** Code: **JetBrains Mono** (OFL-1.1), shipped with the UI through `@fontsource-variable/jetbrains-mono`, so it works offline, on phones and in browsers that don't have it installed. Interface: the platform font (`system-ui` and friends).
+- **Any other name** is used where the device has it installed; the stack then falls through to the platform's own font. Settings › Appearance shows a sample line in the chosen font, so a missing font is visible right away.
+- **Wiring.** `src/lib/fonts.ts` builds the stacks and writes `--bizzi-font-mono` / `--bizzi-font-sans` on `:root`; Tailwind's `--font-mono` / `--font-sans` point at them. `public/theme-init.js` applies the cached stacks (`bizzi.fonts.paint`) before first paint. Terminals take the same code stack (it has no CSS-only keywords such as `ui-monospace`, which xterm's canvas `ctx.font` rejects) and re-measure their cells once the font has loaded and whenever it changes.
+
 ## 8. Terminal, editor and surfaces
 
 - **Terminal:** xterm.js gets the theme's terminal palette (background, foreground, cursor, selection and the 16 ANSI colors). When a theme has none, they're derived from its UI colors. This applies to terminal-mode sessions and login PTYs alike.

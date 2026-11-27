@@ -197,6 +197,11 @@ test('mergeUserPrefs replaces only the keys present', () => {
   assert.deepEqual(mergeUserPrefs({ themeId: 'a', density: 'spacious' }, { themeId: 'b' }), { themeId: 'b', density: 'spacious' });
   assert.deepEqual(mergeUserPrefs({}, {}), {});
   assert.deepEqual(parseUserPrefsPatch({ prefs: { themeId: 'th_01ABC', density: 'theme', other: 1 } }), { themeId: 'th_01ABC', density: 'theme' });
+  assert.deepEqual(parseUserPrefsPatch({ prefs: { codeFont: ' Fira Code ', uiFont: '' } }), { codeFont: 'Fira Code', uiFont: '' });
+  assert.deepEqual(mergeUserPrefs({ codeFont: 'Hack', density: 'compact' }, { codeFont: '' }), { codeFont: '', density: 'compact' });
+  for (const bad of ["x'; color: red", 'a{b}', 42, 'x'.repeat(81)]) {
+    assert.throws(() => parseUserPrefsPatch({ prefs: { codeFont: bad } }), { code: 'bad_request' });
+  }
 });
 
 test('agent profiles in prefs: validated, replaced as a whole, unknown agents dropped', () => {

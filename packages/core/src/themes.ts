@@ -58,6 +58,14 @@ export function parseUserPrefsPatch(params: unknown): Partial<UserPrefs> {
     if (!DENSITIES.includes(r.density as DensityPref)) throw new BizziError('bad_request', `prefs.density must be one of ${DENSITIES.join(', ')}`);
     out.density = r.density as DensityPref;
   }
+  for (const key of ['uiFont', 'codeFont'] as const) {
+    const v = r[key];
+    if (v === undefined) continue;
+    if (typeof v !== 'string' || v.length > MAX_FONT_NAME || !FONT_NAME_RE.test(v)) {
+      throw new BizziError('bad_request', `prefs.${key} must be a font family name of at most ${MAX_FONT_NAME} letters, digits, spaces and _ . - + &`);
+    }
+    out[key] = v.trim();
+  }
   if (r.agentProfiles !== undefined) out.agentProfiles = parseAgentProfiles(r.agentProfiles);
   if (r.preferredProfiles !== undefined) {
     const pp = r.preferredProfiles;
@@ -72,6 +80,10 @@ export function parseUserPrefsPatch(params: unknown): Partial<UserPrefs> {
   }
   return out;
 }
+
+const MAX_FONT_NAME = 80;
+/** A CSS family name without quotes or anything that could end the declaration ('' = the default). */
+const FONT_NAME_RE = /^[\p{L}\p{N} _.\-+&]*$/u;
 
 const PROFILE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/;
 const MAX_PROFILE_NAME = 80;
@@ -114,6 +126,8 @@ export function mergeUserPrefs(current: UserPrefs, patch: Partial<UserPrefs>): U
   const next: UserPrefs = { ...current };
   if (patch.themeId !== undefined) next.themeId = patch.themeId;
   if (patch.density !== undefined) next.density = patch.density;
+  if (patch.uiFont !== undefined) next.uiFont = patch.uiFont;
+  if (patch.codeFont !== undefined) next.codeFont = patch.codeFont;
   if (patch.agentProfiles !== undefined) next.agentProfiles = patch.agentProfiles.map((p) => ({ ...p }));
   if (patch.preferredProfiles !== undefined) next.preferredProfiles = { ...patch.preferredProfiles };
   return next;
