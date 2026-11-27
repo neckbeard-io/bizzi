@@ -12,7 +12,13 @@ function ago(min: number): string {
   return new Date(Date.now() - min * 60_000).toISOString();
 }
 
-type Seed = Omit<KnowledgeItemInfo, 'createdAt' | 'updatedAt' | 'tags' | 'status'> & { tags?: string[]; status?: KnowledgeItemInfo['status']; ageMin: number };
+type Seed = Omit<KnowledgeItemInfo, 'createdAt' | 'updatedAt' | 'tags' | 'status'> & {
+  tags?: string[];
+  status?: KnowledgeItemInfo['status'];
+  ageMin: number;
+  /** Live already, with an inbox notice (dismiss / undo), as when you asked an agent to save it. */
+  notice?: boolean;
+};
 
 const SEED: Seed[] = [
   {
@@ -165,6 +171,17 @@ const SEED: Seed[] = [
     source: { machineId: LAPTOP, via: 'tool', agent: 'claude', sessionId: 's_demo' },
     ageMin: 20,
   },
+  // ---- live with a notice (inbox: dismiss / undo)
+  {
+    id: 'k_live_main',
+    type: 'rule',
+    scope: { level: 'workspace', workspaceId: 'w_acme' },
+    title: 'Never push to main directly; open a PR',
+    body: 'Every change goes through a branch and a pull request, however small.',
+    source: { machineId: LAPTOP, via: 'tool', agent: 'claude', sessionId: 's_demo', userRequested: true },
+    ageMin: 4,
+    notice: true,
+  },
   // ---- suggestions (inbox)
   {
     id: 'k_sug_mock',
@@ -221,6 +238,8 @@ const LEVELS = new Set<KnowledgeScopeLevel>(['global', 'tag', 'machine', 'projec
 export class MockKnowledge implements MockModule {
   private readonly host: MockHost;
   private readonly items = new Map<string, KnowledgeItemInfo>();
+  /** Live changes not dismissed yet. */
+  private readonly notices = new Set<string>();
   private settings: KnowledgeSettings = { preset: 'balanced', defaultAgentScope: 'project' };
   /** workspace id → its AGENTS.md (absent: no file yet). */
   private readonly agentsMd = new Map<string, string>();
@@ -228,9 +247,10 @@ export class MockKnowledge implements MockModule {
   constructor(host: MockHost) {
     this.host = host;
     for (const s of SEED) {
-      const { ageMin, tags, status, ...rest } = s;
+      const { ageMin, tags, status, notice, ...rest } = s;
       const ts = ago(ageMin);
       this.items.set(s.id, { ...rest, tags: tags ?? [], status: status ?? 'active', createdAt: ts, updatedAt: ts });
+      if (notice) this.notices.add(s.id);
     }
   }
 
@@ -299,6 +319,11 @@ export class MockKnowledge implements MockModule {
         const now = new Date().toISOString();
         for (const id of ids) {
           const item = this.get(id);
+          if (this.notices.delete(id)) {
+            // Dismissing a live change keeps it as it is.
+            if (scope) this.items.set(id, { ...item, scope, updatedAt: now });
+            continue;
+          }
           const next: KnowledgeItemInfo = { ...item, status: 'active', updatedAt: now };
           if (scope) next.scope = scope;
           this.items.set(id, next);
@@ -309,7 +334,12 @@ export class MockKnowledge implements MockModule {
       case 'knowledge.reject': {
         const ids = stringList(params.ids);
         const now = new Date().toISOString();
-        for (const id of ids) this.items.set(id, { ...this.get(id), status: 'deleted', updatedAt: now });
+        for (const id of ids) {
+          const item = this.get(id);
+          // Undoing a forget brings the item back; anything else is removed.
+          const undoForget = this.notices.delete(id) && item.status === 'deleted';
+          this.items.set(id, { ...item, status: undoForget ? 'active' : 'deleted', updatedAt: now });
+        }
         this.changed(ids);
         return {};
       }
@@ -407,7 +437,7 @@ export class MockKnowledge implements MockModule {
   private inbox(): KnowledgeInboxCard[] {
     const cards = new Map<string, KnowledgeInboxCard>();
     for (const i of this.items.values()) {
-      if (i.status !== 'suggested') continue;
+      if (i.status !== 'suggested' && !this.notices.has(i.id)) continue;
       const key = i.source.sessionId ?? '';
       let card = cards.get(key);
       if (!card) {

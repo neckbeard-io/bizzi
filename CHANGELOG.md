@@ -13,6 +13,10 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
 - Quitting, updating or reinstalling the desktop app no longer stops running sessions: the core keeps running and the relaunched app reconnects to it. The core restarts only when an update actually changes it. To stop everything, use **Quit and Stop Sessions** in the menu bar.
 
+### Fixed
+- Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
+- Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
+
 ## v0.1.1 — 2026-11-26
 
 ### Added

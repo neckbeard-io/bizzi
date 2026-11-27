@@ -96,7 +96,7 @@ Presets for quick switching: **trusting** (everything live, prune later), **bala
 
 ### 3.2 Review UX
 
-Batched inbox cards, one per finished session ("3 suggested memories, 1 rule"); accept / edit scope / reject, in bulk; no push notifications for knowledge. "Live + inbox notice" items show up in the same card with an undo.
+Batched inbox cards, one per finished session ("3 suggested memories, 1 rule"); accept / edit scope / reject, in bulk; no push notifications for knowledge. "Live + inbox notice" items are listed apart, under "Recent knowledge changes": they are already in effect, so they get Dismiss (keep) and Undo instead of Accept / Reject, and they don't count toward the Knowledge badge. An edit's notice stands for the versions it replaced: only the newest version is listed, Undo steps back one version, and Dismiss clears the whole chain.
 
 ### 3.3 Default scope for agent writes (a user setting)
 

@@ -155,3 +155,27 @@ test('rejecting a "live + notice" edit restores the version it replaced', () => 
   assert.equal(store.get(edit.item.id)?.status, 'deleted');
   assert.equal(store.get(edit.item.id)?.source.sessionId, S1);
 });
+
+test('inbox: an edited "live + notice" rule shows once, as its newest version', () => {
+  const { store } = memStore();
+  const asked = { ...originFromContext(CTX), userRequested: true };
+  const v1 = addKnowledge(store, { type: 'rule', title: 'Run install after a change', body: '', scope: 'project' }, asked).item;
+  const v2 = updateKnowledge(store, v1.id, { title: 'Run install after each PR' }, asked, { context: CTX }).item;
+  const v3 = updateKnowledge(store, v2.id, { title: 'Run install after each merged PR' }, asked, { context: CTX }).item;
+  assert.equal(store.get(v1.id)?.noticePending, true);
+  assert.equal(store.get(v2.id)?.noticePending, true);
+
+  const [card] = listInbox(store);
+  assert.deepEqual(card!.notices.map((i) => i.id), [v3.id], 'replaced versions are folded into the newest');
+  assert.deepEqual(card!.counts, { memories: 0, rules: 1, forgets: 0 });
+
+  // Undo steps back one version, which is itself still an undoable notice.
+  rejectItem(store, v3.id);
+  assert.equal(store.get(v2.id)?.status, 'active');
+  assert.deepEqual(listInbox(store)[0]!.notices.map((i) => i.id), [v2.id]);
+
+  // Dismissing the newest version dismisses the whole chain.
+  acceptItem(store, v2.id);
+  assert.equal(store.get(v1.id)?.noticePending, undefined);
+  assert.deepEqual(listInbox(store), []);
+});

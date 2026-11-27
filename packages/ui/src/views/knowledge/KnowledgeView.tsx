@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { selectKnowledgeNoticeCount, selectKnowledgeSuggestionCount } from '@bizzi/client';
 import type { ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import type { AgentKind, KnowledgeItemInfo, KnowledgeScopeLevel } from '@bizzi/protocol';
@@ -34,7 +35,8 @@ export function KnowledgeView(): ReactNode {
   const rev = useBizzi((s) => s.knowledgeRev);
   const open = useBizzi((s) => s.connection.state === 'open');
   const machineId = useTargetMachineId();
-  const suggestions = useBizzi((s) => (s.knowledgeInbox ?? []).reduce((n, c) => n + c.items.length, 0));
+  const suggestions = useBizzi(selectKnowledgeSuggestionCount);
+  const notices = useBizzi(selectKnowledgeNoticeCount);
   const ctx = useScopeContext();
   const [level, setLevel] = useState<LevelFilter>('all');
   const [type, setType] = useState<TypeFilter>('all');
@@ -124,12 +126,20 @@ export function KnowledgeView(): ReactNode {
             ))}
           </Select>
         </div>
-        {suggestions > 0 ? (
-          <div className="mx-auto w-full max-w-4xl px-3 pb-2 md:px-5">
-            <a href="#/inbox" className="inline-flex items-center gap-1.5 text-xs text-accent-text hover:underline">
-              <Icon name="sparkle" size={13} />
-              {suggestions} suggestion{suggestions === 1 ? '' : 's'} waiting in the inbox
-            </a>
+        {suggestions > 0 || notices > 0 ? (
+          <div className="mx-auto flex w-full max-w-4xl flex-wrap gap-x-4 gap-y-1 px-3 pb-2 md:px-5">
+            {suggestions > 0 ? (
+              <a href="#/inbox" className="inline-flex items-center gap-1.5 text-xs text-accent-text hover:underline">
+                <Icon name="sparkle" size={13} />
+                {suggestions} suggestion{suggestions === 1 ? '' : 's'} to review in the inbox
+              </a>
+            ) : null}
+            {notices > 0 ? (
+              <a href="#/inbox" className="inline-flex items-center gap-1.5 text-xs text-muted hover:text-fg hover:underline">
+                <Icon name="check" size={13} />
+                {notices} recent change{notices === 1 ? '' : 's'} by agents, already live (dismiss or undo)
+              </a>
+            ) : null}
           </div>
         ) : null}
       </div>
