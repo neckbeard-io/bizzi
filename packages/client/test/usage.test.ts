@@ -180,3 +180,13 @@ test('timeline: context, compaction, restart divider and status source', () => {
   t = reduceTimeline(t, evs([{ type: 'session.status', data: { status: 'running' } }], 7));
   assert.equal(t.statusSource, undefined);
 });
+
+test('timeline: context.cleared adds a divider and drops the old context reading', () => {
+  const evs: SessionEvent[] = [
+    { type: 'context.updated', data: { used: 120_000, window: 200_000 } },
+    { type: 'context.cleared', data: { previousRef: 'old' } },
+  ].map((b, i) => ({ ...b, ch: 'session:s', seq: i + 1, ts: '2026-11-10T10:00:00Z' }) as SessionEvent);
+  const t = reduceTimeline(emptyTimeline('s'), evs);
+  assert.equal(t.context, null);
+  assert.ok(t.order.some((id) => t.items[id]?.kind === 'cleared'));
+});
