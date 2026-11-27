@@ -219,6 +219,8 @@ function useWindowWidth(): number {
 
 /** Horizontal space around the tree inside the sidebar (padding, border, a thin scrollbar). */
 const TREE_CHROME = 18;
+/** The header row spans the sidebar, so only its right border (and a pixel of rounding) is extra. */
+const HEADER_CHROME = 2;
 
 /**
  * Natural width of the tree: a hidden, max-content copy laid out once, without the rows that never widen
@@ -229,6 +231,12 @@ function measureTree(el: HTMLElement): number {
   if (!parent) return 0;
   const copy = el.cloneNode(true) as HTMLElement;
   for (const n of copy.querySelectorAll('[data-fit-ignore]')) n.remove();
+  // `flex-1 min-w-0` blocks (the header's name and status) contribute ~0 to a max-content layout:
+  // in the copy they take their text's width instead, so the auto width leaves room for it.
+  for (const n of copy.querySelectorAll<HTMLElement>('[data-fit-natural]')) {
+    n.style.flex = 'none';
+    n.style.minWidth = 'max-content';
+  }
   copy.removeAttribute('id');
   copy.setAttribute('aria-hidden', 'true');
   copy.style.cssText = 'position:fixed;left:-10000px;top:0;width:max-content;visibility:hidden;pointer-events:none;contain:layout style';
@@ -285,7 +293,7 @@ function Sidebar(props: { route: Route }): ReactNode {
   const natural = useTreeWidth(treeRef, pref.mode === 'auto');
   // The header (name, connection status, nav icons) must fit too, or the status gets cut off.
   const header = useTreeWidth(headerRef, pref.mode === 'auto');
-  const content = natural === null ? null : Math.max(natural + TREE_CHROME, header ?? 0);
+  const content = natural === null ? null : Math.max(natural + TREE_CHROME, header === null ? 0 : header + HEADER_CHROME);
   const width = sidebarWidth(pref, content, windowWidth);
 
   return (
@@ -293,7 +301,7 @@ function Sidebar(props: { route: Route }): ReactNode {
       <TitleBarStrip />
       <div ref={headerRef} className="flex items-center gap-2 px-3 pt-3 pb-2">
         <Logo size={28} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" data-fit-natural>
           <div className="truncate text-sm font-semibold">bizzi</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted">
             <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', conn === 'open' ? 'bg-ok' : conn === 'reconnecting' ? 'bg-warn' : 'bg-muted')} />
