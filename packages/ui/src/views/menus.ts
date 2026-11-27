@@ -5,7 +5,7 @@ import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { copyText, openDialog, showToast } from '../app/contextMenu.ts';
 import type { MenuItem } from '../app/contextMenu.ts';
 import { navigate } from '../app/hooks.ts';
-import { deleteSessionFlow } from '../app/sessionActions.ts';
+import { deleteSessionFlow, endSessionFlow, reopenSessionFlow } from '../app/sessionActions.ts';
 import { requestNewSession } from '../app/workspaceIntents.ts';
 import { removeWorkspaceFlow } from './workspaces/WorkspaceDialogs.tsx';
 
@@ -104,7 +104,6 @@ export function sessionMenu(store: BizziStore, s: SessionInfo, online: boolean):
   const ended = s.status === 'ended';
   const canFork = (st.capabilities[s.id] ?? st.agents[s.machineId]?.find((a) => a.agent === s.agent)?.capabilities)?.fork ?? false;
   const unread = s.lastSeq > (s.seenThrough ?? 0);
-  const label = s.title ? `"${s.title}"` : 'this session';
   const items: MenuItem[] = [
     { label: 'Open', icon: s.mode === 'terminal' ? 'terminal' : 'chat', onSelect: () => navigate({ name: 'session', sessionId: s.id, tab: 'chat' }) },
     { label: 'Rename…', icon: 'edit', disabled: !online, ...offline, onSelect: () => openDialog({ kind: 'renameSession', sessionId: s.id }) },
@@ -126,14 +125,22 @@ export function sessionMenu(store: BizziStore, s: SessionInfo, online: boolean):
   const resume = resumeCommand(s);
   if (resume) items.push({ label: 'Copy resume command', icon: 'terminal', hint: resume, onSelect: () => copyText(resume, 'resume command') });
   items.push('separator');
-  if (!ended) {
+  if (ended) {
+    items.push({
+      label: 'Reopen session',
+      icon: 'refresh',
+      disabled: !online,
+      hint: online ? 'Take messages again; the history is kept' : OFFLINE,
+      onSelect: () => reopenSessionFlow(store, s, { open: true }),
+    });
+  } else {
     items.push({
       label: 'End session',
       icon: 'stop',
       disabled: !online,
-      ...offline,
+      hint: online ? 'Stop the agent and keep the history to reopen later' : OFFLINE,
       onSelect: async () => {
-        if (window.confirm(`End ${label}? The agent process will be stopped.`)) await store.stop(s.id);
+        await endSessionFlow(store, s);
       },
     });
   }

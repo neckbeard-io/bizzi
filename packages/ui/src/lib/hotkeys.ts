@@ -14,7 +14,7 @@ export interface HotkeyDef {
 export const HOTKEYS: readonly HotkeyDef[] = [
   { id: 'newWorkspace', key: 'n', label: 'New workspace', description: 'Add a workspace on the machine you are on (the open page’s machine, else the selected one).' },
   { id: 'newSession', key: 't', label: 'New session', description: 'Start a session in the open workspace with the agent’s default profile (★), and open it.' },
-  { id: 'closeSession', key: 'w', label: 'Close session', description: 'Delete the open session after you confirm: the agent is stopped and its history removed. Elsewhere in the desktop app it closes the window.' },
+  { id: 'closeSession', key: 'w', label: 'Close session', description: 'End the open session and go to the next one: the agent and its helpers stop, the history is kept, and it moves to Ended in the sidebar, where you can reopen it. Elsewhere in the desktop app it closes the window.' },
 ];
 
 export type HotkeyPrefs = Record<HotkeyId, boolean>;

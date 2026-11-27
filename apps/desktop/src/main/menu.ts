@@ -67,8 +67,8 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
         { label: 'Pair a Device…', click: () => a.navigate(MENU_ROUTES.devices) },
         sep,
         ...(mac ? [] : [settings, sep]),
-        // ⌘W deletes the open session (the UI asks first) and closes the window on other pages; the
-        // window itself closes with ⇧⌘W.
+        // ⌘W ends the open session (reopenable from the sidebar's Ended group) and closes the window on
+        // other pages; the window itself closes with ⇧⌘W.
         { label: 'Close Session', accelerator: 'CmdOrCtrl+W', registerAccelerator: false, click: () => a.command('close-session') },
         { role: 'close', label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W' },
         ...(mac ? [] : [{ role: 'quit', label: 'Quit bizzi' } satisfies MenuItemConstructorOptions]),

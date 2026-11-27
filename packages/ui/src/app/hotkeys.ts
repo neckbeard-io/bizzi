@@ -13,7 +13,7 @@ import { loadJson, saveJson } from '../lib/storage.ts';
 import { openAddWorkspace } from './addWorkspace.ts';
 import { showToast } from './contextMenu.ts';
 import { navigate } from './hooks.ts';
-import { deleteSessionFlow } from './sessionActions.ts';
+import { closeSessionFlow } from './sessionActions.ts';
 
 const KEY = 'bizzi.hotkeys';
 
@@ -127,7 +127,10 @@ function inDesktop(): boolean {
 
 let closing = false;
 
-/** ⌘W: delete the open session after you confirm; on any other page of the desktop app, close the window. */
+/**
+ * ⌘W: end the open session (it leaves the sidebar's live list; Undo or the Ended group reopens it) and move on
+ * to the next one in its workspace; on any other page of the desktop app, close the window.
+ */
 export async function closeSessionHere(store: BizziStore, route: Route): Promise<void> {
   if (route.name !== 'session') {
     if (inDesktop()) window.close();
@@ -135,15 +138,16 @@ export async function closeSessionHere(store: BizziStore, route: Route): Promise
   }
   const session = store.getState().sessions[route.sessionId];
   if (!session || closing) return;
-  if (!selectMachineOnline(store.getState(), session.machineId)) {
+  const ended = (store.getState().timelines[session.id]?.status ?? session.status) === 'ended';
+  if (!ended && !selectMachineOnline(store.getState(), session.machineId)) {
     showToast(`${machineName(store, session.machineId)} is offline`, 'err');
     return;
   }
   closing = true;
   try {
-    await deleteSessionFlow(store, session);
+    await closeSessionFlow(store, session);
   } catch (err) {
-    showToast(`Could not delete the session: ${err instanceof Error ? err.message : String(err)}`, 'err');
+    showToast(`Could not end the session: ${err instanceof Error ? err.message : String(err)}`, 'err');
   } finally {
     closing = false;
   }

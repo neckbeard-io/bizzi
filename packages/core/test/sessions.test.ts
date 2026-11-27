@@ -155,6 +155,43 @@ test('deny, interrupt, failing turns, stop and ended sessions', async (t) => {
   assert.equal(new Set(completedIds).size, completedIds.length);
 });
 
+test('session.reopen: an ended session takes messages again and resumes; its helpers stay ended', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const s = await idleSession(node, workspace.id);
+  const ch = record(node, sessionChannel(s.id));
+  await node.call('session.send', { sessionId: s.id, input: text('hello') });
+  await ch.waitFor('turn.completed');
+  const ref = node.sessions.get(s.id).session.agentSessionRef;
+  assert.ok(ref);
+  const { session: helper } = await node.call('session.create', { workspaceId: workspace.id, agent: 'claude' });
+  await waitFor(() => node.sessions.get(helper.id).session.status === 'idle', 5000, 'helper idle');
+
+  // Not ended: a no-op.
+  const { session: same } = await node.call('session.reopen', { sessionId: s.id });
+  assert.equal(same.status, 'idle');
+  assert.equal(ch.events.filter((e) => e.type === 'session.status' && e.data.reason === 'reopened').length, 0);
+
+  await node.call('session.stop', { sessionId: s.id });
+  await node.call('session.stop', { sessionId: helper.id });
+  assert.equal(node.sessions.get(s.id).session.status, 'ended');
+  const { session: reopened } = await node.call('session.reopen', { sessionId: s.id });
+  assert.equal(reopened.status, 'idle');
+  assert.equal(node.sessions.get(s.id).session.status, 'idle');
+  assert.equal(node.sessions.get(helper.id).session.status, 'ended');
+  assert.ok(ch.events.some((e) => e.type === 'session.status' && e.data.status === 'idle' && e.data.reason === 'reopened'));
+
+  const starts = fake.starts.length;
+  const { turnId } = await node.call('session.send', { sessionId: s.id, input: text('back again') });
+  await ch.waitFor('turn.completed', (e) => e.data.turnId === turnId);
+  assert.equal(fake.starts.length, starts + 1);
+  assert.equal(fake.starts.at(-1)?.resumeRef, ref);
+  // Ending it again works as before.
+  await node.call('session.stop', { sessionId: s.id });
+  assert.equal(node.sessions.get(s.id).session.status, 'ended');
+  await assert.rejects(node.call('session.reopen', { sessionId: 'nope' }), rejectsWith('not_found'));
+});
+
 test('core completes the turn when the adapter ignores an interrupt', async (t) => {
   const { node, workspace } = await setup(t, [new FakeAdapter({ ignoreInterrupt: true })]);
   const session = await idleSession(node, workspace.id);

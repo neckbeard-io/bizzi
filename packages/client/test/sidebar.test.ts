@@ -7,7 +7,9 @@ import {
   emptyTimeline,
   isDoneUnseen,
   machineTotalsLabel,
+  nextSessionAfterClose,
   reduceTimeline,
+  selectEndedSessions,
   selectHelperTreeModel,
   selectMachineSummary,
   selectMachineWorkspaces,
@@ -262,4 +264,35 @@ test('session context: the open timeline wins, else the session list; unknown wi
   assert.ok(breakdownEqual(lines, selectWorkspaceBreakdown(s, 'w1')));
   const moved = state([...Object.values(s.sessions).filter((x) => x.id !== 'listed'), sess('listed', { context: { used: 60_000, window: 200_000, usable: 100_000 } })], { timelines: s.timelines });
   assert.equal(breakdownEqual(lines, selectWorkspaceBreakdown(moved, 'w1')), false);
+});
+
+test('ended sessions: their own group, newest first, without nested helpers', () => {
+  const st = state([
+    sess('live', { updatedAt: T(9) }),
+    sess('old', { status: 'ended', updatedAt: T(1) }),
+    sess('new', { status: 'ended', updatedAt: T(5) }),
+    sess('helper', { status: 'ended', spawnedBy: 'new', updatedAt: T(6) }),
+    sess('elsewhere', { status: 'ended', workspaceId: 'w2' }),
+  ]);
+  assert.deepEqual(selectEndedSessions(st, 'w1').map((x) => x.id), ['new', 'old']);
+  // The live list leaves them out.
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'w1').map((l) => l.sessionId), ['live']);
+});
+
+test('after closing a session: the next live one in its workspace, else the one before, else none', () => {
+  const st = state([
+    sess('a', { updatedAt: T(9) }),
+    sess('b', { updatedAt: T(8) }),
+    sess('b-helper', { spawnedBy: 'b', updatedAt: T(8), createdAt: T(1) }),
+    sess('c', { updatedAt: T(7) }),
+    sess('gone', { status: 'ended', updatedAt: T(6) }),
+    sess('other', { workspaceId: 'w2', updatedAt: T(10) }),
+  ]);
+  assert.equal(nextSessionAfterClose(st, 'a'), 'b');
+  assert.equal(nextSessionAfterClose(st, 'b'), 'c', 'its helper ends with it');
+  assert.equal(nextSessionAfterClose(st, 'c'), 'b', 'other sessions\' helpers are skipped');
+  assert.equal(nextSessionAfterClose(st, 'b-helper'), 'c', 'closing a helper');
+  assert.equal(nextSessionAfterClose(st, 'gone'), 'a', 'already ended: the first live one');
+  assert.equal(nextSessionAfterClose(st, 'other'), null, 'nothing else in its workspace');
+  assert.equal(nextSessionAfterClose(st, 'nope'), null);
 });

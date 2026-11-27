@@ -121,7 +121,7 @@ export function Composer(props: { sessionId: string }): ReactNode {
   const placeholder = !online
     ? 'Machine offline: read-only until it reconnects'
     : closed
-    ? `Session ${status}`
+    ? 'Session ended: reopen it to send messages'
     : busy
       ? canSteer
         ? 'Steer the agent while it works…'

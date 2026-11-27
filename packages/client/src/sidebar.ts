@@ -329,6 +329,32 @@ export function selectWorkspaceBreakdown(s: BizziState, workspaceId: string): Se
   return out;
 }
 
+/**
+ * A workspace's ended (closed) sessions, most recently changed first: the sidebar's "Ended (n)" group, from
+ * which they can be read and reopened. Helpers whose parent is known are left out (their parent's page lists them).
+ */
+export function selectEndedSessions(s: BizziState, workspaceId: string): SessionInfo[] {
+  const list = sessionIndex(s).byWorkspace.get(workspaceId) ?? [];
+  return list.filter((x) => (selectSessionStatus(s, x.id) ?? x.status) === 'ended' && !isNestedHelper(s, x));
+}
+
+/**
+ * Where to go after closing `sessionId` (⌘W): the live session after it in its workspace's sidebar list, else
+ * the one before it, else null (its workspace page). Its own helpers don't count, since they end with it, and
+ * other sessions' helpers only when closing a helper.
+ */
+export function nextSessionAfterClose(s: BizziState, sessionId: string): string | null {
+  const session = s.sessions[sessionId];
+  if (!session) return null;
+  const gone = new Set([sessionId, ...selectDescendants(s, sessionId).map((h) => h.id)]);
+  const lines = selectWorkspaceBreakdown(s, session.workspaceId).filter((l) => s.sessions[l.sessionId]?.workspaceId === session.workspaceId);
+  const at = lines.findIndex((l) => l.sessionId === sessionId);
+  const depth = at < 0 ? 0 : lines[at]!.depth;
+  const ok = (l: SessionBreakdownLine): boolean => !gone.has(l.sessionId) && l.depth <= depth;
+  if (at < 0) return lines.find(ok)?.sessionId ?? null;
+  return lines.slice(at + 1).find(ok)?.sessionId ?? lines.slice(0, at).reverse().find(ok)?.sessionId ?? null;
+}
+
 /** Equality for `selectWorkspaceBreakdown` results (lines are flat, so field by field). */
 export function breakdownEqual(a: readonly SessionBreakdownLine[], b: readonly SessionBreakdownLine[]): boolean {
   if (a === b) return true;

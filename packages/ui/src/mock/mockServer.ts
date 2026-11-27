@@ -674,6 +674,7 @@ export class MockCore implements MockHost {
       case 'session.send': {
         const s = this.liveSession(p.sessionId);
         if (s.mode === 'terminal') throw new BizziError('unsupported', 'terminal sessions take term.input');
+        if (s.status === 'ended') throw new BizziError('conflict', 'session has ended');
         if (this.runs.has(s.id)) throw new BizziError('conflict', 'a turn is already running; steer or interrupt');
         if (!s.title) {
           const title = titleFromText((p.input as InputBlock[]).flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'));
@@ -706,6 +707,14 @@ export class MockCore implements MockHost {
         this.emitS(s.id, { type: 'session.status', data: { status: 'ended', reason: 'stopped by user' } });
         this.setStatus(s.id, 'ended');
         return {};
+      }
+      case 'session.reopen': {
+        const s = this.liveSession(p.sessionId);
+        if (s.status === 'ended') {
+          this.emitS(s.id, { type: 'session.status', data: { status: 'idle', reason: 'reopened' } });
+          this.setStatus(s.id, 'idle');
+        }
+        return { session: { ...s } };
       }
       case 'session.clear': {
         const s = this.liveSession(p.sessionId);

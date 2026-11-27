@@ -343,6 +343,22 @@ export const SESSIONS: SessionInfo[] = [
     updatedAt: iso(-3),
     lastSeq: 0,
   },
+  // Closed: listed under the sidebar's "Ended (1)" in acme, and reopenable.
+  {
+    id: 's_old',
+    machineId: MACHINE.id,
+    workspaceId: 'w_acme',
+    agent: 'claude',
+    mode: 'structured',
+    status: 'ended',
+    title: 'Bump eslint to v10',
+    model: 'sonnet',
+    agentVersion: '2.4.0',
+    billing: 'plan',
+    createdAt: iso(-60 * 30),
+    updatedAt: iso(-60 * 28),
+    lastSeq: 0,
+  },
   {
     id: 's_infra',
     machineId: SERVER.id,
