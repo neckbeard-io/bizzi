@@ -25,6 +25,9 @@ async function setup(opts: { pollMs?: number; claudeHome?: string; adapters?: Fa
     claudeHome: opts.claudeHome ?? join(tempDir(), '.claude'),
     watch: opts.watch ?? false,
     watchDebounceMs: 20,
+    // macOS FSEvents can drop an event that lands right after a watch starts; the periodic rearm
+    // (60 s in production) is the fallback, so tests run it often instead of racing the first event.
+    watchRearmMs: 250,
   });
   const h = await harness({ extensions: [ext], ...(opts.adapters ? { adapters: opts.adapters } : {}) });
   after(() => h.close());
