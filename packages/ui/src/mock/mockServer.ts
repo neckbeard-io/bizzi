@@ -217,7 +217,14 @@ export class MockCore implements MockHost {
     const p = parseChannel(ch);
     if (p?.kind === 'session') {
       const sess = this.sessionMap.get(p.sessionId);
-      if (sess) sess.lastSeq = ev.seq;
+      if (sess) {
+        sess.lastSeq = ev.seq;
+        // Like the node: the latest context occupancy rides on the session info (sidebar context bars).
+        if (body.type === 'context.updated' && body.data.window > 0) {
+          const { used, window, usable, compactAt } = body.data;
+          sess.context = { used, window, ...(usable !== undefined ? { usable } : {}), ...(compactAt !== undefined ? { compactAt } : {}) };
+        }
+      }
     }
   }
 

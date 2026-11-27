@@ -358,7 +358,7 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 
 One UI codebase for every client: desktop app (macOS, Windows, Linux), phone (Android; iOS best-effort), browser client served by the hub. React, in Electron / Capacitor / the browser (tech-choices D0b).
 
-Screens: the **machine → workspace tree** (the desktop sidebar; the Machines tab on the phone) → **machine page** (opened from its tile: online, headful/headless, power, its workspaces with "Add workspace", ADE status with install/update/login buttons and update/restart policies, API keys, widgets, machine settings such as agent-to-agent limits) → **workspace** (sessions, project links) → **sessions** (timeline, composer, inline approvals, plan/todos, diff review, terminal tab, raw-events tab) · **inbox** (approvals, questions, finished turns, knowledge suggestions) · **knowledge browser** (by scope, provenance, policy) · **settings** (app-level only: appearance, knowledge, devices, connection).
+Screens: the **machine → workspace tree** (the desktop sidebar; the Machines tab on the phone) → **machine page** (opened from its tile: online, headful/headless, power, its workspaces with "Add workspace", ADE status with install/update/login buttons and update/restart policies, API keys, widgets, machine settings such as agent-to-agent limits) → **workspace** (sessions, project links) → **sessions** (timeline, composer, inline approvals, plan/todos, diff review, terminal tab, raw-events tab) · **inbox** (approvals, questions, finished turns, knowledge suggestions) · **knowledge browser** (by scope, provenance, policy) · **settings** (app-level only: appearance, hotkeys, knowledge, devices, connection).
 
 Mobile-first touches: approve/deny from the notification, voice input, file-by-file diff review, share sheet into a session.
 
@@ -366,35 +366,39 @@ Theming: themes are semantic UI tokens, a terminal palette and layout tokens, pe
 
 ### 11.1 Sidebar: machines, workspaces, agent indicators
 
-Machines first, workspaces (usually a repo) under each, as in Herdr. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
+A file tree: machines first, workspaces (usually a repo) under each, and under each workspace its open sessions, then its worktrees, with guide lines and a chevron to fold each level. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
 
 ```
 ▾ This computer              6 · 1 waiting
-  W website    main*                ⚠ ◐ ◐ ●
-    ⚠ Claude: approve `bun run build`?
-  C core       master                     ◐
-  P plugins    main            ● ● ● ● +3
-    PR #27 open · CI ✓ · ↑2
-▾ mac-mini                   1
-  E extensions main                       ✓
-    ✓ Codex: removed five unused selectors
+│ ▾ W website    main*
+│ │   ⚠ Fix the build script   ▬▬── 41%
+│ │     approve `bun run build`?
+│ │   ◐ Review the header PR   ▬─── 18%
+│ │   ▾ ⎇ feat/nav
+│ │       ● Nav spacing         ▬▬▬─ 77%
+│ ▸ P plugins    main            ● ● ● ● +3
+│     PR #27 open · CI ✓ · ↑2
 ▸ vps (offline)              2 (cached)
 ```
 
-**Row 1 (always):** workspace icon, name, branch (`*` when dirty), then the agent marks, right-aligned.
+**Session rows (open workspace):** one per open session (helpers indented under their parent): the agent mark in its state, the name (a terminal icon for terminal sessions), and a context bar read like the session header's (fill = share of the usable window, amber from 80%, red near compaction; the number is the share of the whole window), from `SessionInfo.context`, which the node keeps from the latest `context.updated` so sessions nobody has open show it too. A waiting or failed session has its reason on a second line. The row opens the session and is highlighted while it's open; right-click gives the session menu. Session rows don't count toward the auto width.
+
+**Row 1 (always):** chevron, workspace icon, name, branch (`*` when dirty); when folded, the agent marks right-aligned. On hover (desktop) a **+** starts a session there with the default profile, like ⌘T. Folded state is stored per device; everything starts open.
 
 - One mark per live session, at most four, then `+n`. Order: waiting, failed, working, done-unseen, idle.
 - Mark = the agent-type icon with a ring in the state color; plain dots when the sidebar is narrow.
 - States: **⚠ waiting** (approval, question, login; amber, pulses) · **✗ failed** · **◐ working** (spins) · **✓ done, not yet seen** (clears when the session is opened) · **● idle** (gray, hollow).
 - Helper sessions (§12.1) count inside their parent's mark as a small number, not as marks of their own.
 
-**Row 2 (only when something needs you):** the single most urgent item in the workspace, one line, ellipsised: waiting (with the reason) > failed > done-unseen (first line of the final message). Clicking it opens that session directly.
+**Row 2 (folded workspaces, only when something needs you):** the single most urgent item in the workspace, one line, ellipsised: waiting (with the reason) > failed > done-unseen (first line of the final message). Clicking it opens that session directly.
 
 **Row 3 (only when not default):** repo state: PR and CI status, ahead/behind. Hidden when there's no PR and the branch is in sync. PR/CI needs a forge integration on the node (`gh` first); without one the row shows ahead/behind only.
 
 **Machine header (tile):** name, online state, totals ("6 · 1 waiting"), so a collapsed machine still shows what needs you. Offline machines are dimmed and show cached counts; an unsupported agent shows a warning mark; "updates pending" sits under the header. Clicking the tile opens the machine's page and highlights the tile while it's open; the chevron is a separate target that collapses/expands. On hover (desktop) a **+** (add a workspace on that machine) and a gear (the machine page) overlay the totals.
 
 **Desktop sidebar = the tree** (Herdr-style; no separate Machines/Workspaces pages, `#/machines` and `#/workspaces` open the selected machine's page). Header: logo and connection status, then icon buttons for Inbox (waiting badge), Knowledge (suggestion badge) and Settings. Footer: light/dark toggle and disconnect.
+
+**Hotkeys** (Settings › Hotkeys, each switchable per device): **⌘N / Ctrl+N** opens Add workspace for the machine you're on (the open page's machine, else the selected one); **⌘T / Ctrl+T** starts a session in the open workspace (the workspace page, or a session's) with the default agent's ★ profile and opens it. The desktop File menu lists both without registering them, so the keys reach the UI; clicking the item sends the same command (`bizzi:command`). In a terminal session on Windows and Linux, Ctrl+N and Ctrl+T go to the shell. Browsers may keep these keys for new window and new tab.
 
 **Width:** a drag handle on the right edge (keyboard: focus it, arrows resize, Home/End jump, Enter fits) sets a manual width in [200, min(480, 40% of the window)]. **Auto** (the default) fits the widest row 1 or machine header (rows 2 and 3 don't count), clamped to [220, 360], and shrinks on narrow windows so the main pane keeps 640 px. Double-click the handle, its context menu, or Settings → Appearance returns to auto. Stored per device; rows ellipsise at any width. Measured once per frame at most, from a hidden max-content copy, only when the tree changes.
 

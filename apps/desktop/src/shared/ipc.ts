@@ -9,6 +9,18 @@ export const IPC_BOOTSTRAP = 'bizzi:bootstrap';
 export const IPC_CHROME = 'bizzi:chrome';
 /** Main → renderer: a UI hash route (`#/inbox`) picked from the application menu; the preload sets it. */
 export const IPC_NAVIGATE = 'bizzi:navigate';
+/**
+ * Main → renderer: a menu command the UI runs where it is (`MENU_COMMANDS`); the preload re-dispatches it
+ * as a `bizzi:command` window event. Same actions as the UI's hotkeys (Settings › Hotkeys).
+ */
+export const IPC_COMMAND = 'bizzi:command';
+
+export const MENU_COMMANDS = ['new-workspace', 'new-session'] as const;
+export type MenuCommand = (typeof MENU_COMMANDS)[number];
+
+export function isMenuCommand(v: unknown): v is MenuCommand {
+  return typeof v === 'string' && (MENU_COMMANDS as readonly string[]).includes(v);
+}
 
 /** A route the renderer may be sent to from the menu: a UI hash route (`#/…`), no scheme or host. */
 export function isMenuRoute(v: unknown): v is string {

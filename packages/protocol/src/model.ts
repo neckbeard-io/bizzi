@@ -170,6 +170,11 @@ export interface SessionInfo {
   group?: string;
   /** Highest seq viewed on any device (spec §4); "done, not yet seen" = idle with lastSeq > seenThrough. */
   seenThrough?: number;
+  /**
+   * Latest context-window occupancy the agent reported (`context.updated`), without the breakdown, so lists
+   * (the sidebar tree) can show it for sessions nobody has open. Absent until the agent reports one.
+   */
+  context?: SessionContext;
   // ---- parent answers approvals (spec §12.5)
   /** Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals. */
   parentAnswersApprovals?: boolean;
@@ -258,6 +263,20 @@ export interface ContextUsage {
   compactAt?: number;
   /** Only where the agent reports a breakdown (Claude); bizzi adds a 'bizzi' row for what it injects. */
   categories?: ContextCategory[];
+}
+
+/** What `SessionInfo.context` keeps of a `ContextUsage` (no breakdown). */
+export interface SessionContext {
+  used: number;
+  window: number;
+  usable?: number;
+  compactAt?: number;
+}
+
+/** Context occupancy 0..1+ of `usable` (or `window`), the share warnings key off; 0 for an unknown window. */
+export function contextFraction(c: SessionContext): number {
+  const of = c.usable ?? c.window;
+  return of > 0 ? c.used / of : 0;
 }
 
 export interface ContextCategory {

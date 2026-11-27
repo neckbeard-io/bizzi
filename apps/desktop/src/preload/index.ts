@@ -1,9 +1,10 @@
 // Sandboxed preload: exposes exactly `window.bizzi = { connection, coreStarting, platform, versions,
-// accentColor, titleBar, setChrome, updates }`, and applies menu navigation (a hash route) to the page's location.
+// accentColor, titleBar, setChrome, updates }`, applies menu navigation (a hash route) to the page's location
+// and passes menu commands on as `bizzi:command` window events.
 // Nothing else from Electron or Node reaches the page.
 
 import { contextBridge, ipcRenderer } from 'electron';
-import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
+import { IPC_BOOTSTRAP, IPC_CHROME, IPC_COMMAND, IPC_NAVIGATE, isMenuCommand, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
 import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, type UpdateAction, type UpdateState } from '../shared/update.ts';
 
 const boot = (ipcRenderer.sendSync(IPC_BOOTSTRAP) as Bootstrap | null) ?? { connection: null, appVersion: '0.0.0' };
@@ -39,4 +40,11 @@ contextBridge.exposeInMainWorld('bizzi', {
 ipcRenderer.on(IPC_NAVIGATE, (_e, hash: unknown) => {
   // No DOM lib in this tsconfig; the page's location is shared with the isolated world.
   if (isMenuRoute(hash)) (globalThis as unknown as { location: { hash: string } }).location.hash = hash;
+});
+
+// Application menu → UI command (New Workspace, New Session): the UI runs it for the page it shows.
+ipcRenderer.on(IPC_COMMAND, (_e, command: unknown) => {
+  if (!isMenuCommand(command)) return;
+  const g = globalThis as unknown as { dispatchEvent(e: unknown): boolean; CustomEvent: new (type: string, init: { detail: string }) => unknown };
+  g.dispatchEvent(new g.CustomEvent('bizzi:command', { detail: command }));
 });

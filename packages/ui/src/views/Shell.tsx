@@ -4,6 +4,7 @@ import { selectKnowledgeSuggestionCount, selectMachineList, selectWaitingCount }
 import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { ContextMenuHost, GlobalDialogs, ToastHost } from '../components/ContextMenu.tsx';
 import { useBizzi, useBizziContext } from '../app/context.tsx';
+import { useGlobalHotkeys } from '../app/hotkeys.ts';
 import { navigate, useIsWide, useRoute, useTheme } from '../app/hooks.ts';
 import type { ThemePref } from '../app/hooks.ts';
 import { useTargetMachineId } from '../app/machine.ts';
@@ -69,6 +70,7 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
     if (redirect) navigate(redirect, { replace: true });
   }, [redirectHref]);
   const shown = redirect ?? route;
+  useGlobalHotkeys(store, shown);
 
   const fullScreen = shown.name === 'session' || shown.name === 'login';
 
@@ -315,7 +317,7 @@ function Sidebar(props: { route: Route }): ReactNode {
       <UpdatePill />
       <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto border-t border-sidebar-border px-1 pt-2 pb-2">
         <div ref={treeRef}>
-          <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} />
+          <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} activeSessionId={props.route.name === 'session' ? props.route.sessionId : null} />
         </div>
       </div>
       <div className="flex items-center gap-1 border-t border-sidebar-border px-2 py-2">

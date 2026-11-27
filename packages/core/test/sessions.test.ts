@@ -408,3 +408,38 @@ test('session.clear is refused for terminal sessions and ended sessions', async 
   await node.call('session.stop', { sessionId: s.id });
   await assert.rejects(node.call('session.clear', { sessionId: s.id }), (e: unknown) => e instanceof BizziError);
 });
+
+test('session info keeps the latest context occupancy; session.updated only when the percentage moves', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const session = await idleSession(node, workspace.id);
+  const before = node.sessions.get(session.id).session.updatedAt;
+  const updates: SessionInfo[] = [];
+  const off = node.bus.on(GLOBAL_CHANNEL, (ev) => {
+    if (ev.type === 'session.updated' && ev.data.session.id === session.id) updates.push(ev.data.session);
+  });
+  t.after(off);
+  const handle = fake.sessions[0]!;
+
+  handle.emitEvent({ type: 'context.updated', data: { used: 40_000, window: 200_000, usable: 160_000, compactAt: 160_000, categories: [{ id: 'msgs', label: 'Messages', tokens: 40_000, kind: 'used' }] } });
+  await waitFor(() => node.sessions.get(session.id).session.context !== undefined);
+  assert.deepEqual(node.sessions.get(session.id).session.context, { used: 40_000, window: 200_000, usable: 160_000, compactAt: 160_000 });
+  assert.equal(updates.length, 1);
+  // Context isn't activity: the session keeps its place in recency-ordered lists.
+  assert.equal(node.sessions.get(session.id).session.updatedAt, before);
+
+  // Same rounded percentage (25%): stored, not broadcast.
+  handle.emitEvent({ type: 'context.updated', data: { used: 40_300, window: 200_000, usable: 160_000, compactAt: 160_000 } });
+  await waitFor(() => node.sessions.get(session.id).session.context?.used === 40_300);
+  assert.equal(updates.length, 1);
+
+  handle.emitEvent({ type: 'context.compacted', data: { before: 40_300, after: 8_000 } });
+  await waitFor(() => updates.length === 2);
+  assert.deepEqual(updates[1]!.context, { used: 8_000, window: 200_000, usable: 160_000, compactAt: 160_000 });
+  const got = await node.call('session.get', { sessionId: session.id });
+  assert.equal(got.session.context?.used, 8_000);
+
+  // /clear starts a fresh conversation: the old context no longer applies.
+  await node.call('session.clear', { sessionId: session.id });
+  await waitFor(() => node.sessions.get(session.id).session.context === undefined, 5000, 'context reset by clear');
+});

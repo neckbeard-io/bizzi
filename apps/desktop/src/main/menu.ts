@@ -2,10 +2,13 @@
 // (`MenuActions.navigate`, applied by the preload), so the menu needs no knowledge of the UI's state.
 
 import type { MenuItemConstructorOptions } from 'electron';
+import type { MenuCommand } from '../shared/ipc.ts';
 
 export interface MenuActions {
   /** Show the window and open this UI route (`#/…`). */
   navigate(hash: string): void;
+  /** Show the window and run a UI command where the page is (`bizzi:command`). */
+  command(name: MenuCommand): void;
   back(): void;
   forward(): void;
   showCoreLog(): void;
@@ -56,8 +59,11 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
     {
       label: 'File',
       submenu: [
-        { label: 'New Prompt…', accelerator: 'CmdOrCtrl+N', click: () => a.navigate(MENU_ROUTES.ask) },
-        { label: 'Add Workspace…', accelerator: 'CmdOrCtrl+Shift+N', click: () => a.navigate(MENU_ROUTES.addWorkspace) },
+        // ⌘N / ⌘T are the UI's hotkeys (Settings › Hotkeys, switchable per device): shown here, not
+        // registered, so the keys reach the page and the UI decides; a click runs the command regardless.
+        { label: 'New Workspace…', accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: () => a.command('new-workspace') },
+        { label: 'New Session', accelerator: 'CmdOrCtrl+T', registerAccelerator: false, click: () => a.command('new-session') },
+        { label: 'New Prompt…', accelerator: 'CmdOrCtrl+Shift+N', click: () => a.navigate(MENU_ROUTES.ask) },
         { label: 'Pair a Device…', click: () => a.navigate(MENU_ROUTES.devices) },
         sep,
         ...(mac ? [] : [settings, sep]),

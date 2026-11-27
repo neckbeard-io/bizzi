@@ -9,6 +9,7 @@ import { useMachine, useMachineOnline, useShowMachine } from '../app/machine.ts'
 import { OfflineMachineBanner } from '../components/OfflineMachineBanner.tsx';
 import { contextMenuHandler, menuButtonHandler } from '../app/contextMenu.ts';
 import { useNewSessionRequest } from '../app/workspaceIntents.ts';
+import { agentModes, defaultAgent, resolveMode } from '../lib/newSession.ts';
 import { Icon } from '../components/icons.tsx';
 import { ModelPicker, effortsFor, useAgentModels } from '../components/ModelPicker.tsx';
 import { MachineChip, WorkspaceTile, stripeStyle } from '../components/labels.tsx';
@@ -239,8 +240,6 @@ function SessionRow(props: { session: SessionInfo; depth?: number; foreign?: boo
   );
 }
 
-const FALLBACK_MODES: SessionMode[] = ['structured'];
-
 /** What a profile sets, as the form holds it ('' = the agent's default). */
 interface ProfileFields {
   mode: SessionMode | '';
@@ -272,11 +271,11 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
   const agents = useBizzi((s) => selectAgents(s, machineId));
   const prefs = useBizzi((s) => s.prefs);
   const installed = useMemo(() => (agents ?? []).filter((a) => a.installed), [agents]);
-  const defaultAgent = installed.find((a) => a.auth === 'ok' && a.capabilities?.modes.includes('structured')) ?? installed[0];
-  const [agent, setAgent] = useState<AgentKind | ''>(defaultAgent?.agent ?? '');
-  const listing: AgentListing | undefined = installed.find((a) => a.agent === agent) ?? defaultAgent;
+  const preselected = defaultAgent(installed);
+  const [agent, setAgent] = useState<AgentKind | ''>(preselected?.agent ?? '');
+  const listing: AgentListing | undefined = installed.find((a) => a.agent === agent) ?? preselected;
   const caps = listing?.capabilities;
-  const modes = caps?.modes.length ? caps.modes : FALLBACK_MODES;
+  const modes = agentModes(listing);
 
   // Profiles (user-wide prefs). Without prefs support on the server there are none: plain fields.
   const profiles = useMemo(() => (listing ? profilesFor(prefs ?? undefined, listing.agent) : []), [prefs, listing]);
@@ -311,7 +310,7 @@ function NewSessionForm(props: { workspaceId: string; onCancel: () => void }): R
     setTouched(false);
   };
 
-  const mode: SessionMode = fields.mode && modes.includes(fields.mode) ? fields.mode : modes.includes('structured') ? 'structured' : (modes[0] ?? 'structured');
+  const mode: SessionMode = resolveMode(fields.mode, modes);
   const { models } = useAgentModels(machineId, caps && mode === 'structured' && caps.models === 'dynamic' ? listing?.agent : undefined);
   const efforts = effortsFor(models, fields.model, caps?.effort ?? undefined);
   const [title, setTitle] = useState('');

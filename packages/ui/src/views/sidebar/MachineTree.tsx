@@ -1,8 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import {
+  breakdownEqual,
   collapsedCounts,
+  contextView,
   machineSummaryEqual,
   machineTotalsLabel,
   selectMachineList,
@@ -14,11 +16,12 @@ import {
   workspaceRowEqual,
   workspaceTreeEqual,
 } from '@bizzi/client';
-import type { SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
-import type { MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
+import type { ContextView, SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
+import type { MachineInfo } from '@bizzi/protocol';
 import { openAddWorkspace } from '../../app/addWorkspace.ts';
 import { contextMenuHandler } from '../../app/contextMenu.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
+import { isMac, startDefaultSession } from '../../app/hotkeys.ts';
 import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { WorkspaceTile } from '../../components/labels.tsx';
@@ -26,30 +29,51 @@ import { PresenceDot } from '../../components/MachineSwitcher.tsx';
 import { AgentMark, MarkCount, MarkDot } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
 import { formatRelative } from '../../lib/format.ts';
+import { HOTKEYS, hotkeyLabel } from '../../lib/hotkeys.ts';
 import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
 import { AGENT_LABEL, MARK_LABEL, MARK_SYMBOL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
+import { groupWorkspaces, readCollapsed } from '../../lib/sidebarTree.ts';
+import type { WorkspaceGroup } from '../../lib/sidebarTree.ts';
 import { loadJson, saveJson } from '../../lib/storage.ts';
-import { machineMenu, workspaceMenu } from '../menus.ts';
+import { machineMenu, sessionMenu, workspaceMenu } from '../menus.ts';
 
 type Variant = 'desktop' | 'phone';
 
 const COLLAPSED_KEY = 'bizzi.sidebar.collapsed';
+const FOLDED_KEY = 'bizzi.sidebar.folded';
 
 /**
- * Machines first, workspaces under each (spec §11.1). A quiet workspace is one line; a row grows only when
- * something needs you (row 2) or the repo isn't in sync (row 3, desktop only). Machine sections collapse and
- * remember their state. Each machine header is a tile that opens the machine's page.
+ * A file tree (spec §11.1): machines, their workspaces, and under each workspace its open sessions (helpers
+ * under their parent) and then its worktrees, with guide lines. Each session row shows its state, name and a
+ * context bar. Machines and workspaces fold and remember it on this device; a folded workspace summarizes
+ * its sessions as marks, an urgent line and a hover breakdown. Each machine header opens the machine's page.
  *
- * Auto width (Shell): elements marked `data-fit-ignore` (rows 2 and 3, notes) don't widen the sidebar.
+ * Auto width (Shell): elements marked `data-fit-ignore` (session rows, notes) don't widen the sidebar.
  */
-export function MachineTree(props: { variant: Variant; activeWorkspaceId?: string | null; activeMachineId?: string | null; className?: string }): ReactNode {
+export function MachineTree(props: {
+  variant: Variant;
+  activeWorkspaceId?: string | null;
+  activeMachineId?: string | null;
+  activeSessionId?: string | null;
+  className?: string;
+}): ReactNode {
   const machines = useBizzi(selectMachineList, shallowEqual);
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>(() => loadJson<Record<string, boolean>>(COLLAPSED_KEY) ?? {});
   const toggle = useCallback((id: string) => {
     setCollapsed((c) => {
       const next = { ...c, [id]: !c[id] };
       saveJson(COLLAPSED_KEY, next);
+      return next;
+    });
+  }, []);
+  const [folded, setFolded] = useState<Record<string, boolean>>(() => readCollapsed(loadJson(FOLDED_KEY)));
+  const fold = useCallback((id: string) => {
+    setFolded((c) => {
+      const next = { ...c };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      saveJson(FOLDED_KEY, next);
       return next;
     });
   }, []);
@@ -64,6 +88,9 @@ export function MachineTree(props: { variant: Variant; activeWorkspaceId?: strin
           collapsed={collapsed[m.id] ?? false}
           onToggle={toggle}
           activeWorkspaceId={props.activeWorkspaceId ?? null}
+          activeSessionId={props.activeSessionId ?? null}
+          folded={folded}
+          onFold={fold}
           active={props.activeMachineId === m.id}
         />
       ))}
@@ -71,11 +98,22 @@ export function MachineTree(props: { variant: Variant; activeWorkspaceId?: strin
   );
 }
 
-function MachineSection(props: { machine: MachineInfo; variant: Variant; collapsed: boolean; onToggle: (id: string) => void; activeWorkspaceId: string | null; active: boolean }): ReactNode {
+function MachineSection(props: {
+  machine: MachineInfo;
+  variant: Variant;
+  collapsed: boolean;
+  onToggle: (id: string) => void;
+  activeWorkspaceId: string | null;
+  activeSessionId: string | null;
+  folded: Record<string, boolean>;
+  onFold: (id: string) => void;
+  active: boolean;
+}): ReactNode {
   const { machine: m, variant, collapsed } = props;
   const store = useStore();
   const summary = useBizzi((s) => selectMachineSummary(s, m.id), machineSummaryEqual);
   const rows = useBizzi((s) => selectMachineWorkspaces(s, m.id), workspaceTreeEqual);
+  const groups = useMemo(() => groupWorkspaces(rows), [rows]);
   const phone = variant === 'phone';
   const totals = machineTotalsLabel(summary);
   const unsupported = summary.unsupported.map((a) => AGENT_LABEL[a]).join(', ');
@@ -127,7 +165,7 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
             <button
               type="button"
               className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40"
-              title={`Add a workspace on ${m.name}`}
+              title={`Add a workspace on ${m.name} (${hotkeyLabel(HOTKEYS.find((h) => h.id === 'newWorkspace')!, isMac())})`}
               aria-label={`Add a workspace on ${m.name}`}
               disabled={!summary.online}
               onClick={() => {
@@ -160,21 +198,43 @@ function MachineSection(props: { machine: MachineInfo; variant: Variant; collaps
         </div>
       ) : null}
       {!collapsed ? (
-        <div className="flex flex-col">
-          {rows.map((r) => (
-            <WorkspaceRow key={r.workspace.id} workspace={r.workspace} depth={r.depth} variant={variant} online={summary.online} active={props.activeWorkspaceId === r.workspace.id} />
+        // Guide line down from the machine's chevron.
+        <div className={cx('flex flex-col border-l border-sidebar-border', phone ? 'ml-[18px] pl-0.5' : 'ml-3 pl-0.5')}>
+          {groups.map((g) => (
+            <WorkspaceNode
+              key={g.workspace.id}
+              group={g}
+              variant={variant}
+              online={summary.online}
+              activeWorkspaceId={props.activeWorkspaceId}
+              activeSessionId={props.activeSessionId}
+              folded={props.folded}
+              onFold={props.onFold}
+            />
           ))}
-          {rows.length === 0 ? <div data-fit-ignore className="py-1 pl-7 text-[11px] text-muted">No workspaces</div> : null}
+          {rows.length === 0 ? <div data-fit-ignore className="py-1 pl-4 text-[11px] text-muted">No workspaces</div> : null}
         </div>
       ) : null}
     </section>
   );
 }
 
-function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant: Variant; online: boolean; active: boolean }): ReactNode {
-  const { workspace: w, variant, online } = props;
+function WorkspaceNode(props: {
+  group: WorkspaceGroup;
+  variant: Variant;
+  online: boolean;
+  activeWorkspaceId: string | null;
+  activeSessionId: string | null;
+  folded: Record<string, boolean>;
+  onFold: (id: string) => void;
+}): ReactNode {
+  const { group, variant, online, folded, onFold } = props;
+  const w = group.workspace;
   const store = useStore();
   const row = useBizzi((s) => selectWorkspaceRow(s, w.id), workspaceRowEqual);
+  // Each session sits under its own workspace only: a helper running in a worktree isn't repeated under
+  // its parent's workspace (the hover breakdown still nests it there).
+  const lines = useBizzi((s) => selectWorkspaceBreakdown(s, w.id).filter((l) => s.sessions[l.sessionId]?.workspaceId === w.id), breakdownEqual);
   const git = useBizzi((s) => s.gitStatus[w.id] ?? null);
   const iconsFit = useMediaQuery('(min-width: 1024px)');
   const phone = variant === 'phone';
@@ -182,9 +242,13 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
   const [sheet, setSheet] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const longPress = useLongPress(() => setSheet(true));
+  const hasChildren = lines.length > 0 || group.worktrees.length > 0;
+  const open = hasChildren && !folded[w.id];
+  const longPress = useLongPress(() => {
+    if (!open) setSheet(true);
+  });
 
-  // Repo state for row 1 (branch, dirty) and row 3 (ahead/behind); refreshed while the row is mounted.
+  // Repo state for the row (branch, dirty) and the line under it (ahead/behind); refreshed while mounted.
   useEffect(() => {
     if (!online || w.kind === 'dir') return;
     const load = (): void => void store.loadGitStatus(w.id).catch(() => {});
@@ -202,8 +266,9 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
 
   const branch = git?.branch ?? w.branch;
   const ab = git ? aheadBehind(git.ahead, git.behind) : '';
+  // Folded rows summarize their sessions: marks, the urgent line and the hover breakdown.
   const onEnter = (): void => {
-    if (phone || row.marks.length === 0) return;
+    if (phone || open || row.marks.length === 0) return;
     timer.current = setTimeout(() => setHover(ref.current?.getBoundingClientRect() ?? null), 450);
   };
   const onLeave = (): void => {
@@ -211,41 +276,82 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
     timer.current = null;
     setHover(null);
   };
+  const here = props.activeWorkspaceId === w.id;
+  // The open session gets the highlight when its row is showing; otherwise its workspace does.
+  const highlighted = here && !(open && lines.some((l) => l.sessionId === props.activeSessionId));
+  const newSession = HOTKEYS.find((h) => h.id === 'newSession')!;
 
   return (
-    <div
-      ref={ref}
-      onMouseEnter={onEnter}
-      onMouseLeave={onLeave}
-      onContextMenu={contextMenuHandler(() => {
-        onLeave();
-        return workspaceMenu(store, w, online);
-      }, w.name)}
-      className={cx('rounded-md', props.active && (phone ? 'bg-panel-2' : 'bg-sidebar-accent'))} style={{ paddingLeft: props.depth * 14 }}>
-      <a
-        href={routeHref({ name: 'workspace', workspaceId: w.id })}
-        className={cx('flex items-center gap-2 rounded-md pr-2 pl-2', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]', props.active ? 'font-medium text-fg' : 'text-fg/90')}
-        title={w.path}
-        {...(phone ? longPress : {})}
+    <div>
+      <div
+        ref={ref}
+        onMouseEnter={onEnter}
+        onMouseLeave={onLeave}
+        onContextMenu={contextMenuHandler(() => {
+          onLeave();
+          return workspaceMenu(store, w, online);
+        }, w.name)}
+        className={cx(
+          'group relative flex items-center rounded-md pr-2',
+          phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]',
+          highlighted ? (phone ? 'bg-panel-2' : 'bg-sidebar-accent') : phone ? 'active:bg-panel-2' : 'hover:bg-sidebar-accent/70',
+          here ? 'font-medium text-fg' : 'text-fg/90',
+        )}
       >
-        <WorkspaceTile workspace={w} />
-        <span className="min-w-[4.5rem] truncate">{w.kind === 'worktree' && w.branch ? w.branch : w.name}</span>
-        {branch && w.kind !== 'worktree' ? (
-          <span className="min-w-0 shrink-[4] truncate font-mono text-[11px] text-muted">
-            {branch}
-            {git?.dirty ? '*' : ''}
+        {hasChildren ? (
+          <button
+            type="button"
+            onClick={() => onFold(w.id)}
+            className={cx('flex shrink-0 items-center justify-center self-stretch rounded text-muted hover:text-fg', phone ? 'w-7' : 'w-[18px]')}
+            aria-expanded={open}
+            aria-label={open ? `Collapse ${w.name}` : `Expand ${w.name}`}
+          >
+            <Icon name={open ? 'chevronDown' : 'chevronRight'} size={12} />
+          </button>
+        ) : (
+          <span className={cx('shrink-0', phone ? 'w-7' : 'w-[18px]')} />
+        )}
+        <a
+          href={routeHref({ name: 'workspace', workspaceId: w.id })}
+          className="flex min-w-0 flex-1 items-center gap-2 self-stretch"
+          title={w.path}
+          aria-current={highlighted ? 'page' : undefined}
+          {...(phone ? longPress : {})}
+        >
+          <WorkspaceTile workspace={w} />
+          <span className="min-w-[4.5rem] truncate">{w.kind === 'worktree' && w.branch ? w.branch : w.name}</span>
+          {branch && w.kind !== 'worktree' ? (
+            <span className="min-w-0 shrink-[4] truncate font-mono text-[11px] font-normal text-muted">
+              {branch}
+              {git?.dirty ? '*' : ''}
+            </span>
+          ) : w.kind === 'worktree' && git?.dirty ? (
+            <span className="font-mono text-[11px] text-muted">*</span>
+          ) : null}
+          <span className="flex-1" />
+          {open ? null : <Marks row={row} variant={variant} dots={!phone && !iconsFit} />}
+        </a>
+        {phone ? null : (
+          // Overlays the marks on hover, so it never changes the row's width.
+          <span className="absolute top-1/2 right-1 hidden -translate-y-1/2 items-center rounded-md bg-sidebar-accent pl-1 group-focus-within:flex group-hover:flex">
+            <button
+              type="button"
+              className="flex h-6 w-6 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40"
+              title={`New session in ${w.name}, default profile (${hotkeyLabel(newSession, isMac())})`}
+              aria-label={`New session in ${w.name}`}
+              disabled={!online}
+              onClick={() => void startDefaultSession(store, w.id)}
+            >
+              <Icon name="plus" size={14} />
+            </button>
           </span>
-        ) : w.kind === 'worktree' && git?.dirty ? (
-          <span className="font-mono text-[11px] text-muted">*</span>
-        ) : null}
-        <span className="flex-1" />
-        <Marks row={row} variant={variant} dots={!phone && !iconsFit} />
-      </a>
-      {row.urgent ? (
+        )}
+      </div>
+      {!open && row.urgent ? (
         <a
           data-fit-ignore
           href={routeHref({ name: 'session', sessionId: row.urgent.sessionId, tab: 'chat' })}
-          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-8 text-xs text-muted hover:text-fg', phone ? 'hover:bg-panel-2' : 'hover:bg-sidebar-accent', phone ? 'min-h-11' : 'h-6')}
+          className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-10 text-xs text-muted hover:text-fg', phone ? 'min-h-11 hover:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
           title={`${AGENT_LABEL[row.urgent.agent]}: ${row.urgent.text}`}
         >
           <span className={cx('shrink-0', MARK_TEXT[row.urgent.state])} aria-label={MARK_LABEL[row.urgent.state]}>
@@ -256,7 +362,31 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
           </span>
         </a>
       ) : null}
-      {!phone && ab ? <div data-fit-ignore className="h-5 truncate pl-8 font-mono text-[11px] leading-5 text-muted">{ab}</div> : null}
+      {!phone && ab ? <div data-fit-ignore className="h-5 truncate pl-10 font-mono text-[11px] leading-5 text-muted">{ab}</div> : null}
+      {open ? (
+        // The guide line runs down from the chevron; sessions first, then the repo's worktrees.
+        <div className={cx('flex flex-col border-l border-sidebar-border', phone ? 'ml-3.5 pl-1' : 'ml-[9px] pl-0.5')}>
+          {lines.length > 0 ? (
+            <div data-fit-ignore className="flex flex-col">
+              {lines.map((l) => (
+                <SessionLeaf key={l.sessionId} line={l} phone={phone} online={online} active={props.activeSessionId === l.sessionId} />
+              ))}
+            </div>
+          ) : null}
+          {group.worktrees.map((t) => (
+            <WorkspaceNode
+              key={t.id}
+              group={{ workspace: t, worktrees: [] }}
+              variant={variant}
+              online={online}
+              activeWorkspaceId={props.activeWorkspaceId}
+              activeSessionId={props.activeSessionId}
+              folded={folded}
+              onFold={onFold}
+            />
+          ))}
+        </div>
+      ) : null}
       {hover ? <BreakdownPopover workspaceId={w.id} rect={hover} /> : null}
       {sheet ? (
         <Modal title={w.name} onClose={() => setSheet(false)}>
@@ -264,6 +394,56 @@ function WorkspaceRow(props: { workspace: WorkspaceInfo; depth: number; variant:
         </Modal>
       ) : null}
     </div>
+  );
+}
+
+/** One live session: its state, name and context bar; why it waits or failed on a second line. */
+function SessionLeaf(props: { line: SessionBreakdownLine; phone: boolean; online: boolean; active: boolean }): ReactNode {
+  const { line: l, phone } = props;
+  const store = useStore();
+  const ctx = contextView(l.contextUsage);
+  const reason = l.reason && (l.state === 'waiting' || l.state === 'failed') ? l.reason : null;
+  const title = `${AGENT_LABEL[l.agent]} · ${l.title} · ${MARK_LABEL[l.state]}${ctx.known ? ` · context ${ctx.label}` : ''}${reason ? `\n${reason}` : ''}`;
+  return (
+    <a
+      href={routeHref({ name: 'session', sessionId: l.sessionId, tab: 'chat' })}
+      onContextMenu={contextMenuHandler(() => {
+        const s = store.getState().sessions[l.sessionId];
+        return s ? sessionMenu(store, s, props.online) : [];
+      }, l.title)}
+      className={cx(
+        'block rounded-md pr-2',
+        props.active ? (phone ? 'bg-panel-2 font-medium text-fg' : 'bg-sidebar-accent font-medium text-sidebar-accent-foreground') : phone ? 'text-fg/85 active:bg-panel-2' : 'text-fg/85 hover:bg-sidebar-accent/70',
+      )}
+      style={{ paddingLeft: 6 + l.depth * 12 }}
+      title={title}
+      aria-current={props.active ? 'page' : undefined}
+    >
+      <span className={cx('flex items-center gap-1.5', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]')}>
+        <AgentMark agent={l.agent} state={l.state} size={phone ? 18 : 14} title={`${AGENT_LABEL[l.agent]} · ${MARK_LABEL[l.state]}`} />
+        {l.mode === 'terminal' ? <Icon name="terminal" size={12} className="shrink-0 text-muted" /> : null}
+        <span className="min-w-0 flex-1 truncate">{l.title}</span>
+        {ctx.known ? <ContextBar view={ctx} /> : null}
+      </span>
+      {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
+    </a>
+  );
+}
+
+/**
+ * How full the session's context window is, read exactly like the session header's bar (`contextView`):
+ * the fill is the share of the usable window, the number the share of the whole window.
+ */
+function ContextBar(props: { view: Extract<ContextView, { known: true }> }): ReactNode {
+  const v = props.view;
+  const pct = Math.round(v.pct * 100);
+  return (
+    <span className="flex shrink-0 items-center gap-1" role="meter" aria-label={`Context ${v.label}`} aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100}>
+      <span className="relative h-1 w-8 overflow-hidden rounded-full bg-sidebar-border">
+        <span className={cx('absolute inset-y-0 left-0 rounded-full', v.tone === 'err' ? 'bg-err' : v.tone === 'warn' ? 'bg-warn' : 'bg-accent')} style={{ width: `${Math.max(Math.round(v.fill * 100), 4)}%` }} />
+      </span>
+      <span className={cx('w-7 text-right text-[10px] font-normal tabular-nums', v.tone === 'neutral' ? 'text-muted' : v.tone === 'warn' ? 'text-warn' : 'text-err')}>{pct}%</span>
+    </span>
   );
 }
 
@@ -345,14 +525,4 @@ function BreakdownLine(props: { line: SessionBreakdownLine }): ReactNode {
       </span>
     </>
   );
-}
-
-function breakdownEqual(a: SessionBreakdownLine[], b: SessionBreakdownLine[]): boolean {
-  if (a.length !== b.length) return false;
-  for (let i = 0; i < a.length; i++) {
-    const x = a[i];
-    const y = b[i];
-    if (!x || !y || !shallowEqual(x, y)) return false;
-  }
-  return true;
 }

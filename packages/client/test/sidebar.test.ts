@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { AgentListing, SessionEvent, SessionEventBody, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
 import {
+  breakdownEqual,
   collapsedCounts,
   emptyTimeline,
   isDoneUnseen,
@@ -14,6 +15,7 @@ import {
   selectWaitingCount,
   selectWorkspaceBreakdown,
   selectWorkspaceRow,
+  sessionContext,
   sessionMarkState,
   workspaceRowEqual,
 } from '../src/index.ts';
@@ -226,4 +228,31 @@ test('phone: more than three marks collapse to counts; row equality ignores unre
   const again = selectWorkspaceRow({ ...s, version: 2, sessions: { ...s.sessions } }, 'w1');
   assert.notEqual(again, row);
   assert.ok(workspaceRowEqual(row, again));
+});
+
+test('session context: the open timeline wins, else the session list; unknown without either', () => {
+  const s = state(
+    [
+      sess('listed', { context: { used: 50_000, window: 200_000, usable: 100_000 } }),
+      sess('open', { context: { used: 10_000, window: 200_000 } }),
+      sess('none'),
+      sess('gone', { status: 'ended', context: { used: 1, window: 2 } }),
+    ],
+    { timelines: { open: tl('open', [{ type: 'context.updated', data: { used: 100_000, window: 200_000 } }]) } },
+  );
+  assert.equal(sessionContext(s, s.sessions['listed']!), 0.5);
+  assert.equal(sessionContext(s, s.sessions['open']!), 0.5);
+  assert.equal(sessionContext(s, s.sessions['none']!), undefined);
+  const lines = selectWorkspaceBreakdown(s, 'w1');
+  assert.deepEqual(
+    lines.map((l) => [l.sessionId, l.context, l.mode]).sort(),
+    [
+      ['listed', 0.5, 'structured'],
+      ['none', undefined, 'structured'],
+      ['open', 0.5, 'structured'],
+    ],
+  );
+  assert.ok(breakdownEqual(lines, selectWorkspaceBreakdown(s, 'w1')));
+  const moved = state([...Object.values(s.sessions).filter((x) => x.id !== 'listed'), sess('listed', { context: { used: 60_000, window: 200_000, usable: 100_000 } })], { timelines: s.timelines });
+  assert.equal(breakdownEqual(lines, selectWorkspaceBreakdown(moved, 'w1')), false);
 });

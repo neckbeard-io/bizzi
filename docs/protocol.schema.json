@@ -6508,6 +6508,28 @@
         }
       }
     },
+    "SessionContext": {
+      "description": "What `SessionInfo.context` keeps of a `ContextUsage` (no breakdown).",
+      "type": "object",
+      "properties": {
+        "used": {
+          "type": "number"
+        },
+        "window": {
+          "type": "number"
+        },
+        "usable": {
+          "type": "number"
+        },
+        "compactAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "used",
+        "window"
+      ]
+    },
     "SessionEvent": {
       "allOf": [
         {
@@ -7138,6 +7160,10 @@
         "seenThrough": {
           "description": "Highest seq viewed on any device (spec §4); \"done, not yet seen\" = idle with lastSeq > seenThrough.",
           "type": "number"
+        },
+        "context": {
+          "description": "Latest context-window occupancy the agent reported (`context.updated`), without the breakdown, so lists (the sidebar tree) can show it for sessions nobody has open. Absent until the agent reports one.",
+          "$ref": "#/$defs/SessionContext"
         },
         "parentAnswersApprovals": {
           "description": "Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals.",
