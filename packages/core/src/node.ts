@@ -98,6 +98,13 @@ export interface NodeOptions {
   extensions?: NodeExtension[];
   /** Workspace picker (fs.browse / fs.complete / fs.suggest) overrides; tests set `home` and `caseInsensitive`. */
   browse?: Pick<BrowserOptions, 'home' | 'caseInsensitive' | 'maxEntries'>;
+  /**
+   * After start, continue structured sessions whose turn the last shutdown or crash cut off
+   * (`Sessions.resumeInterrupted`). Default true; `false` leaves them for the next message.
+   */
+  resumeInterrupted?: boolean;
+  /** Delay before that resume, so the caller can finish wiring (default 1 s). */
+  resumeDelayMs?: number;
 }
 
 /** Protocol methods the core doesn't implement; they answer `unsupported` unless an extension claims them. */
@@ -357,6 +364,14 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     ]);
     node.registerExtensions(contexts);
     await node.startExtensions(contexts);
+    // After extensions and a beat for the caller's wiring (`bizzi serve` binds knowledge to the
+    // machine and starts listening): a resumed agent needs their session-start hooks.
+    if (opts.resumeInterrupted !== false) {
+      const t = setTimeout(() => {
+        void sessions.resumeInterrupted().catch((err: unknown) => logger.log('warn', 'resuming interrupted turns failed', { err }));
+      }, opts.resumeDelayMs ?? 1000);
+      t.unref();
+    }
     return node;
   } catch (err) {
     if (node) await node.close().catch(() => {});

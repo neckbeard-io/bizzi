@@ -37,7 +37,9 @@ other BIZZI_ROUTER_* variables, as for "bizzi hub serve". The model only has to 
 machine; a hub without a classifier of its own borrows this one (route.score).
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
-SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting.`;
+SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting.
+Turns still running then are continued automatically on the next start
+(BIZZI_RESUME_INTERRUPTED=0 turns that off).`;
 
 function parsePort(v: string): number {
   const n = Number(v);
@@ -134,6 +136,8 @@ export async function serve(argv: string[], version: string): Promise<void> {
     version,
     ...(knowledge ? { prepareStart: knowledge.prepareStart } : {}),
     ...(extensions.length > 0 ? { extensions } : {}),
+    // Turns cut off by the last shutdown continue on their own (updates.md §7); 0 turns that off.
+    resumeInterrupted: process.env.BIZZI_RESUME_INTERRUPTED !== '0',
   });
   knowledge?.bindMachine(() => node.machine);
   let server: BizziServer;

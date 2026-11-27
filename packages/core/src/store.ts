@@ -47,6 +47,14 @@ export interface SessionState {
    * `fromVersion`: the version that process ran.
    */
   nodeRestarted?: { fromVersion?: string };
+  /**
+   * bizzi stopped this structured session mid-turn (it shut down, or was killed and found the turn
+   * still open at load). Once the node is back, `Sessions.resumeInterrupted` sends a continuation so
+   * the agent carries on instead of waiting for a message. `at`: when it was cut off.
+   */
+  interruptedTurn?: { at: string };
+  /** Automatic resumes since someone last sent a message; capped so a restart loop can't spin. */
+  autoResumes?: number;
   /** Cross-machine helper (spec §12.4): the parent's agent and mode, for the permission cap on `session.set`. */
   remoteParent?: { machineId: string; agent: AgentKind; permissionMode?: string };
   /** Last known spend of this session's helpers on other machines, by helper id (counted in its tree). */

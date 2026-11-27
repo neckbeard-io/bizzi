@@ -256,6 +256,13 @@ function newRuntime(info: SessionInfo, state: SessionState, adapter: AgentAdapte
   };
 }
 
+/** Automatic resumes in a row (no message in between) before bizzi stops continuing a session itself. */
+export const MAX_AUTO_RESUMES = 3;
+
+/** What an interrupted agent is told when bizzi continues its turn after a restart. */
+export const CONTINUE_AFTER_RESTART =
+  '[bizzi] bizzi restarted while you were working, and your last turn was cut off partway. Continue where you left off: check what already got done before redoing anything. If you had already finished, say so briefly.';
+
 export class Sessions {
   readonly #d: SessionsDeps;
   readonly #log: Logger;
@@ -324,6 +331,8 @@ export class Sessions {
         continue;
       }
 
+      // A turn still open here means the node died mid-turn (killed, crashed): resume it once we're up.
+      this.#markInterrupted(rt);
       this.#closeOpenTurn(rt, 'interrupted', 'node restarted');
       const status: SessionStatus = 'idle';
       if (!resumable && rt.info.agentSessionRef && !rt.state.startFresh) {
@@ -714,6 +723,61 @@ export class Sessions {
   }
 
   async send(id: string, input: InputBlock[]): Promise<{ turnId: string }> {
+    return this.#send(id, input, false);
+  }
+
+  /**
+   * After a node restart, continue every structured session whose turn bizzi cut off (updates.md §7):
+   * one at a time, `gapMs` apart, so agents don't all spawn at once. A session interrupted
+   * MAX_AUTO_RESUMES times in a row with no message in between gets a notice instead.
+   */
+  async resumeInterrupted(gapMs = 500): Promise<string[]> {
+    const resumed: string[] = [];
+    for (const rt of [...this.#byId.values()]) {
+      if (!rt.state.interruptedTurn || this.#closed) continue;
+      rt.state.interruptedTurn = undefined;
+      this.#persist(rt);
+      if (rt.deleted || rt.state.closed || rt.info.status === 'ended' || rt.info.mode !== 'structured' || !rt.adapter) continue;
+      const tries = rt.state.autoResumes ?? 0;
+      if (tries >= MAX_AUTO_RESUMES) {
+        this.#append(rt, {
+          type: 'error',
+          data: {
+            message: `bizzi restarted during this session's work ${tries + 1} times in a row, so it didn't continue it on its own this time. Send a message to continue.`,
+            code: 'resume_skipped',
+            fatal: false,
+          },
+        });
+        continue;
+      }
+      rt.state.autoResumes = tries + 1;
+      this.#persist(rt);
+      try {
+        await this.#send(rt.info.id, [{ type: 'text', text: CONTINUE_AFTER_RESTART }], true);
+        resumed.push(rt.info.id);
+        this.#log.log('info', 'resumed an interrupted turn', { sessionId: rt.info.id, attempt: tries + 1 });
+      } catch (err) {
+        this.#log.log('warn', 'could not resume an interrupted turn', { sessionId: rt.info.id, err });
+        if (!this.#closed && !rt.deleted) {
+          this.#append(rt, {
+            type: 'error',
+            data: { message: `bizzi restarted mid-turn and couldn't continue this session (${errorMessage(err)}). Send a message to continue.`, code: 'resume_failed', fatal: false },
+          });
+        }
+      }
+      if (gapMs > 0) await new Promise((r) => setTimeout(r, gapMs));
+    }
+    return resumed;
+  }
+
+  /** Remember a structured turn bizzi is about to cut off, for resumeInterrupted. */
+  #markInterrupted(rt: Runtime): void {
+    if (!rt.state.currentTurnId || rt.info.mode !== 'structured' || rt.state.closed) return;
+    rt.state.interruptedTurn = { at: new Date().toISOString() };
+    this.#persist(rt);
+  }
+
+  async #send(id: string, input: InputBlock[], auto: boolean): Promise<{ turnId: string }> {
     const rt = this.#get(id);
     validateInput(input);
     this.#assertAccepting();
@@ -736,6 +800,12 @@ export class Sessions {
     if (rt.state.budgetBlocked) {
       // Within budget again (a cap was raised): carry on.
       rt.state.budgetBlocked = undefined;
+      this.#persist(rt);
+    }
+    if (!auto && (rt.state.autoResumes || rt.state.interruptedTurn)) {
+      // Someone is driving the session again: the automatic-resume count starts over.
+      rt.state.autoResumes = undefined;
+      rt.state.interruptedTurn = undefined;
       this.#persist(rt);
     }
     const turnId = newId('t');
@@ -1062,6 +1132,8 @@ export class Sessions {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#draining = true;
+    // Before stopping: the agent's final turn.completed (interrupted) clears the turn as it goes.
+    for (const rt of this.#byId.values()) this.#markInterrupted(rt);
     await Promise.all([...this.#byId.values()].map((rt) => this.#stopHandle(rt)));
     for (const rt of this.#byId.values()) {
       clearTimeout(rt.interruptTimer);
@@ -1964,6 +2036,11 @@ export class Sessions {
     if (rt.state.queued) state.queued = true;
     if (rt.state.agentPath) state.agentPath = rt.state.agentPath;
     if (rt.state.nodeRestarted) state.nodeRestarted = rt.state.nodeRestarted;
+    if (rt.state.titleByUser) state.titleByUser = true;
+    if (rt.state.closed) state.closed = true;
+    if (rt.state.startFresh) state.startFresh = true;
+    if (rt.state.interruptedTurn) state.interruptedTurn = rt.state.interruptedTurn;
+    if (rt.state.autoResumes) state.autoResumes = rt.state.autoResumes;
     if (rt.state.remoteParent) state.remoteParent = rt.state.remoteParent;
     if (rt.state.remoteSpent) state.remoteSpent = rt.state.remoteSpent;
     this.#d.store.putSession({ info: rt.info, state });
