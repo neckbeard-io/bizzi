@@ -8,8 +8,8 @@ import { Icon } from '../../components/icons.tsx';
 import { SectionTitle } from '../../components/layout.tsx';
 import { Badge, Button, ErrorText, Select, cx } from '../../components/ui.tsx';
 import { formatRelative } from '../../lib/format.ts';
-import { SCOPE_LEVELS, cardSummary, groupByScope, retargetScope, scopeLabel } from '../../lib/knowledge.ts';
-import type { ScopeContext } from '../../lib/knowledge.ts';
+import { SCOPE_LEVELS, cardSummary, groupByScope, noticeAction, retargetScope, scopeLabel, splitInbox } from '../../lib/knowledge.ts';
+import type { KnowledgeNotice, ScopeContext } from '../../lib/knowledge.ts';
 import { routeHref } from '../../lib/router.ts';
 
 type Target = 'keep' | KnowledgeScopeLevel;
@@ -18,20 +18,115 @@ function useScopeCtx(): ScopeContext {
   return useBizzi((s) => ({ machines: s.machines, workspaces: s.workspaces, sessions: s.sessions }), shallowEqual);
 }
 
-/** Knowledge suggestions waiting for review: one card per finished session, accept / move / reject, in bulk. */
+/**
+ * Knowledge in the inbox, in two parts: suggestions waiting for a decision (one card per session,
+ * accept / move / reject, in bulk), and changes agents already made that you can dismiss or undo.
+ */
 export function KnowledgeInbox(): ReactNode {
   const cards = useBizzi((s) => s.knowledgeInbox);
-  if (!cards || cards.length === 0) return null;
+  const { suggestions, notices } = useMemo(() => splitInbox(cards ?? []), [cards]);
+  if (suggestions.length === 0 && notices.length === 0) return null;
   return (
     <>
-      <SectionTitle>Knowledge suggestions</SectionTitle>
-      <div className="flex flex-col gap-4">
-        {cards.map((c, i) => (
-          <SuggestionCard key={c.sessionId ?? `card-${i}`} card={c} />
-        ))}
-      </div>
-      <p className="mt-2 text-xs text-muted">Suggestions come from agents and transcripts. Accepted items reach every matching session on every machine.</p>
+      {suggestions.length > 0 ? (
+        <>
+          <SectionTitle>Knowledge suggestions</SectionTitle>
+          <div className="flex flex-col gap-4">
+            {suggestions.map((c, i) => (
+              <SuggestionCard key={c.sessionId ?? `card-${i}`} card={c} />
+            ))}
+          </div>
+          <p className="mt-2 text-xs text-muted">Not live yet. Suggestions come from agents and transcripts; accepted items reach every matching session on every machine.</p>
+        </>
+      ) : null}
+      {notices.length > 0 ? <RecentChanges notices={notices} /> : null}
     </>
+  );
+}
+
+/** Changes that are already in effect: nothing to approve, only dismiss (keep) or undo. */
+function RecentChanges(props: { notices: KnowledgeNotice[] }): ReactNode {
+  const store = useStore();
+  const ctx = useScopeCtx();
+  const dismiss = useAction(async (ids: string[]) => store.acceptKnowledge(ids));
+  const undo = useAction(async (ids: string[]) => store.rejectKnowledge(ids));
+  const busy = dismiss.busy || undo.busy;
+  const n = props.notices.length;
+  return (
+    <>
+      <SectionTitle>Recent knowledge changes</SectionTitle>
+      <div className="rounded-lg border border-border bg-panel">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2.5">
+          <Icon name="check" size={16} className="shrink-0 text-ok" />
+          <div className="min-w-0 flex-1">
+            <div className="font-medium">
+              {n} change{n === 1 ? '' : 's'} already live
+            </div>
+            <div className="text-xs text-muted">Nothing to approve. Agents saved these because you asked or your settings allow it. Dismiss to keep them, or undo.</div>
+          </div>
+          <Button size="sm" icon="check" disabled={busy} onClick={() => void dismiss.run(props.notices.map((x) => x.item.id))}>
+            Dismiss all
+          </Button>
+        </div>
+        <ul className="divide-y divide-border">
+          {props.notices.map((x) => (
+            <NoticeRow key={x.item.id} notice={x} ctx={ctx} disabled={busy} onDismiss={() => void dismiss.run([x.item.id])} onUndo={() => void undo.run([x.item.id])} />
+          ))}
+        </ul>
+        {dismiss.error || undo.error ? (
+          <div className="px-3 pb-2">
+            <ErrorText error={dismiss.error ?? undo.error} />
+          </div>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+const NOTICE_LABEL = { added: 'added', updated: 'updated', forgot: 'forgotten' } as const;
+const UNDO_HINT = {
+  added: 'Undo removes it',
+  updated: 'Undo brings back the previous version',
+  forgot: 'Undo brings it back',
+} as const;
+
+function NoticeRow(props: { notice: KnowledgeNotice; ctx: ScopeContext; disabled: boolean; onDismiss: () => void; onUndo: () => void }): ReactNode {
+  const { item: it, sessionId, agent } = props.notice;
+  const session = useBizzi((s) => (sessionId ? (s.sessions[sessionId] ?? null) : null));
+  const action = noticeAction(it);
+  return (
+    <li className="flex gap-2.5 px-3 py-2.5">
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-1">
+          <Badge tone={it.type === 'rule' ? 'accent' : 'info'}>{it.type}</Badge>
+          <Badge tone={action === 'forgot' ? 'warn' : 'ok'}>{NOTICE_LABEL[action]}</Badge>
+          {it.source.userRequested ? <Badge tone="ok">you asked</Badge> : null}
+          <span className={cx('min-w-0 font-medium break-words', action === 'forgot' && 'line-through decoration-muted')}>{it.title}</span>
+        </div>
+        {it.body ? <div className="mt-0.5 line-clamp-2 text-sm whitespace-pre-wrap text-muted">{it.body}</div> : null}
+        <div className="mt-1 truncate text-xs text-muted">
+          {scopeLabel(it.scope, props.ctx)}
+          {agent ? <span className="capitalize">{` · ${agent}`}</span> : null}
+          {sessionId ? (
+            <>
+              {' · '}
+              <a className="hover:text-fg hover:underline" href={routeHref({ name: 'session', sessionId, tab: 'chat' })}>
+                {session?.title ?? sessionId}
+              </a>
+            </>
+          ) : null}
+          {` · ${formatRelative(it.updatedAt)}`}
+        </div>
+      </div>
+      <div className="flex shrink-0 flex-col gap-1 sm:flex-row sm:items-start">
+        <Button size="sm" icon="check" disabled={props.disabled} onClick={props.onDismiss} title="Keep it and clear this notice">
+          Dismiss
+        </Button>
+        <Button size="sm" variant="ghost" icon="back" disabled={props.disabled} onClick={props.onUndo} title={UNDO_HINT[action]}>
+          Undo
+        </Button>
+      </div>
+    </li>
   );
 }
 

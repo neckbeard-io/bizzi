@@ -145,6 +145,38 @@ export function cardSummary(card: Pick<KnowledgeInboxCard, 'items'>): string {
   return parts.map(([n, word], i) => `${n} ${i === 0 ? 'suggested ' : ''}${word}`).join(', ');
 }
 
+/** A change that is already live (or already forgotten) and can still be undone, with where it came from. */
+export interface KnowledgeNotice {
+  item: KnowledgeItemInfo;
+  sessionId?: string;
+  agent?: AgentKind;
+}
+
+/**
+ * The inbox holds two different things: suggestions waiting for a decision, and changes agents
+ * already made (because you asked or your policy allows it) that you can dismiss or undo.
+ */
+export function splitInbox(cards: readonly KnowledgeInboxCard[]): { suggestions: KnowledgeInboxCard[]; notices: KnowledgeNotice[] } {
+  const suggestions: KnowledgeInboxCard[] = [];
+  const notices: KnowledgeNotice[] = [];
+  for (const c of cards) {
+    const pending = c.items.filter((i) => i.status === 'suggested');
+    if (pending.length > 0) suggestions.push({ ...c, items: pending });
+    for (const item of c.items) {
+      if (item.status === 'suggested') continue;
+      notices.push({ item, ...(c.sessionId !== undefined ? { sessionId: c.sessionId } : {}), ...(c.agent !== undefined ? { agent: c.agent } : {}) });
+    }
+  }
+  notices.sort((a, b) => (a.item.updatedAt < b.item.updatedAt ? 1 : a.item.updatedAt > b.item.updatedAt ? -1 : 0));
+  return { suggestions, notices };
+}
+
+/** What a live change did: added a new item, replaced an older version, or forgot one. */
+export function noticeAction(item: KnowledgeItemInfo): 'added' | 'updated' | 'forgot' {
+  if (item.status === 'deleted') return 'forgot';
+  return item.supersedes && item.supersedes.length > 0 ? 'updated' : 'added';
+}
+
 /** "a, b ,, c" → ["a", "b", "c"] (deduplicated, trimmed). */
 export function parseTags(text: string): string[] {
   return [...new Set(text.split(/[,\n]/).map((t) => t.trim().replace(/^#/, '')).filter(Boolean))];

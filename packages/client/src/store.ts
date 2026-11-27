@@ -1502,10 +1502,17 @@ export function inboxEqual(a: InboxEntry[], b: InboxEntry[]): boolean {
   return true;
 }
 
-/** Number of suggested knowledge items waiting in the inbox. */
+/** Number of suggested knowledge items waiting for a decision (live changes with an undo don't count). */
 export function selectKnowledgeSuggestionCount(s: BizziState): number {
   let n = 0;
-  for (const c of s.knowledgeInbox ?? []) n += c.items.length;
+  for (const c of s.knowledgeInbox ?? []) for (const i of c.items) if (i.status === 'suggested') n++;
+  return n;
+}
+
+/** Number of knowledge changes that are already live (or forgotten) and can still be undone. */
+export function selectKnowledgeNoticeCount(s: BizziState): number {
+  let n = 0;
+  for (const c of s.knowledgeInbox ?? []) for (const i of c.items) if (i.status !== 'suggested') n++;
   return n;
 }
 

@@ -12,6 +12,10 @@ Entries are added with the change, not reconstructed at release time; the rules 
 ### Changed
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
 
+### Fixed
+- Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
+- Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
+
 ## v0.1.1 — 2026-11-26
 
 ### Added

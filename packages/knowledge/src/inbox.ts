@@ -1,5 +1,6 @@
 // Review inbox (§3.2): suggested items and "live + notice" items, batched one card per session.
-// Accept (optionally re-scoped) / reject; for notice items, reject means undo.
+// Accept (optionally re-scoped) / reject; for notice items, accept means dismiss and reject means undo.
+// A notice for a version that a later edit replaced is folded into the newest version's notice.
 
 import { BizziError } from '@bizzi/protocol';
 import type { AgentKind } from '@bizzi/protocol';
@@ -33,7 +34,8 @@ export function isForgetRequest(item: KnowledgeItem): boolean {
 
 export function listInbox(store: KnowledgeStore, filter: InboxFilter = {}): InboxGroup[] {
   const pending = store.list({ status: 'suggested' });
-  const notices = store.list({ noticePending: true });
+  // A replaced version is not shown on its own: the edit that replaced it carries the notice.
+  const notices = store.list({ noticePending: true }).filter((i) => i.status !== 'superseded');
   const groups = new Map<string, InboxGroup>();
   const keep = (i: KnowledgeItem) =>
     (filter.sessionId === undefined || i.source.sessionId === filter.sessionId) &&
@@ -91,9 +93,27 @@ export function acceptItem(store: KnowledgeStore, id: string, opts: AcceptOption
       applyActivation(store, live);
       return store.require(id);
     }
-    if (item.noticePending) return store.patch(id, { noticePending: false, ...(scope ? { scope } : {}) });
+    if (item.noticePending) {
+      clearReplacedNotices(store, item);
+      return store.patch(id, { noticePending: false, ...(scope ? { scope } : {}) });
+    }
     throw new BizziError('conflict', `knowledge item ${id} is not in the inbox (status ${item.status})`);
   });
+}
+
+/** Dismissing an edit's notice also dismisses the notices of the versions it replaced. */
+function clearReplacedNotices(store: KnowledgeStore, item: KnowledgeItem): void {
+  const seen = new Set<string>([item.id]);
+  const queue = [...(item.supersedes ?? [])];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (seen.has(id)) continue;
+    seen.add(id);
+    const prev = store.get(id);
+    if (!prev || prev.status !== 'superseded') continue;
+    if (prev.noticePending) store.patch(id, { noticePending: false });
+    queue.push(...(prev.supersedes ?? []));
+  }
 }
 
 /** Reject a suggestion, or undo a "live + notice" change. */

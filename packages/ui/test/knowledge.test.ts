@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { BizziClient, BizziStore, createManualScheduler } from '@bizzi/client';
+import { BizziClient, BizziStore, createManualScheduler, selectKnowledgeNoticeCount, selectKnowledgeSuggestionCount } from '@bizzi/client';
 import type { KnowledgeItemInfo, MachineInfo, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
 import {
@@ -10,6 +10,7 @@ import {
   PROMOTED_TAG,
   knownTags,
   matchesAgent,
+  noticeAction,
   parseTags,
   projectOptions,
   promotionCandidates,
@@ -18,6 +19,7 @@ import {
   sameScope,
   scopeComplete,
   scopeLabel,
+  splitInbox,
 } from '../src/lib/knowledge.ts';
 import type { ScopeContext } from '../src/lib/knowledge.ts';
 import { diffStats, parseUnifiedDiff } from '../src/lib/diff.ts';
@@ -190,8 +192,13 @@ test('mock knowledge: list filters, inbox, accept with scope, forget, settings',
   const cards = store.getState().knowledgeInbox ?? [];
   assert.equal(cards.length, 2);
   const demo = cards.find((c) => c.sessionId === 's_demo');
-  assert.equal(demo?.items.length, 3);
+  assert.equal(demo?.items.length, 4);
   assert.equal(demo?.agent, 'claude');
+  assert.equal(selectKnowledgeSuggestionCount(store.getState()), 4, 'live changes are not counted as suggestions');
+  assert.equal(selectKnowledgeNoticeCount(store.getState()), 1);
+  await store.acceptKnowledge(['k_live_main']);
+  assert.equal(selectKnowledgeNoticeCount(store.getState()), 0);
+  assert.equal((await store.listKnowledge({ type: 'rule' })).find((i) => i.id === 'k_live_main')?.status, 'active', 'dismissing keeps it');
 
   const rev = store.getState().knowledgeRev;
   await store.acceptKnowledge(['k_sug_mock'], { level: 'workspace', workspaceId: 'w_acme' });
@@ -258,4 +265,22 @@ test('mock knowledge: Add to AGENTS.md preview and write', async (t) => {
   const after = await store.listKnowledge({ type: 'memory' });
   assert.ok(ids.every((id) => after.find((i) => i.id === id)?.tags.includes(PROMOTED_TAG)));
   await assert.rejects(store.previewPromotion({ workspaceId: 'w_acme', ids }), /none of the picked/);
+});
+
+test('inbox split: live changes are notices, not suggestions', () => {
+  const pending = item({ id: 'k_s' });
+  const added = item({ id: 'k_a', type: 'rule', status: 'active', updatedAt: '2026-01-01' });
+  const updated = item({ id: 'k_u', type: 'rule', status: 'active', supersedes: ['k_old'], updatedAt: '2026-01-03' });
+  const forgot = item({ id: 'k_f', status: 'deleted', updatedAt: '2026-01-02' });
+  const { suggestions, notices } = splitInbox([
+    { sessionId: 's_1', agent: 'claude', items: [pending, added] },
+    { sessionId: 's_2', agent: 'codex', items: [updated, forgot] },
+  ]);
+  assert.deepEqual(suggestions, [{ sessionId: 's_1', agent: 'claude', items: [pending] }], 'a card with only live changes is not a suggestion card');
+  assert.deepEqual(notices.map((n) => [n.item.id, n.sessionId, n.agent]), [
+    ['k_u', 's_2', 'codex'],
+    ['k_f', 's_2', 'codex'],
+    ['k_a', 's_1', 'claude'],
+  ]);
+  assert.deepEqual(notices.map((n) => noticeAction(n.item)), ['updated', 'forgot', 'added']);
 });
