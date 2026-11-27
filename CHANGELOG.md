@@ -35,6 +35,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three crashes in a row with no message from you it waits for you instead; a run of ordinary restarts (updates, local installs) gets ten.
 
 ### Fixed
+- Agent sessions and terminals no longer inherit npm's script settings when bizzi was started from an `npm` script (such as `npm run dev` or a local install). An `npm` command an agent ran in another workspace could act on bizzi's own checkout, and that checkout's `node_modules/.bin` came first on the agent's PATH.
 - bizzi no longer picks up an agent CLI that a project installs as a dev dependency (a `node_modules/.bin/codex`, for example) in place of the one you installed. Starting bizzi from an `npm` script used to trigger this, and it led to spurious "codex 0.167.0 → 0.172.0 installed" notices and needless session restarts. Switching to a different copy of an agent now says which binary it runs instead of calling it an upgrade.
 - Starting a helper when the helper limit is reached no longer leaves an empty worktree in the sidebar.
 - Long waits on a helper no longer fail after five minutes in Claude sessions; they return early and can be called again.

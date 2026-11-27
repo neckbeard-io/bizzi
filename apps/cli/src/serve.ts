@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { createJsonLogger, createNode, isLogLevel, platformPowerBackend, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
-import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
+import { cleanNpmScriptEnv, type AgentAdapter, type Logger, type ServeReady } from '@bizzi/protocol';
 import { createContainersExtension } from '@bizzi/containers';
 import { createRoutingExtension, routerOptionsFromEnv, type RouterOptions } from '@bizzi/routing';
 import { loadAdapters } from './adapters.ts';
@@ -90,6 +90,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
   const level = values['log-level'] ?? process.env.BIZZI_LOG_LEVEL ?? 'info';
   if (!isLogLevel(level)) throw new UsageError(`invalid log level: ${level}`);
   const logger = createJsonLogger({ level });
+  dropNpmScriptEnv(logger);
   const port = parsePort(values.port);
   const dataDir = resolveDir(values['data-dir'] ?? defaultDataDir());
   const token = values.token || process.env.BIZZI_TOKEN || randomBytes(24).toString('base64url');
@@ -223,4 +224,18 @@ export function readReady(path: string): ServeReady | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Started from an npm script (`npm run dev`, or an app reopened by one), the node would pass npm's
+ * script environment on to every agent session and terminal: `npm_config_local_prefix` and friends
+ * point npm at bizzi's checkout, and PATH starts with its `node_modules/.bin`. Take it out of this
+ * process's environment before anything is spawned; what the user set stays.
+ */
+export function dropNpmScriptEnv(logger: Logger, env: NodeJS.ProcessEnv = process.env): void {
+  const { env: clean, removed, removedPath } = cleanNpmScriptEnv(env);
+  if (!removed.length && !removedPath.length) return;
+  for (const k of removed) delete env[k];
+  if (clean.PATH !== undefined) env.PATH = clean.PATH;
+  logger.log('info', 'dropped the npm script environment', { vars: removed.length, pathEntries: removedPath.length });
 }

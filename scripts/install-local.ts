@@ -28,6 +28,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
+import { cleanNpmScriptEnv } from '@bizzi/protocol';
 import { bumpPatch, closedVersion } from './release/changelog.ts';
 
 const repo = fileURLToPath(new URL('../', import.meta.url));
@@ -143,7 +144,10 @@ ${values['no-launch'] ? '' : 'open "$TARGET"\n'}echo "done"
 `;
 const scriptPath = join(backupDir, 'swap.sh');
 writeFileSync(scriptPath, script, { mode: 0o755 });
-spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore' }).unref();
+// Without npm's script environment (npm_*, INIT_CWD, this checkout's node_modules/.bin on PATH):
+// `open` hands the caller's environment to the app, and the app hands it to its core and to every
+// agent session. Each install from inside bizzi would otherwise stack another layer of it.
+spawn('/bin/bash', [scriptPath], { detached: true, stdio: 'ignore', env: cleanNpmScriptEnv(process.env).env }).unref();
 
 log(`staged ${label}`);
 log(`in ${delay} s bizzi quits (running turns get up to 30 s), ${target} is replaced${values['no-launch'] ? '' : ' and reopened'}`);
