@@ -13,6 +13,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - Long pasted text collapses into a `[Pasted text 1 · 40 lines]` placeholder you can expand or remove before sending, and shows collapsed in the conversation.
 - Hotkeys: ⌘N (Ctrl+N on Windows and Linux) adds a workspace on the machine you're on, and ⌘T (Ctrl+T) starts a session with the default profile in the open workspace. Switch each one on or off in Settings › Hotkeys.
 - agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
+- Your prompt stays pinned at the top of the conversation once it scrolls out of view, so you can see what the agent is working on while it runs. Click it to read the whole prompt, or use the arrow to jump back to it.
 - Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
 ### Changed
