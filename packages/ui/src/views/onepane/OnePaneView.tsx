@@ -31,6 +31,9 @@ import {
 } from '../../lib/onePane.ts';
 import type { ActiveToken, Completion, RoutePlan } from '../../lib/onePane.ts';
 import { AGENT_LABEL } from '../../lib/states.ts';
+import { CompletionMenu } from '../../components/CompletionMenu.tsx';
+import { builtinCommand, matchCommands, sessionCommands } from '../../lib/slash.ts';
+import { AttachImageButton, AttachmentTray, useDraftAttachments } from '../session/Attachments.tsx';
 import { Timeline } from '../session/Timeline.tsx';
 import { RoutingRules } from './RoutingRules.tsx';
 
@@ -124,6 +127,7 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   const session = sessionId ? sessions[sessionId] : undefined;
   const caps = useBizzi((s) => (sessionId ? (s.capabilities[sessionId] ?? null) : null));
   const activeTurn = useBizzi((s) => (sessionId ? (s.timelines[sessionId]?.activeTurnId ?? null) : null));
+  const advertised = useBizzi((s) => (sessionId ? s.timelines[sessionId]?.info.commands : undefined));
 
   // `#/ask?text=…` prefills the composer (launchers, share targets); nothing is sent until you press Enter.
   // Unsent text is kept per session (or for a new ask) across reloads and app restarts.
@@ -152,6 +156,15 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   const continuing = continues(session, tokens, session ? online(session.machineId) : false);
   const busy = continuing && (activeTurn !== null || isBusy(session?.status));
   const canSteer = busy && (caps?.steer ?? false);
+  const images = continuing ? (caps?.images ?? true) : true;
+  const draft = useDraftAttachments({ text, onChange: (v, pos) => onEdit(v, pos), textarea: ref, images });
+  // Continuing a session, `/` at the start also offers its slash commands (before the agents).
+  const commandItems: Completion[] = useMemo(() => {
+    if (!continuing || menuClosed || token?.sigil !== '/' || token.start !== 0) return [];
+    return matchCommands(sessionCommands(advertised), token.query).map((c) => ({ key: `cmd:${c.name}`, label: c.name, insert: `/${c.name}`, ...(c.description ? { detail: c.description } : {}) }));
+  }, [continuing, menuClosed, token?.sigil, token?.start, token?.query, advertised]);
+  const menu = useMemo(() => [...commandItems, ...items].map((c) => ({ ...c, prefix: token?.sigil ?? '' })), [commandItems, items, token?.sigil]);
+  const menuTitle = commandItems.length ? (items.length ? 'Commands and agents' : 'Commands') : token?.sigil === '@' ? 'Machines' : token?.sigil === '#' ? 'Workspaces' : 'Agents';
 
   // Ask the router once typing pauses (not while continuing: the target is the open session).
   useEffect(() => {
@@ -186,8 +199,10 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   };
 
   const start = useAction(async (t: RouteCandidate, sug: RouteSuggestion, typed: string) => {
-    const prompt = sug.text.trim();
-    if (!prompt) throw new Error('Say what you want done, not only where.');
+    if (draft.pending > 0) throw new Error('Wait for the images to finish reading.');
+    const input = draft.build(sug.text);
+    if (input.length === 0) throw new Error('Say what you want done, not only where.');
+    const prompt = draft.typed(sug.text) || (input.some((b) => b.type === 'image') ? 'Image' : '');
     if (store.getState().agents[t.machineId] === undefined) await store.loadAgents(t.machineId).catch(() => {});
     const m = machines.find((x) => x.id === t.machineId);
     const st = store.getState();
@@ -195,30 +210,42 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
       ? { agent: agentPick }
       : chooseAgent({ explicit: sug.agent, agents: st.agents[t.machineId], sessions: Object.values(st.sessions), workspaceId: t.workspaceId, machineName: m?.name ?? t.label });
     if ('error' in picked) throw new Error(picked.error);
-    const created = await store.createSession({ workspaceId: t.workspaceId, agent: picked.agent, mode: 'structured', title: titleFor(prompt) });
-    await store.send(created.id, prompt);
+    const firstText = input.find((b) => b.type === 'text');
+    const title = titleFor(prompt || (firstText?.type === 'text' ? firstText.text : ''));
+    const created = await store.createSession({ workspaceId: t.workspaceId, agent: picked.agent, mode: 'structured', title });
+    await store.send(created.id, input);
     const decision = decisionFor(typed, sug, t, picked.agent, created.id);
     // A server without route.record (older) still routes; the label is just not kept.
     store.recordRoute(decision).catch(() => {});
     setOverride(decision.overridden ? decision : null);
     setText('');
+    draft.clear();
     setSuggested(null);
     setChanging(false);
     navigate({ name: 'ask', sessionId: created.id });
   });
 
   const followUp = useAction(async () => {
-    if (!sessionId) return;
-    const t = text.trim();
-    if (!t) return;
-    if (busy) await store.steer(sessionId, t);
-    else await store.send(sessionId, t);
+    if (!sessionId || draft.pending > 0) return;
+    if (builtinCommand(text) === 'clear') {
+      if (busy) throw new Error('The agent is working: wait for it or stop it before clearing.');
+      await store.clearSession(sessionId);
+      setText('');
+      draft.clear();
+      return;
+    }
+    const input = draft.build(text);
+    if (input.length === 0) return;
+    if (busy) await store.steer(sessionId, input);
+    else await store.send(sessionId, input);
     setText('');
+    draft.clear();
   });
 
   const route = useAction(async () => {
     const typed = text;
     if (!typed.trim()) return;
+    if (builtinCommand(typed)) throw new Error('Open a session to clear it: there is no conversation here yet.');
     let sug = fresh ? s : null;
     if (!sug) {
       try {
@@ -266,16 +293,18 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   }, [text]);
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>): void => {
-    if (items.length > 0) {
+    if (menu.length > 0) {
       if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault();
         const d = e.key === 'ArrowDown' ? 1 : -1;
-        setMenuIndex((i) => (i + d + items.length) % items.length);
+        setMenuIndex((i) => (i + d + menu.length) % menu.length);
         return;
       }
       if (e.key === 'Enter' || e.key === 'Tab') {
-        const c = items[Math.min(menuIndex, items.length - 1)];
-        if (c && !c.disabled) {
+        const c = menu[Math.min(menuIndex, menu.length - 1)];
+        // Enter on a command that's already typed out runs it instead of re-inserting it.
+        const typedOut = e.key === 'Enter' && c?.key.startsWith('cmd:') && token && text.slice(token.start, token.end) === c.insert;
+        if (c && !c.disabled && !typedOut) {
           e.preventDefault();
           pick(c);
           return;
@@ -308,27 +337,32 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   return (
     <div className="pb-safe shrink-0 border-t border-border bg-panel">
       <div className="mx-auto max-w-3xl px-3 pt-2 pb-3 md:px-5">
-        <ErrorText error={error} className="mb-2" />
+        <ErrorText error={error ?? draft.error} className="mb-2" />
         {override ? <OverrideHint decision={override} onMakeRule={() => props.onMakeRule(override.chosen.workspaceId)} onClose={() => setOverride(null)} /> : null}
         <div className="relative">
-          {items.length > 0 ? <CompletionMenu items={items} index={Math.min(menuIndex, items.length - 1)} onPick={pick} onHover={setMenuIndex} sigil={token!.sigil} /> : null}
-          <div className="flex items-end gap-2 rounded-xl border border-border bg-bg px-2 py-1.5 focus-within:border-accent">
-            <textarea
-              ref={ref}
-              rows={1}
-              value={text}
-              onChange={(e) => onEdit(e.target.value, e.target.selectionStart)}
-              onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
-              onKeyDown={onKey}
-              placeholder={placeholder}
-              className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-6 placeholder:text-muted/80 focus:outline-none md:text-sm"
-              aria-label="Prompt"
-              aria-autocomplete="list"
-              aria-expanded={items.length > 0}
-            />
-            <Button variant="primary" icon="send" busy={sending} disabled={!text.trim() || (continuing && busy && !canSteer)} onClick={submit} title={continuing ? (busy ? 'Steer' : 'Send') : 'Route and send'}>
-              <span className="hidden sm:inline">{continuing && busy ? 'Steer' : 'Send'}</span>
-            </Button>
+          {menu.length > 0 ? <CompletionMenu title={menuTitle} items={menu} index={Math.min(menuIndex, menu.length - 1)} onPick={pick} onHover={setMenuIndex} /> : null}
+          <div className="rounded-xl border border-border bg-bg px-2 py-1.5 focus-within:border-accent" onDragOver={draft.onDragOver} onDrop={draft.onDrop}>
+            <AttachmentTray draft={draft} />
+            <div className="flex items-end gap-2">
+              {images ? <AttachImageButton draft={draft} /> : null}
+              <textarea
+                ref={ref}
+                rows={1}
+                value={text}
+                onChange={(e) => onEdit(e.target.value, e.target.selectionStart)}
+                onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
+                onKeyDown={onKey}
+                onPaste={draft.onPaste}
+                placeholder={placeholder}
+                className="max-h-[200px] min-h-[36px] flex-1 resize-none bg-transparent px-1.5 py-1.5 text-[15px] leading-6 placeholder:text-muted/80 focus:outline-none md:text-sm"
+                aria-label="Prompt"
+                aria-autocomplete="list"
+                aria-expanded={menu.length > 0}
+              />
+              <Button variant="primary" icon="send" busy={sending} disabled={!draft.hasContent(text) || draft.pending > 0 || (continuing && busy && !canSteer)} onClick={submit} title={continuing ? (busy ? 'Steer' : 'Send') : 'Route and send'}>
+                <span className="hidden sm:inline">{continuing && busy ? 'Steer' : 'Send'}</span>
+              </Button>
+            </div>
           </div>
         </div>
         <div className={cx('mt-1.5 min-h-6 px-1 text-xs transition-transform', nudge && 'translate-x-1')}>
@@ -515,36 +549,6 @@ function OtherPicker(props: { others: RouteCandidate[]; onPick: (c: RouteCandida
       <button type="button" className="mt-1 flex items-center gap-1.5 px-2 py-1 text-sm text-accent-text hover:underline" onClick={() => openAddWorkspace(null)}>
         <Icon name="plus" size={14} /> New workspace…
       </button>
-    </div>
-  );
-}
-
-function CompletionMenu(props: { items: Completion[]; index: number; sigil: string; onPick: (c: Completion) => void; onHover: (i: number) => void }): ReactNode {
-  const what = props.sigil === '@' ? 'Machines' : props.sigil === '#' ? 'Workspaces' : 'Agents';
-  return (
-    <div role="listbox" aria-label={what} className="absolute right-0 bottom-full left-0 z-30 mb-1 max-w-md overflow-hidden rounded-lg border border-border bg-panel py-1 shadow-lg">
-      <div className="px-3 pt-0.5 pb-1 text-[10px] font-semibold tracking-wide text-muted uppercase">{what}</div>
-      {props.items.map((c, i) => (
-        <button
-          key={c.key}
-          type="button"
-          role="option"
-          aria-selected={i === props.index}
-          aria-disabled={c.disabled}
-          // Keep focus in the textarea so the caret stays put.
-          onMouseDown={(e) => e.preventDefault()}
-          onMouseEnter={() => props.onHover(i)}
-          onClick={() => props.onPick(c)}
-          className={cx('flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm', i === props.index && !c.disabled && 'bg-panel-2', c.disabled ? 'cursor-not-allowed text-muted/70' : 'text-fg')}
-        >
-          <span className="min-w-0 truncate font-medium">
-            {props.sigil}
-            {c.label}
-          </span>
-          {c.detail ? <span className="min-w-0 truncate text-xs text-muted">{c.detail}</span> : null}
-          {c.reason ? <span className="ml-auto shrink-0 text-xs text-muted">{c.reason}</span> : null}
-        </button>
-      ))}
     </div>
   );
 }

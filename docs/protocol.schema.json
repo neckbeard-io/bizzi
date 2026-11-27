@@ -209,6 +209,15 @@
         "$ref": "#/$defs/result:session.stop"
       }
     },
+    "session.clear": {
+      "description": "Start a fresh conversation in the same session (`/clear`): the agent process is stopped and the next one starts without resuming, so the agent forgets everything so far. The timeline, budget and settings stay. Emits `context.cleared`. `conflict` while a turn runs; `unsupported` for terminal sessions (type the agent's own command there).",
+      "params": {
+        "$ref": "#/$defs/params:session.clear"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.clear"
+      }
+    },
     "session.set": {
       "description": "A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces the session's budget (`{}` clears it); a session held for budget accepts sends again once within it. / /** Change a session's settings. `title` renames it (also on an ended session; '' clears it); a title set here is kept over titles the agent reports later.",
       "params": {
@@ -983,6 +992,12 @@
       "context.compacted": {
         "data": {
           "$ref": "#/$defs/session:context.compacted"
+        }
+      },
+      "context.cleared": {
+        "description": "`session.clear` started a fresh conversation; `previousRef` is the agent session it left.",
+        "data": {
+          "$ref": "#/$defs/session:context.cleared"
         }
       },
       "account.usage": {
@@ -3557,6 +3572,7 @@
         "session.markSeen",
         "session.restart",
         "session.stop",
+        "session.clear",
         "session.set",
         "approval.respond",
         "question.respond",
@@ -4601,6 +4617,25 @@
             },
             "params": {
               "$ref": "#/$defs/params:session.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.clear"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.clear"
             }
           }
         },
@@ -6808,6 +6843,21 @@
           ],
           "properties": {
             "type": {
+              "const": "context.cleared"
+            },
+            "data": {
+              "$ref": "#/$defs/session:context.cleared"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
               "const": "account.usage"
             },
             "data": {
@@ -6991,6 +7041,7 @@
         "usage.updated",
         "context.updated",
         "context.compacted",
+        "context.cleared",
         "account.usage",
         "session.restarting",
         "session.restarted",
@@ -9344,6 +9395,17 @@
         "text"
       ]
     },
+    "params:session.clear": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
     "params:session.create": {
       "type": "object",
       "properties": {
@@ -10663,6 +10725,9 @@
         "suggestion"
       ]
     },
+    "result:session.clear": {
+      "$ref": "#/$defs/Empty"
+    },
     "result:session.create": {
       "type": "object",
       "properties": {
@@ -10979,6 +11044,14 @@
         "approvalId",
         "decision"
       ]
+    },
+    "session:context.cleared": {
+      "type": "object",
+      "properties": {
+        "previousRef": {
+          "type": "string"
+        }
+      }
     },
     "session:context.compacted": {
       "type": "object",

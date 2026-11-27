@@ -700,6 +700,13 @@ export class MockCore implements MockHost {
         this.setStatus(s.id, 'ended');
         return {};
       }
+      case 'session.clear': {
+        const s = this.liveSession(p.sessionId);
+        if (s.mode === 'terminal') throw new BizziError('unsupported', "terminal sessions can't be cleared from bizzi");
+        if (this.runs.has(s.id)) throw new BizziError('conflict', 'a turn is in progress: wait for it or stop it first');
+        this.emitS(s.id, { type: 'context.cleared', data: {} });
+        return {};
+      }
       case 'session.set': {
         const s = this.liveSession(p.sessionId);
         const patch: { model?: string; permissionMode?: string; effort?: string } = {};

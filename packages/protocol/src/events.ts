@@ -120,6 +120,8 @@ export interface SessionEventMap {
   /** Current context-window occupancy (usage.md §1.2). Agents without data never emit it. */
   'context.updated': ContextUsage;
   'context.compacted': { before?: number; after?: number };
+  /** `session.clear` started a fresh conversation; `previousRef` is the agent session it left. */
+  'context.cleared': { previousRef?: string };
   /** Per-login usage observed during this session (rate-limit events etc.); the core republishes it globally. */
   'account.usage': AccountUsage;
   /** The agent process is being replaced at a safe point (updates.md §5). The bizzi session carries on. */

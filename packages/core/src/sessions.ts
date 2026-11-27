@@ -900,6 +900,29 @@ export class Sessions {
   }
 
   /**
+   * A fresh conversation in the same bizzi session: stop the agent process, forget its session ref
+   * (and an unstarted fork's source) so the next start doesn't resume, then start a new one.
+   */
+  async clear(id: string): Promise<void> {
+    const rt = this.#get(id);
+    this.#assertOpen(rt);
+    if (rt.info.mode !== 'structured') throw new BizziError('unsupported', "terminal sessions can't be cleared from bizzi; use the agent's own command");
+    if (rt.restarting) {
+      await this.#waitForRestart(rt);
+      this.#assertOpen(rt);
+    }
+    if (rt.state.queued) throw new BizziError('conflict', 'this helper is queued until a helper slot frees up');
+    if (rt.state.currentTurnId || rt.reservedTurn) throw new BizziError('conflict', 'a turn is in progress: wait for it or stop it first');
+    const previousRef = rt.info.agentSessionRef;
+    // Nothing the old process says while it shuts down belongs to the new conversation.
+    rt.generation++;
+    await this.#stopHandle(rt);
+    this.#assertOpen(rt);
+    this.#append(rt, { type: 'context.cleared', data: previousRef ? { previousRef } : {} });
+    this.#startInBackground(rt, {});
+  }
+
+  /**
    * Change model / permission mode / effort (applied to the running agent when it supports it, else
    * on the next start) and the session's budget. A helper's permission mode can't be loosened beyond
    * its parent's (spec §12.2). `budget` replaces the session's budget (an empty object clears it);
@@ -1900,6 +1923,17 @@ export class Sessions {
         if (info.agentSessionRef && rt.state.forkOf) {
           rt.state.forkOf = undefined;
           changed = true;
+        }
+        break;
+      case 'context.cleared':
+        if (info.agentSessionRef !== undefined) {
+          delete info.agentSessionRef;
+          changed = true;
+        }
+        if (rt.state.forkOf || rt.state.nodeRestarted) {
+          rt.state.forkOf = undefined;
+          rt.state.nodeRestarted = undefined;
+          pendingChanged = true;
         }
         break;
       case 'account.usage':

@@ -702,6 +702,10 @@ class Node implements BizziNode {
         }
         return { session: await s.set(params) };
       },
+      'session.clear': async (p) => {
+        await s.clear(reqString(p, 'sessionId'));
+        return {};
+      },
       'session.restart': (p) => {
         this.restarts.request(reqString(p, 'sessionId'));
         return {};

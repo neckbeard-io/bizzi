@@ -193,6 +193,13 @@ export interface Methods {
   'session.restart': { params: { sessionId: string }; result: Empty };
   'session.stop': { params: { sessionId: string }; result: Empty };
   /**
+   * Start a fresh conversation in the same session (`/clear`): the agent process is stopped and the
+   * next one starts without resuming, so the agent forgets everything so far. The timeline, budget
+   * and settings stay. Emits `context.cleared`. `conflict` while a turn runs; `unsupported` for
+   * terminal sessions (type the agent's own command there).
+   */
+  'session.clear': { params: { sessionId: string }; result: Empty };
+  /**
    * A helper's permission mode can't be loosened beyond its parent's (`conflict`). `budget` replaces
    * the session's budget (`{}` clears it); a session held for budget accepts sends again once within it.
    */

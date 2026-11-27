@@ -7,6 +7,10 @@ Entries are added with the change, not reconstructed at release time; the rules 
 ## Unreleased
 
 ### Added
+- Paste, drop or attach images in the message box; large images are scaled down before sending, and sent images show in the conversation.
+- Slash commands in the message box: type `/` for a list with the agent's own commands (Claude's `/compact`, `/review`, …) and bizzi's `/clear`.
+- `/clear` (also `/new`, `/reset`) starts a fresh conversation in the same session with any agent, so the agent forgets everything so far while the session's history stays visible.
+- Long pasted text collapses into a `[Pasted text 1 · 40 lines]` placeholder you can expand or remove before sending, and shows collapsed in the conversation.
 - agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
 - Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
