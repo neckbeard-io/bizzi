@@ -105,7 +105,7 @@ test('bizzi-agents MCP: Claude asks Codex to review in a worktree, waits, reads 
   const { session: parent, workspace, client } = await parentWithClient(t, h, { permissionMode: 'acceptEdits' });
 
   const tools = (await client.listTools()).tools.map((x) => x.name).sort();
-  assert.deepEqual(tools, ['machines_list', 'session_answer', 'session_interrupt', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list']);
+  assert.deepEqual(tools, ['machines_list', 'session_answer', 'session_interrupt', 'session_peek', 'session_read', 'session_send', 'session_start', 'session_stop', 'session_wait', 'sessions_list', 'sessions_overview']);
 
   const started = await call(client, 'session_start', {
     agent: 'codex',
@@ -352,4 +352,38 @@ test('session_wait keeps a long wait alive with progress, and returns early when
   const early = await call(client, 'session_wait', { sessionId: helper.id, until: 'ended', timeout: 30 });
   assert.equal(early.structuredContent?.reached, false);
   assert.ok(Date.now() - t0 < 5000, 'returned early');
+});
+
+test('bizzi-agents: sessions_overview and session_peek see every session, read-only', async (t) => {
+  const h = await harness(t);
+  const { session: me, workspace, client } = await parentWithClient(t, h);
+  const { session: other } = await h.node.call('session.create', { workspaceId: workspace.id, agent: 'claude', title: 'Other work' });
+  await waitFor(() => h.node.sessions.get(other.id).session.status === 'idle', 'other idle');
+  await h.node.call('session.send', { sessionId: other.id, input: [{ type: 'text', text: 'Shall I push?' }] });
+  await waitFor(() => h.node.sessions.get(other.id).session.status === 'idle' && !h.node.sessions.isBusy(other.id), 'other done');
+
+  const ov = await call(client, 'sessions_overview', { workspace: h.repo });
+  assert.equal(ov.isError, undefined, textOf(ov));
+  const sessions = ov.structuredContent!.sessions as { sessionId: string; self?: boolean; waiting?: { asks?: { heuristic: boolean } } }[];
+  assert.deepEqual(new Set(sessions.map((s) => s.sessionId)), new Set([me.id, other.id]));
+  assert.equal(sessions.find((s) => s.sessionId === me.id)!.self, true);
+  assert.equal(sessions.find((s) => s.sessionId === other.id)!.waiting?.asks?.heuristic, true);
+  assert.match(textOf(ov), /WAITING ON THE USER: asks \(heuristic\): echo: Shall I push\?/);
+  assert.match(textOf(ov), /asked: Shall I push\?/);
+
+  const waiting = await call(client, 'sessions_overview', { waitingOnly: true, limit: 5 });
+  assert.deepEqual((waiting.structuredContent!.sessions as { sessionId: string }[]).map((s) => s.sessionId), [other.id]);
+
+  const peek = await call(client, 'session_peek', { sessionId: other.id });
+  assert.equal(peek.isError, undefined, textOf(peek));
+  assert.equal(peek.structuredContent!.finalMessage, 'echo: Shall I push?');
+  assert.equal(peek.structuredContent!.title, 'Other work');
+
+  // Peeking doesn't make it yours: driving it is still refused.
+  for (const [tool, args] of [['session_send', { sessionId: other.id, text: 'hi' }], ['session_stop', { sessionId: other.id }], ['session_read', { sessionId: other.id }]] as const) {
+    const r = await call(client, tool, args);
+    assert.equal(r.isError, true, tool);
+    assert.match(textOf(r), /not_found: no helper/);
+  }
+  assert.equal(h.node.sessions.get(other.id).session.status, 'idle');
 });

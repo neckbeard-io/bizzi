@@ -48,6 +48,7 @@ import { KeepAwake, parseKeepAwakeSettings, readKeepAwakeSettings, type PowerBac
 import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
+import { History } from './history.ts';
 import { Store } from './store.ts';
 import { themesExtension } from './themes.ts';
 import { DEFAULT_MAX_BYTES, fsList, fsRead, gitDiff, gitStatus } from './tools.ts';
@@ -270,6 +271,8 @@ export interface BizziNode {
   readonly forks: Forks;
   /** Keeping the machine awake while agents work (spec §8.1). */
   readonly keepAwake: KeepAwake;
+  /** Read-only views over every session on this node for agents (sessions_overview, session_peek). */
+  readonly history: History;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -378,6 +381,8 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     node.hub = hub;
     node.keepAwake = keepAwake;
     node.forks = new Forks({ sessions, workspaces, registry, bus, hub, machine, dataDir: opts.dataDir, logger });
+    const self = node;
+    node.history = new History({ store, sessions, workspaces, orchestration, hub, machine: () => self.machine });
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
     const baselines = new BaselineTracker({
@@ -447,6 +452,7 @@ class Node implements BizziNode {
   hub!: HubPort;
   forks!: Forks;
   keepAwake!: KeepAwake;
+  history!: History;
   readonly #browser: FsBrowser;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;

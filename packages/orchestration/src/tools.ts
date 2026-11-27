@@ -6,7 +6,10 @@ import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import type { BizziNode } from '@bizzi/core';
 import { DEFAULT_READ_TOKENS, DEFAULT_WAIT_MS, MAX_READ_TOKENS, MAX_WAIT_MS, WAIT_UNTIL, type WaitUntil } from '@bizzi/core';
-import { AGENT_KINDS, BizziError, type AgentKind, type SessionInfo } from '@bizzi/protocol';
+import { OVERVIEW_DEFAULT_LIMIT, OVERVIEW_MAX_LIMIT, type OverviewResult } from '@bizzi/core';
+import { AGENT_KINDS, BizziError, type AgentKind, type SessionInfo, type SessionStatus } from '@bizzi/protocol';
+
+const SESSION_STATUSES: [SessionStatus, ...SessionStatus[]] = ['starting', 'running', 'waiting_input', 'waiting_approval', 'idle', 'paused', 'ended', 'failed'];
 
 /** Longest session_wait without a progress token: under the 300 s a silent MCP call may last in Claude Code. */
 export const SILENT_WAIT_MAX_MS = 240_000;
@@ -29,6 +32,9 @@ export const SERVER_INSTRUCTIONS = [
     'opted in (parentAnswersApprovals), session_wait also lists them with what you may do, and session_answer answers ' +
     'them: allow only what you could do yourself without asking, inside the helper\'s workspace; deny anything. The user ' +
     'can still answer first; then session_answer says it was already answered.',
+  'To see the other sessions on this machine (not only your helpers): sessions_overview lists every session with its ' +
+    'last prompt, last reply and whether it waits on the user; session_peek reads any one of them like session_read. ' +
+    'Both are read-only: you can only drive (send, answer, stop) helpers you started.',
 ].join('\n');
 
 /** Short note appended to the system prompt of sessions that get these tools. */
@@ -36,7 +42,9 @@ export const TOOLS_NOTE =
   'You can start helper sessions with the bizzi-agents MCP tools (session_start, session_wait, session_read, ' +
   'session_send, session_answer, session_stop, sessions_list, machines_list): any installed agent on this machine, optionally ' +
   'in a git worktree (`worktree: "<branch>"`), or on another online machine (`machine: "<name>"`). Give helpers ' +
-  'self-contained prompts, read their structured results instead of asking for transcripts, and stop them when done.';
+  'self-contained prompts, read their structured results instead of asking for transcripts, and stop them when done. ' +
+  'sessions_overview and session_peek show every other session on this machine (read-only), e.g. to check that nothing ' +
+  'is left uncommitted or waiting on the user.';
 
 function text(t: string, structured?: Record<string, unknown>): CallToolResult {
   return { content: [{ type: 'text', text: t }], ...(structured ? { structuredContent: structured } : {}) };
@@ -326,7 +334,7 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string, opts: A
     'sessions_list',
     {
       title: 'List your helpers',
-      description: 'The helpers this session started, with their state.',
+      description: 'The helpers this session started, with their state. For every session on this machine use sessions_overview.',
       inputSchema: {},
     },
     async () => {
@@ -366,5 +374,106 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string, opts: A
     },
   );
 
+  // ---- every session on this node, read-only (not just your helpers)
+  server.registerTool(
+    'sessions_overview',
+    {
+      title: 'Overview of every session',
+      description:
+        'Every session on this machine (not just your helpers), newest first: title, agent, workspace path and ' +
+        'branch, status, parent/helper relation, its last user prompt and last reply (trimmed), whether a turn or ' +
+        'background work is still running, and `waiting` when it needs the user: pending approvals, questions or a ' +
+        'budget stop, or `asks` (a heuristic: its last reply ends by asking the user something). Read-only. Use it ' +
+        'to check what other sessions are doing or whether anything is left for the user. `machine` reads another ' +
+        "machine from the hub's index (states only, no prompts or replies). Paged with offset/limit.",
+      inputSchema: {
+        workspace: z.string().optional().describe('Workspace id or path; a repo workspace includes its worktrees.'),
+        status: z.array(z.enum(SESSION_STATUSES)).optional().describe('Default: every status except "ended".'),
+        agent: agentSchema.optional(),
+        updatedSince: z.string().optional().describe('ISO time or a duration back from now: "90m", "6h", "2d".'),
+        waitingOnly: z.boolean().optional().describe('Only sessions waiting on the user (including the heuristic).'),
+        machine: z.string().optional().describe('Machine name or id (see machines_list). Default: this machine.'),
+        offset: z.number().int().nonnegative().optional(),
+        limit: z.number().int().min(1).max(OVERVIEW_MAX_LIMIT).optional().describe(`Default ${OVERVIEW_DEFAULT_LIMIT}.`),
+      },
+    },
+    async (args) => {
+      try {
+        const r = await node.history.overview(callerId, {
+          ...(args.workspace ? { workspace: args.workspace } : {}),
+          ...(args.status ? { status: args.status } : {}),
+          ...(args.agent ? { agent: args.agent } : {}),
+          ...(args.updatedSince ? { updatedSince: args.updatedSince } : {}),
+          ...(args.waitingOnly !== undefined ? { waitingOnly: args.waitingOnly } : {}),
+          ...(args.machine ? { machine: args.machine } : {}),
+          ...(args.offset !== undefined ? { offset: args.offset } : {}),
+          ...(args.limit !== undefined ? { limit: args.limit } : {}),
+        });
+        return text(overviewText(r), { ...r });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
+  server.registerTool(
+    'session_peek',
+    {
+      title: 'Read any session',
+      description:
+        "session_read's structured summary for any session on this machine, not only your helpers: final message, " +
+        'changed files, tool counts, stop reason, what it waits on, plus its title, workspace and last prompt. ' +
+        'Read-only: you can only send to, answer for or stop your own helpers.',
+      inputSchema: {
+        sessionId: z.string().min(1).describe('Any session id on this machine (see sessions_overview).'),
+        since: z.number().int().nonnegative().optional(),
+        maxTokens: z.number().int().min(100).max(MAX_READ_TOKENS).optional(),
+        detail: z.enum(['summary', 'full', 'diff']).optional(),
+        path: z.string().optional().describe('With detail "diff": the changed file.'),
+      },
+    },
+    async (args) => {
+      try {
+        const r = await node.history.peek(args.sessionId, {
+          ...(args.since !== undefined ? { since: args.since } : {}),
+          ...(args.maxTokens !== undefined ? { maxTokens: args.maxTokens } : {}),
+          ...(args.detail ? { detail: args.detail } : {}),
+          ...(args.path ? { path: args.path } : {}),
+        });
+        return text(JSON.stringify(r, null, 1), { ...r });
+      } catch (err) {
+        return errorResult(err);
+      }
+    },
+  );
+
   return server;
 }
+
+/** One block per session: the head line, then the prompt, reply and what it waits on. */
+export function overviewText(r: OverviewResult): string {
+  const lines = [`${r.machine.name}${r.machine.self ? ' (this machine)' : ''}: ${r.total} session${r.total === 1 ? '' : 's'}${r.sessions.length < r.total ? `, showing ${r.sessions.length}` : ''}`];
+  for (const s of r.sessions) {
+    const where = [s.workspace.path ?? s.workspace.id, s.workspace.branch ? `@${s.workspace.branch}` : ''].join('');
+    const rel = [s.self ? 'you' : '', s.parentId ? `helper of ${s.parentId}` : '', s.helpers?.length ? `${s.helpers.length} helper(s)` : ''].filter(Boolean).join(', ');
+    const busy = [s.turnOpen ? 'turn open' : '', s.background?.length ? `background: ${s.background.join('; ')}` : ''].filter(Boolean).join(', ');
+    lines.push('', `${s.sessionId} ${s.agent} ${s.status} ${s.updatedAt} — ${s.title ?? 'Untitled'} [${where}]${rel ? ` (${rel})` : ''}${busy ? ` {${busy}}` : ''}`);
+    if (s.lastPrompt) lines.push(`  asked: ${s.lastPrompt.text}`);
+    if (s.lastReply) lines.push(`  replied: ${s.lastReply.text}`);
+    const w = s.waiting;
+    if (w) {
+      const why = [
+        ...(w.approvals ?? []).map((a) => `approval: ${a}`),
+        ...(w.questions ?? []).map((q) => `question: ${q}`),
+        ...(w.budget ? [`budget: ${w.budget}`] : []),
+        ...(w.status ? [w.status] : []),
+        ...(w.asks ? [`asks (heuristic): ${w.asks.question}`] : []),
+      ];
+      lines.push(`  WAITING ON THE USER: ${why.join(' | ')}`);
+    }
+  }
+  if (r.nextOffset !== undefined) lines.push('', `More: offset ${r.nextOffset}.`);
+  for (const n of r.notes) lines.push(`(${n})`);
+  return lines.join('\n');
+}
+
