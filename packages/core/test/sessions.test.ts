@@ -409,6 +409,37 @@ test('session.clear is refused for terminal sessions and ended sessions', async 
   await assert.rejects(node.call('session.clear', { sessionId: s.id }), (e: unknown) => e instanceof BizziError);
 });
 
+test('a turn the agent starts on its own is tracked like any turn; only when none is in flight', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const session = await idleSession(node, workspace.id);
+  const handle = fake.sessions[0]!;
+  const ch = record(node, sessionChannel(session.id));
+  const info = () => node.sessions.get(session.id).session;
+
+  // Only agent turns may come from the adapter.
+  handle.emitEvent({ type: 'turn.started', data: { turnId: 't_fake', input: text('x') } });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(ch.events.filter((e) => e.type === 'turn.started').length, 0);
+
+  // Claude picks work back up after a background task: the session works, nothing titles it.
+  handle.emitEvent({ type: 'turn.started', data: { turnId: 't_agent', input: text('ignored'), agent: true } });
+  await waitFor(() => info().status === 'running');
+  const started = ch.events.find((e) => e.type === 'turn.started');
+  assert.deepEqual(started?.data, { turnId: 't_agent', input: [], agent: true });
+  assert.equal(info().title, undefined);
+  // A user message now is a conflict, like during any turn (the UI steers instead).
+  await assert.rejects(node.call('session.send', { sessionId: session.id, input: text('hi') }), rejectsWith('conflict'));
+  handle.emitEvent({ type: 'turn.completed', data: { turnId: 't_agent', stopReason: 'end_turn' } });
+  await waitFor(() => info().status === 'idle');
+
+  // During a turn of the user's, the agent's own turn.started is dropped.
+  const { turnId } = await node.call('session.send', { sessionId: session.id, input: text('/slow 300') });
+  handle.emitEvent({ type: 'turn.started', data: { turnId: 't_agent2', input: [], agent: true } });
+  await ch.waitFor('turn.completed', (e) => e.data.turnId === turnId);
+  assert.equal(ch.events.filter((e) => e.type === 'turn.started').length, 2);
+});
+
 test('session info keeps the agent background work; it is not activity and ends with the agent process', async (t) => {
   const fake = new FakeAdapter();
   const { node, workspace } = await setup(t, [fake]);

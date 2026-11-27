@@ -892,7 +892,7 @@
         }
       },
       "turn.started": {
-        "description": "Emitted by the core when a turn starts; echoes the user input. */ /** `auto`: bizzi sent this input itself (continuing a turn cut off by a restart), not the user; it doesn't title the session and isn't the user's request.",
+        "description": "Emitted by the core when a turn starts; echoes the user input. `auto`: bizzi sent this input itself (continuing a turn cut off by a restart), not the user; it doesn't title the session and isn't the user's request. `agent`: the agent started this turn on its own, with no input from bizzi (Claude picking work back up when a background task finishes). Emitted by the adapter; `input` is empty.",
         "data": {
           "$ref": "#/$defs/session:turn.started"
         }
@@ -11698,6 +11698,9 @@
           }
         },
         "auto": {
+          "const": true
+        },
+        "agent": {
           "const": true
         }
       },

@@ -62,6 +62,8 @@ interface ActiveTurn {
   uuids: Set<string>;
   consumed: Set<string>;
   interrupted: boolean;
+  /** Claude started this turn on its own (a background task finished), not bizzi's send(). */
+  agent?: true;
   usage?: Usage;
   graceTimer?: ReturnType<typeof setTimeout>;
 }
@@ -310,6 +312,18 @@ export class ClaudeSession implements AdapterSession {
     this.#input.push(msg);
   }
 
+  /**
+   * Main-loop output with no turn in flight: Claude picked work back up on its own, typically when a
+   * background task finished. Open a turn for it so the session shows as working and a restart closes
+   * it; its `result` completes it. Not while an interrupted turn is still draining (its late output).
+   */
+  #agentTurn(): void {
+    if (this.#active || this.#state !== 'running' || this.#orphaned.size > 0) return;
+    const turnId = newId('t');
+    this.#active = { turnId, uuids: new Set(), consumed: new Set(), interrupted: false, agent: true };
+    this.#emit({ type: 'turn.started', data: { turnId, input: [], agent: true } });
+  }
+
   #complete(turn: ActiveTurn, stopReason: StopReason, error?: string): void {
     if (turn.graceTimer) clearTimeout(turn.graceTimer);
     if (this.#active === turn) this.#active = null;
@@ -529,6 +543,7 @@ export class ClaudeSession implements AdapterSession {
 
   #handle(m: AnyMsg): void {
     this.#noteConsumed(m);
+    if ((m.type === 'stream_event' || m.type === 'assistant') && !m.parent_tool_use_id) this.#agentTurn();
     switch (m.type) {
       case 'system':
         return this.#onSystem(m);
@@ -890,8 +905,8 @@ export class ClaudeSession implements AdapterSession {
       return; // late result of a turn we already force-completed
     }
     if (!turn) return this.#raw(r);
-    const mine = !this.#stampsUuids || ids.some((u) => turn.uuids.has(u)) || turn.interrupted;
-    if (!mine) return this.#raw(r); // e.g. a background-task turn the CLI ran on its own
+    const mine = turn.agent || !this.#stampsUuids || ids.some((u) => turn.uuids.has(u)) || turn.interrupted;
+    if (!mine) return this.#raw(r); // e.g. a background-task turn the CLI ran inside one of ours
     const tokens = resultTokens(r);
     if (turnCost !== undefined) tokens.costUsd = turnCost;
     if (cumulative.contextWindow) tokens.contextWindow = cumulative.contextWindow;

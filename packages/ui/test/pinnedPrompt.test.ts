@@ -24,6 +24,17 @@ test('promptText flattens turn input and skips non-prompts', () => {
   assert.equal(promptText(undefined), null);
 });
 
+test('promptText leaves out what bizzi sent itself and turns the agent started', () => {
+  const note = [{ type: 'text', text: '[bizzi] bizzi restarted while you were working, and your last turn was cut off partway.' }];
+  const turn = (extra: object) => ({ ...base, kind: 'turn', ...extra }) as unknown as TimelineItem;
+  assert.equal(promptText(turn({ input: note, auto: true })), null);
+  // History from older nodes: no `auto` flag, only the prefix.
+  assert.equal(promptText(turn({ input: note })), null);
+  assert.equal(promptText({ ...base, kind: 'message', role: 'user', text: note[0]!.text } as unknown as TimelineItem), null);
+  assert.equal(promptText(turn({ input: [], agent: true })), null);
+  assert.equal(promptText(turn({ input: [{ type: 'text', text: 'what does [bizzi] mean?' }] })), 'what does [bizzi] mean?');
+});
+
 test('pinnedPromptIndex pins the last prompt above the viewport once it is fully out of view', () => {
   // Rows of 100px each; prompts at rows 0, 3 and 7.
   const span = (i: number) => ({ start: i * 100, end: i * 100 + 100 });

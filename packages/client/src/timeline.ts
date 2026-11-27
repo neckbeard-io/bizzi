@@ -27,6 +27,10 @@ interface ItemBase {
 export interface TurnItem extends ItemBase {
   kind: 'turn';
   input: InputBlock[];
+  /** The agent started this turn on its own (`turn.started.agent`); there is no prompt. */
+  agent?: true;
+  /** bizzi sent this input itself (`turn.started.auto`: continuing after a restart), not the user. */
+  auto?: true;
 }
 
 /** Input steered into the in-flight turn (`turn.steered`). */
@@ -369,11 +373,17 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       return;
     }
     case 'turn.started': {
+      // One turn runs at a time: a tool still marked running belongs to work that ended unrecorded.
+      // (Subagents can outlive their turn in the background; they end with the agent process.)
+      cancelRunning(d, false);
       tl.activeTurnId = ev.data.turnId;
       tl.status = 'running';
       tl.prompt = null;
       d.turnStarted(ev.data.turnId, ev.ts);
-      d.put({ ...base(d, `turn:${ev.data.turnId}`, ev), turnId: ev.data.turnId, kind: 'turn', input: ev.data.input });
+      const turn: TurnItem = { ...base(d, `turn:${ev.data.turnId}`, ev), turnId: ev.data.turnId, kind: 'turn', input: ev.data.input };
+      if (ev.data.agent) turn.agent = true;
+      if (ev.data.auto) turn.auto = true;
+      d.put(turn);
       // A new turn answers any open question (agents without question.respond take answers as input).
       for (const qid of tl.pendingQuestions) {
         const q = d.get(`q:${qid}`);
@@ -631,6 +641,8 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       // Lists read it from the session info (`SessionInfo.background`), which the core keeps current.
       return;
     case 'session.restarting': {
+      // Nothing the old agent process was running survives it.
+      cancelRunning(d, true);
       const item: RestartItem = { ...base(d, `restart:${ev.seq}`, ev), kind: 'restart', state: 'restarting' };
       if (ev.data.fromVersion !== undefined) item.fromVersion = ev.data.fromVersion;
       if (ev.data.toVersion !== undefined) item.toVersion = ev.data.toVersion;
@@ -667,6 +679,19 @@ function toolOrPlaceholder(d: Draft, toolId: string, ev: SessionEvent): ToolItem
 }
 
 /** Close everything still open in a finished turn. */
+/**
+ * Mark tools (and with `subagents`, subagents) still shown as running as cancelled. Their end was never
+ * recorded: the node was killed while they ran, or they ran outside any tracked turn (older nodes
+ * didn't track turns the agent started on its own), and they would otherwise spin forever.
+ */
+function cancelRunning(d: Draft, subagents: boolean): void {
+  for (const id of d.ids()) {
+    const item = d.get(id);
+    if (!item || (item.kind !== 'tool' && !(subagents && item.kind === 'subagent'))) continue;
+    if (item.status === 'running') d.put({ ...item, status: 'cancelled' });
+  }
+}
+
 function finalizeTurn(d: Draft, turnId: string, stopReason: StopReason): void {
   const tl = d.tl;
   const aborted = stopReason !== 'end_turn';

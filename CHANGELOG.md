@@ -32,6 +32,9 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Fixed
 - After an update or a restart that replaces the core, the desktop app reopens the page you were on and shows your sessions right away, instead of starting over on the machine page.
+- When Claude picks its work back up on its own after a background task finishes, the session shows as working and can be stopped, and the timeline marks it "continued on its own". Before, that work ran unseen, and a restart during it left its last command spinning forever.
+- A command still spinning after a restart, from work that ended without being recorded, now shows as cancelled.
+- The prompt pinned above the timeline is always one you wrote: bizzi's "[bizzi] bizzi restarted…" note and turns Claude started on its own no longer replace it.
 - Sessions are no longer named "[bizzi] bizzi restarted while you were…": bizzi's own continue message never names a session, and sessions it already renamed, or that were left "Untitled session", take their name from your first message again.
 - A Claude session's context bar now keeps up during a long turn, updating after each response and tool result instead of only when the turn ends.
 - The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
