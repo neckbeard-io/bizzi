@@ -9,8 +9,10 @@ import { useIsHub, useMachine, useMachineOnline, useShowMachine } from '../../ap
 import { Icon } from '../../components/icons.tsx';
 import { MachineChip, WorkspaceTile, stripeStyle } from '../../components/labels.tsx';
 import { PageHeader } from '../../components/layout.tsx';
-import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
+import { Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
 import { STATUS_LABEL, machinePresence } from '../../lib/format.ts';
+import { hotkeyLabel } from '../../lib/hotkeys.ts';
+import { isMac } from '../../app/hotkeys.ts';
 import { statusSourceLabel } from '../../lib/states.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
@@ -59,7 +61,6 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const [showForkTo, setShowForkTo] = useState(false);
   const isHub = useIsHub();
   const [sideTab, setSideTab] = useState<SideTab>(props.tab === 'chat' ? 'plan' : props.tab);
-  const stop = useAction(() => store.stop(sessionId));
   const fork = useAction(async () => {
     const s = await store.forkSession(sessionId);
     navigate({ name: 'session', sessionId: s.id, tab: 'chat' });
@@ -138,7 +139,6 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
     </Suspense>
   );
 
-  const ended = status === 'ended';
   return (
     <div className="flex h-full flex-col">
       <PageHeader
@@ -177,26 +177,13 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             <IconButton icon="more" label="More session actions" onClick={menuButtonHandler(() => sessionMenu(store, session, online), session.title || 'Untitled session')} />
             <IconButton
               icon="trash"
-              label="Delete session"
+              label={`Delete session (${hotkeyLabel({ key: 'w' }, isMac())})`}
               disabled={!online || remove.busy}
               onClick={() => {
                 if (window.confirm(`Delete "${session.title || 'this session'}"? The agent is stopped and the session and its history are removed. This cannot be undone.`)) void remove.run();
               }}
+              className="text-err! hover:bg-err/10!"
             />
-            {!ended && online ? (
-              <Button
-                size="sm"
-                variant="ghost"
-                icon="stop"
-                busy={stop.busy}
-                onClick={() => {
-                  if (window.confirm('End this session? The agent process will be stopped.')) void stop.run();
-                }}
-                className="hidden sm:inline-flex"
-              >
-                End
-              </Button>
-            ) : null}
           </>
         }
       />
@@ -205,11 +192,6 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
       {showControls && !terminal ? (
         <div className="shrink-0 border-b border-border bg-panel px-3 py-2 md:px-5">
           <SessionControls sessionId={sessionId} />
-          {!ended ? (
-            <Button size="sm" variant="ghost" icon="stop" className="mt-2 sm:hidden" onClick={() => void stop.run()}>
-              End session
-            </Button>
-          ) : null}
         </div>
       ) : null}
       {showForkTo && isHub && !terminal ? (
@@ -231,7 +213,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
           <Icon name="key" size={14} /> This is a login session. Open the login helper for links and codes.
         </a>
       ) : null}
-      <ErrorText error={openError ?? stop.error ?? fork.error ?? remove.error} />
+      <ErrorText error={openError ?? fork.error ?? remove.error} />
       {split ? (
         <div className="flex min-h-0 flex-1">
           <section className="min-w-0 flex-1">{main}</section>

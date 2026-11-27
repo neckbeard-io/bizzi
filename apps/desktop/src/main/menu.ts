@@ -59,7 +59,7 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
     {
       label: 'File',
       submenu: [
-        // ⌘N / ⌘T are the UI's hotkeys (Settings › Hotkeys, switchable per device): shown here, not
+        // ⌘N / ⌘T / ⌘W are the UI's hotkeys (Settings › Hotkeys, switchable per device): shown here, not
         // registered, so the keys reach the page and the UI decides; a click runs the command regardless.
         { label: 'New Workspace…', accelerator: 'CmdOrCtrl+N', registerAccelerator: false, click: () => a.command('new-workspace') },
         { label: 'New Session', accelerator: 'CmdOrCtrl+T', registerAccelerator: false, click: () => a.command('new-session') },
@@ -67,7 +67,10 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
         { label: 'Pair a Device…', click: () => a.navigate(MENU_ROUTES.devices) },
         sep,
         ...(mac ? [] : [settings, sep]),
-        { role: 'close' },
+        // ⌘W deletes the open session (the UI asks first) and closes the window on other pages; the
+        // window itself closes with ⇧⌘W.
+        { label: 'Close Session', accelerator: 'CmdOrCtrl+W', registerAccelerator: false, click: () => a.command('close-session') },
+        { role: 'close', label: 'Close Window', accelerator: 'CmdOrCtrl+Shift+W' },
         ...(mac ? [] : [{ role: 'quit', label: 'Quit bizzi' } satisfies MenuItemConstructorOptions]),
       ],
     },
@@ -97,7 +100,11 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
         { label: 'Forward', accelerator: 'CmdOrCtrl+]', click: () => a.forward() },
       ],
     },
-    { role: 'windowMenu' },
+    // Spelled out: the stock Window menu has Close (⌘W / Ctrl+W) on Windows and Linux, which would take ⌘W.
+    {
+      role: 'windowMenu',
+      submenu: mac ? [{ role: 'minimize' }, { role: 'zoom' }, sep, { role: 'front' }] : [{ role: 'minimize' }],
+    },
     {
       role: 'help',
       submenu: [

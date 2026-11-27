@@ -5,6 +5,7 @@ import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { copyText, openDialog, showToast } from '../app/contextMenu.ts';
 import type { MenuItem } from '../app/contextMenu.ts';
 import { navigate } from '../app/hooks.ts';
+import { deleteSessionFlow } from '../app/sessionActions.ts';
 import { requestNewSession } from '../app/workspaceIntents.ts';
 import { removeWorkspaceFlow } from './workspaces/WorkspaceDialogs.tsx';
 
@@ -143,9 +144,7 @@ export function sessionMenu(store: BizziStore, s: SessionInfo, online: boolean):
     disabled: !online,
     ...offline,
     onSelect: async () => {
-      if (!window.confirm(`Delete ${label}? The agent is stopped and the session and its history are removed. This cannot be undone.`)) return;
-      await store.deleteSession(s.id);
-      if (window.location.hash.includes(s.id)) navigate({ name: 'workspace', workspaceId: s.workspaceId }, { replace: true });
+      await deleteSessionFlow(store, s);
     },
   });
   return items;

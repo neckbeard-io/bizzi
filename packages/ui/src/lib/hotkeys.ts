@@ -1,7 +1,7 @@
 // App-wide keyboard shortcuts (Settings › Hotkeys): what each one does, how it reads on this platform,
 // and which keydown matches it. Pure; the listener and the per-device on/off switches are app/hotkeys.ts.
 
-export type HotkeyId = 'newWorkspace' | 'newSession';
+export type HotkeyId = 'newWorkspace' | 'newSession' | 'closeSession';
 
 export interface HotkeyDef {
   id: HotkeyId;
@@ -14,6 +14,7 @@ export interface HotkeyDef {
 export const HOTKEYS: readonly HotkeyDef[] = [
   { id: 'newWorkspace', key: 'n', label: 'New workspace', description: 'Add a workspace on the machine you are on (the open page’s machine, else the selected one).' },
   { id: 'newSession', key: 't', label: 'New session', description: 'Start a session in the open workspace with the agent’s default profile (★), and open it.' },
+  { id: 'closeSession', key: 'w', label: 'Close session', description: 'Delete the open session after you confirm: the agent is stopped and its history removed. Elsewhere in the desktop app it closes the window.' },
 ];
 
 export type HotkeyPrefs = Record<HotkeyId, boolean>;
@@ -53,7 +54,7 @@ export interface KeyLike {
 /**
  * The hotkey a keydown triggers, or null. Exactly the platform modifier and the letter: ⇧, ⌥ and the other
  * modifier must be up (⌘⇧N is not ⌘N). Matches by physical key too, so non-Latin layouts work. On Windows
- * and Linux, Ctrl+letter inside a terminal belongs to the shell (Ctrl+T, Ctrl+N), so it is left alone there.
+ * and Linux, Ctrl+letter inside a terminal belongs to the shell (Ctrl+T, Ctrl+N, Ctrl+W), so it is left alone there.
  */
 export function matchHotkey(e: KeyLike, opts: { mac: boolean; prefs: HotkeyPrefs; inTerminal?: boolean }): HotkeyId | null {
   if (e.repeat || e.altKey || e.shiftKey) return null;
@@ -68,4 +69,4 @@ export function matchHotkey(e: KeyLike, opts: { mac: boolean; prefs: HotkeyPrefs
 }
 
 /** Commands the desktop app's menu sends (preload → `bizzi:command` window event). */
-export const MENU_COMMANDS: Readonly<Record<string, HotkeyId>> = { 'new-workspace': 'newWorkspace', 'new-session': 'newSession' };
+export const MENU_COMMANDS: Readonly<Record<string, HotkeyId>> = { 'new-workspace': 'newWorkspace', 'new-session': 'newSession', 'close-session': 'closeSession' };
