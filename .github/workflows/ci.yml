@@ -46,6 +46,11 @@ jobs:
 
       - run: npm run typecheck
 
+      # The curl installer (scripts/install.sh): unit tests everywhere, shellcheck on Linux.
+      - run: bash scripts/test-install.sh
+      - if: runner.os == 'Linux'
+        run: shellcheck scripts/install.sh scripts/test-install.sh
+
       # docs/protocol.schema.json must match packages/protocol (regenerate with `npm run schema`).
       - run: npm run schema:check
 

@@ -166,7 +166,47 @@ export function coreNodeArgs(entry: string, exists: (file: string) => boolean = 
   return exists(hook) && !exists(join(dirname(entry), '..', '..', '..', 'node_modules', '@bizzi')) ? ['--import', pathToFileURL(hook).href] : [];
 }
 
-/** The data dir shared with a launchd `bizzi serve` on the same laptop. */
-export function resolveDataDir(env: NodeJS.ProcessEnv): string {
-  return env['BIZZI_DATA_DIR'] || join(env['HOME'] ?? homedir(), '.bizzi');
+/**
+ * A test build: this app runs from a bizzi checkout (a dev run, or a packaged build still in
+ * apps/desktop/release). It must never share anything with the bizzi actually in use: its own data dir
+ * (so it neither attaches to nor stops that app's core), its own Electron profile (so the
+ * single-instance lock doesn't hand it to the installed app), its own secrets and widgets, no
+ * `bizzi://` registration and no self-update. Explicit BIZZI_* settings still win.
+ */
+export interface TestBuild {
+  checkout: string;
+  dataDir: string;
+  userDataDir: string;
+  /** Environment for the core it spawns (only where the user didn't set the variable). */
+  coreEnv: Record<string, string>;
+}
+
+/** The bizzi checkout that contains `start` (a directory with .git and apps/desktop), or null. */
+export function findCheckout(start: string, exists: (p: string) => boolean = existsSync): string | null {
+  let dir = start;
+  for (;;) {
+    if (exists(join(dir, '.git')) && exists(join(dir, 'apps', 'desktop', 'package.json'))) return dir;
+    const up = dirname(dir);
+    if (up === dir) return null;
+    dir = up;
+  }
+}
+
+/** Where a test build keeps to itself: `<checkout>/.bizzi-dev/` (gitignored). `BIZZI_TEST_BUILD=0` opts out. */
+export function testBuildFor(appPath: string, env: NodeJS.ProcessEnv, exists?: (p: string) => boolean): TestBuild | null {
+  if (env['BIZZI_TEST_BUILD'] === '0') return null;
+  const checkout = findCheckout(appPath, exists);
+  if (!checkout) return null;
+  const root = join(checkout, '.bizzi-dev');
+  return {
+    checkout,
+    dataDir: join(root, 'data'),
+    userDataDir: join(root, 'electron'),
+    coreEnv: { BIZZI_SECRET_SERVICE: 'bizzi-dev', BIZZI_WIDGETS_DIR: join(root, 'widgets') },
+  };
+}
+
+/** The data dir: BIZZI_DATA_DIR, a test build's own, else the one shared with a launchd `bizzi serve`. */
+export function resolveDataDir(env: NodeJS.ProcessEnv, testBuild?: TestBuild | null): string {
+  return env['BIZZI_DATA_DIR'] || testBuild?.dataDir || join(env['HOME'] ?? homedir(), '.bizzi');
 }

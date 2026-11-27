@@ -19,7 +19,7 @@ import {
 import type { LogLevel, ServeReady } from '@bizzi/protocol';
 import { createLogger, fileSink, stderrSink } from '../core/log.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
-import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir } from '../core/runtime.ts';
+import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, testBuildFor } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
 import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
 import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, parseUpdateAction } from '../shared/update.ts';
@@ -35,13 +35,17 @@ const ALLOWED_PERMISSIONS = new Set(['clipboard-sanitized-write', 'notifications
 const isMac = process.platform === 'darwin';
 const env = process.env;
 
+// A build run from a bizzi checkout keeps apart from the installed app (runtime.ts, TestBuild).
+const testBuild = testBuildFor(app.getAppPath(), env);
 if (env['BIZZI_USER_DATA_DIR']) app.setPath('userData', env['BIZZI_USER_DATA_DIR']);
+else if (testBuild) app.setPath('userData', testBuild.userDataDir);
+const appName = testBuild ? 'bizzi (test build)' : 'bizzi';
 
 const appDir = app.getAppPath();
 /** The bee icons (scripts/icons.ts); inside app.asar when packaged. */
 const assetsDir = join(appDir, 'assets');
 const appIcon = join(assetsDir, 'icon.png');
-const dataDir = resolveDataDir(env);
+const dataDir = resolveDataDir(env, testBuild);
 const logFile = join(dataDir, 'logs', 'core.log');
 // Desktop log lines go to our stderr and into the core's log file (its stderr channel).
 const log = createLogger([stderrSink, fileSink(logFile)], { proc: 'desktop' }, (env['BIZZI_LOG_LEVEL'] as LogLevel) || 'info');
@@ -78,13 +82,16 @@ const manager = new CoreManager({
     const entry = resolveCoreEntry({ env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir });
     if (!existsSync(entry)) throw new Error(`core entry not found: ${entry}`);
     log.log('info', 'core runtime', { kind: runtime.kind, command: runtime.command, nodeVersion: runtime.nodeVersion, entry });
-    return { command: runtime.command, args: [...coreNodeArgs(entry), entry], env: runtime.env };
+    // A test build's core gets its data dir, secrets and widgets apart from the installed app's.
+    const isolated: Record<string, string> = testBuild ? { BIZZI_DATA_DIR: dataDir, ...testBuild.coreEnv } : {};
+    const coreEnv = Object.fromEntries(Object.entries(isolated).filter(([k]) => !env[k]));
+    return { command: runtime.command, args: [...coreNodeArgs(entry), entry], env: { ...coreEnv, ...runtime.env } };
   },
   onStatus: (status) => onCoreStatus(status),
 });
 
 // Self-update from GitHub Releases (src/update/). Downloads go to a temp dir; prefs live in userData.
-const updateTarget = detectInstall({ isPackaged: app.isPackaged, platform: process.platform, execPath: process.execPath, env });
+const updateTarget = detectInstall({ isPackaged: app.isPackaged, platform: process.platform, execPath: process.execPath, env, testBuild: testBuild?.checkout ?? null });
 const updates = new UpdateController({
   currentVersion: app.getVersion(),
   arch: process.arch,
@@ -169,6 +176,7 @@ function setup(): void {
 async function onReady(): Promise<void> {
   log.log('info', 'desktop starting', {
     version: app.getVersion(),
+    ...(testBuild ? { testBuild: testBuild.checkout } : {}),
     electron: process.versions.electron,
     packaged: app.isPackaged,
     dataDir,
@@ -230,7 +238,7 @@ async function onReady(): Promise<void> {
     ),
   );
   tray = new Tray(trayIcon(process.platform, assetsDir));
-  tray.setToolTip('bizzi');
+  tray.setToolTip(appName);
   if (!isMac) tray.on('click', () => showWindow());
   updateTray(manager.status);
 
@@ -311,7 +319,7 @@ function createWindow(): void {
     minWidth: 720,
     minHeight: 480,
     show: false,
-    title: 'bizzi',
+    title: appName,
     ...(isMac ? {} : { icon: appIcon }),
     ...windowChromeOptions(titleBar, chrome),
     webPreferences: {
@@ -393,8 +401,9 @@ function coreLabel(s: CoreStatus): string {
 
 function registerDeepLinks(): void {
   // Packaged builds also declare the scheme in Info.plist / .desktop / registry (electron-builder).
-  // In dev, registration would point the OS at the bare Electron binary, so it's opt-in.
-  if (app.isPackaged) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
+  // In dev, registration would point the OS at the bare Electron binary, so it's opt-in. A packaged
+  // test build never claims it: bizzi:// links belong to the installed app.
+  if (app.isPackaged && !testBuild) app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME);
   else if (env['BIZZI_REGISTER_PROTOCOL'] === '1' && process.argv[1]) {
     app.setAsDefaultProtocolClient(DEEP_LINK_SCHEME, process.execPath, [resolve(process.argv[1])]);
   }

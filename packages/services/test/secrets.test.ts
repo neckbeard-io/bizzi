@@ -224,3 +224,9 @@ describe('createDefaultSecretBackend', () => {
     await assert.rejects(createDefaultSecretBackend({ dataDir, env: { BIZZI_SECRETS_BACKEND: 'vault' } }), isBad('bad_request'));
   });
 });
+
+it('secretService: BIZZI_SECRET_SERVICE keeps test builds out of the real secrets', async () => {
+  const { secretService, SECRET_SERVICE } = await import('../src/index.ts');
+  assert.equal(secretService({}), SECRET_SERVICE);
+  assert.equal(secretService({ BIZZI_SECRET_SERVICE: 'bizzi-dev' }), 'bizzi-dev');
+});
