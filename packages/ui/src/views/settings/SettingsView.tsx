@@ -7,12 +7,13 @@ import type { SettingsSection } from '../../lib/router.ts';
 import { KnowledgeSettings } from '../knowledge/KnowledgeSettings.tsx';
 import { AppearanceSettings } from './AppearanceSettings.tsx';
 import { DevicesSettings } from './DevicesSettings.tsx';
+import { HotkeysSettings } from './HotkeysSettings.tsx';
 import { NotificationSettings } from './NotificationSettings.tsx';
 import { UpdateSettings } from './UpdateSettings.tsx';
 import { updateBridge } from '../../lib/updates.ts';
 
 /**
- * App-level settings only (the gear in the sidebar header): appearance, knowledge, devices (hub), connection.
+ * App-level settings only (the gear in the sidebar header): appearance, hotkeys, knowledge, devices (hub), connection.
  * Machine-scoped settings (agents and their policies, API keys, widgets, agent-to-agent limits) are on each
  * machine's page.
  */
@@ -20,6 +21,7 @@ export function SettingsView(props: { section: SettingsSection }): ReactNode {
   const hub = useBizzi((s) => s.role === 'hub');
   const items: { value: SettingsSection; label: string }[] = [
     { value: 'general', label: 'Appearance' },
+    { value: 'hotkeys', label: 'Hotkeys' },
     { value: 'knowledge', label: 'Knowledge' },
   ];
   if (hub) items.push({ value: 'devices', label: 'Devices' });
@@ -31,7 +33,7 @@ export function SettingsView(props: { section: SettingsSection }): ReactNode {
   return (
     <Page header={<PageHeader title="Settings" subtitle="For the whole app; machine settings are on each machine's page" />}>
       <Tabs<SettingsSection> className="mb-4" value={section} onChange={(s) => navigate({ name: 'settings', section: s }, { replace: true })} items={items} />
-      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'updates' ? <UpdateSettings /> : section === 'devices' ? (
+      {section === 'general' ? <AppearanceSettings /> : section === 'hotkeys' ? <HotkeysSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'updates' ? <UpdateSettings /> : section === 'devices' ? (
         <>
           <NotificationSettings />
           <DevicesSettings />

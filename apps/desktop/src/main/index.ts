@@ -23,7 +23,7 @@ import { ensureCoreCopy, pruneCoreCopies, readCoreId } from '../core/copy.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
 import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, testBuildFor } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
-import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
+import { IPC_BOOTSTRAP, IPC_CHROME, IPC_COMMAND, IPC_NAVIGATE, isMenuCommand, isMenuRoute, type Bootstrap, type MenuCommand } from '../shared/ipc.ts';
 import { initialBounds, parseWindowState, type WindowState } from '../shared/window-state.ts';
 import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, parseUpdateAction } from '../shared/update.ts';
 import { filePrefs, UpdateController } from '../update/controller.ts';
@@ -253,6 +253,7 @@ async function onReady(): Promise<void> {
     Menu.buildFromTemplate(
       appMenu(process.platform, {
         navigate: (hash) => openRoute(hash),
+        command: (name) => runCommand(name),
         back: () => win?.webContents.navigationHistory.goBack(),
         forward: () => win?.webContents.navigationHistory.goForward(),
         showCoreLog: () => shell.showItemInFolder(logFile),
@@ -460,6 +461,15 @@ function openRoute(hash: string): void {
   if (!wc) return;
   if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC_NAVIGATE, hash));
   else wc.send(IPC_NAVIGATE, hash);
+}
+
+function runCommand(name: MenuCommand): void {
+  if (!isMenuCommand(name)) return;
+  showWindow();
+  const wc = win?.webContents;
+  if (!wc) return;
+  if (wc.isLoading()) wc.once('did-finish-load', () => wc.send(IPC_COMMAND, name));
+  else wc.send(IPC_COMMAND, name);
 }
 
 function updateTray(status: CoreStatus): void {

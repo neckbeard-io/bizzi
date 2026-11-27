@@ -2,7 +2,7 @@
 
 export type SessionTab = 'chat' | 'plan' | 'files' | 'changes';
 /** Global (app-level) settings; `general` is Appearance. Machine-scoped settings live on the machine page. */
-export type SettingsSection = 'general' | 'knowledge' | 'devices' | 'updates' | 'connection';
+export type SettingsSection = 'general' | 'hotkeys' | 'knowledge' | 'devices' | 'updates' | 'connection';
 
 export type Route =
   /** Every machine: the machine → workspace tree (phone); on desktop the sidebar is the tree, so it redirects. */
@@ -26,7 +26,7 @@ export type Route =
   | { name: 'ask'; sessionId?: string };
 
 const TABS: readonly SessionTab[] = ['chat', 'plan', 'files', 'changes'];
-const SECTIONS: readonly SettingsSection[] = ['general', 'knowledge', 'devices', 'updates', 'connection'];
+const SECTIONS: readonly SettingsSection[] = ['general', 'hotkeys', 'knowledge', 'devices', 'updates', 'connection'];
 
 export function parseHash(hash: string): Route {
   const path = hash.replace(/^#\/?/, '').split('?')[0] ?? '';

@@ -7,6 +7,7 @@ import {
   BizziError,
   GLOBAL_CHANNEL,
   NO_CAPABILITIES,
+  contextFraction,
   newId,
   sessionChannel,
   type AdapterSession,
@@ -24,6 +25,7 @@ import {
   type QuestionAnswers,
   type SessionEventBody,
   type SessionBudget,
+  type SessionContext,
   type SessionEventMap,
   type SessionInfo,
   type SessionMode,
@@ -1930,11 +1932,20 @@ export class Sessions {
           delete info.agentSessionRef;
           changed = true;
         }
+        // A fresh conversation: the old one's context occupancy no longer applies.
+        if (info.context !== undefined) {
+          delete info.context;
+          changed = true;
+        }
         if (rt.state.forkOf || rt.state.nodeRestarted) {
           rt.state.forkOf = undefined;
           rt.state.nodeRestarted = undefined;
           pendingChanged = true;
         }
+        break;
+      case 'context.updated':
+      case 'context.compacted':
+        this.#noteContext(rt, body);
         break;
       case 'account.usage':
         // The login's billing class, as the agent reports it (spec §12.3).
@@ -2093,6 +2104,31 @@ export class Sessions {
     if (rt.deleted || rt.info.billing === billing || this.#closed || !this.#d.store.isOpen) return;
     rt.info.billing = billing;
     this.#changed(rt, new Date().toISOString());
+  }
+
+  /**
+   * Keep the latest context occupancy on the session info for lists. Broadcast only when the rounded
+   * percentage moves (agents report often), and without bumping `updatedAt`: context isn't activity.
+   */
+  #noteContext(rt: Runtime, body: Extract<SessionEventBody, { type: 'context.updated' | 'context.compacted' }>): void {
+    const prev = rt.info.context;
+    let next: SessionContext | undefined;
+    if (body.type === 'context.updated') {
+      const { used, window, usable, compactAt } = body.data;
+      if (!(window > 0)) return;
+      next = { used, window };
+      if (usable !== undefined) next.usable = usable;
+      if (compactAt !== undefined) next.compactAt = compactAt;
+    } else {
+      if (!prev || body.data.after === undefined) return;
+      next = { ...prev, used: body.data.after };
+    }
+    rt.info.context = next;
+    const same = (a: SessionContext, b: SessionContext): boolean =>
+      Math.round(contextFraction(a) * 100) === Math.round(contextFraction(b) * 100) && a.window === b.window && a.usable === b.usable && a.compactAt === b.compactAt;
+    if (prev && same(prev, next)) return;
+    this.#persist(rt);
+    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
   }
 
   #changed(rt: Runtime, ts: string): void {

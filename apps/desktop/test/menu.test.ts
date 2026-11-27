@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { MenuItemConstructorOptions } from 'electron';
 import { appMenu, MENU_ROUTES } from '../src/main/menu.ts';
-import { isMenuRoute } from '../src/shared/ipc.ts';
+import { MENU_COMMANDS, isMenuCommand, isMenuRoute } from '../src/shared/ipc.ts';
 
 function actions() {
   const calls: string[] = [];
@@ -10,6 +10,7 @@ function actions() {
     calls,
     a: {
       navigate: (h: string) => calls.push(`nav ${h}`),
+      command: (c: string) => calls.push(`cmd ${c}`),
       back: () => calls.push('back'),
       forward: () => calls.push('forward'),
       showCoreLog: () => calls.push('log'),
@@ -60,8 +61,9 @@ test('Windows / Linux: no app menu; Settings and Quit live in File, About in Hel
 test('items open their UI routes and actions; accelerators are unique', () => {
   const { a, calls } = actions();
   const menu = appMenu('darwin', a);
+  click(byLabel(menu, 'New Workspace…'));
+  click(byLabel(menu, 'New Session'));
   click(byLabel(menu, 'New Prompt…'));
-  click(byLabel(menu, 'Add Workspace…'));
   click(byLabel(menu, 'Pair a Device…'));
   click(byLabel(menu, 'Settings…'));
   click(byLabel(menu, 'Inbox'));
@@ -69,8 +71,9 @@ test('items open their UI routes and actions; accelerators are unique', () => {
   click(byLabel(menu, 'Show Core Log'));
   click(byLabel(menu, 'Open Data Folder'));
   assert.deepEqual(calls, [
+    'cmd new-workspace',
+    'cmd new-session',
     `nav ${MENU_ROUTES.ask}`,
-    `nav ${MENU_ROUTES.addWorkspace}`,
     `nav ${MENU_ROUTES.devices}`,
     `nav ${MENU_ROUTES.settings}`,
     `nav ${MENU_ROUTES.inbox}`,
@@ -87,4 +90,18 @@ test('menu routes pass the preload check; anything else does not', () => {
   for (const bad of ['https://x.example', 'javascript:alert(1)', '#/a b', '#x', '/inbox', 42, '#/' + 'a'.repeat(300)]) {
     assert.equal(isMenuRoute(bad), false, String(bad));
   }
+});
+
+test('⌘N and ⌘T are shown but left to the page (the UI hotkeys); menu commands pass the preload check', () => {
+  const { a } = actions();
+  for (const platform of ['darwin', 'linux'] as const) {
+    const menu = appMenu(platform, a);
+    for (const [label, accel] of [['New Workspace…', 'CmdOrCtrl+N'], ['New Session', 'CmdOrCtrl+T']] as const) {
+      const it = byLabel(menu, label);
+      assert.equal(it.accelerator, accel);
+      assert.equal(it.registerAccelerator, false, `${label} must not swallow the key`);
+    }
+  }
+  for (const c of MENU_COMMANDS) assert.ok(isMenuCommand(c), c);
+  for (const bad of ['rm -rf', 'new-prompt', 42, null]) assert.equal(isMenuCommand(bad), false, String(bad));
 });

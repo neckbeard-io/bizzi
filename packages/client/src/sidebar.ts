@@ -1,6 +1,7 @@
 // Pure selectors for the sidebar (spec §11.1), session lists with helpers nested under their parent
 // (spec §12.1) and the helper tree (usage.md §2). Everything here derives from BizziState only.
-import type { AgentKind, AgentListing, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
+import { contextFraction } from '@bizzi/protocol';
+import type { AgentKind, AgentListing, SessionContext, SessionInfo, SessionMode, WorkspaceInfo } from '@bizzi/protocol';
 import type { BizziState } from './store.ts';
 import { selectSessionPrompt, selectSessionStatus } from './store.ts';
 import type { SessionPrompt } from './timeline.ts';
@@ -66,6 +67,21 @@ export function isDoneUnseen(s: BizziState, session: SessionInfo): boolean {
   const st = selectSessionStatus(s, session.id);
   if (st !== 'idle') return false;
   return sessionLastSeq(s, session.id) > session.seenThrough;
+}
+
+/**
+ * Context occupancy 0..1 of `usable` (or `window`): the open timeline's latest report, else what the
+ * session list carries (`SessionInfo.context`), so sessions nobody has open show it too.
+ */
+export function sessionContext(s: BizziState, session: SessionInfo): number | undefined {
+  const c = sessionContextUsage(s, session);
+  return c ? contextFraction(c) : undefined;
+}
+
+/** The latest context report itself (open timeline first, else the session list), for context bars. */
+export function sessionContextUsage(s: BizziState, session: SessionInfo): SessionContext | undefined {
+  const c = s.timelines[session.id]?.context ?? session.context;
+  return c && c.window > 0 ? c : undefined;
 }
 
 /** A helper started by another session (spec §12.1) whose parent is known. */
@@ -264,6 +280,7 @@ export function workspaceRowEqual(a: WorkspaceRowModel, b: WorkspaceRowModel): b
 export interface SessionBreakdownLine {
   sessionId: string;
   agent: AgentKind;
+  mode: SessionMode;
   title: string;
   state: MarkState;
   /** Waiting reason / failure, when there is one. */
@@ -271,24 +288,46 @@ export interface SessionBreakdownLine {
   updatedAt: string;
   /** Context occupancy 0..1 of `usable` (or `window`), when the session reported it. */
   context?: number;
+  /** The report behind `context` (for `contextView`: the same bar and label as the session header). */
+  contextUsage?: SessionContext;
   /** Nesting under the parent session (0 for sessions you started). */
   depth: number;
 }
 
-/** One line per live session of a workspace (helpers under their parent), for the hover / long-press breakdown. */
+/**
+ * One line per live session of a workspace (helpers under their parent): the sidebar tree's session rows
+ * and the long-press breakdown.
+ */
 export function selectWorkspaceBreakdown(s: BizziState, workspaceId: string): SessionBreakdownLine[] {
   const out: SessionBreakdownLine[] = [];
   for (const { session, depth } of selectNestedSessions(s, workspaceId)) {
     const state = sessionMarkState(s, session);
     if (!state) continue;
-    const line: SessionBreakdownLine = { sessionId: session.id, agent: session.agent, title: session.title || 'Untitled session', state, updatedAt: session.updatedAt, depth };
+    const line: SessionBreakdownLine = { sessionId: session.id, agent: session.agent, mode: session.mode, title: session.title || 'Untitled session', state, updatedAt: session.updatedAt, depth };
     if (state === 'waiting') line.reason = waitingText(s, session.id);
     else if (state === 'failed') line.reason = failedText(s, session);
-    const ctx = s.timelines[session.id]?.context;
-    if (ctx && ctx.window > 0) line.context = ctx.used / (ctx.usable ?? ctx.window);
+    const usage = sessionContextUsage(s, session);
+    if (usage) {
+      line.context = contextFraction(usage);
+      line.contextUsage = usage;
+    }
     out.push(line);
   }
   return out;
+}
+
+/** Equality for `selectWorkspaceBreakdown` results (lines are flat, so field by field). */
+export function breakdownEqual(a: readonly SessionBreakdownLine[], b: readonly SessionBreakdownLine[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.sessionId !== y.sessionId || x.state !== y.state || x.title !== y.title || x.reason !== y.reason || x.context !== y.context || x.depth !== y.depth) return false;
+    if (x.updatedAt !== y.updatedAt || x.agent !== y.agent || x.mode !== y.mode) return false;
+    if (x.contextUsage?.window !== y.contextUsage?.window || x.contextUsage?.compactAt !== y.contextUsage?.compactAt) return false;
+  }
+  return true;
 }
 
 // ---------------------------------------------------------------- session lists and helper trees
@@ -374,8 +413,8 @@ export function selectHelperTreeModel(s: BizziState, rootId: string): HelperTree
     const model = tl?.info.model ?? session.model;
     if (model !== undefined) node.model = model;
     if (session.billing !== undefined) node.billing = session.billing;
-    const ctx = tl?.context;
-    if (ctx && ctx.window > 0) node.context = ctx.used / (ctx.usable ?? ctx.window);
+    const ctx = sessionContext(s, session);
+    if (ctx !== undefined) node.context = ctx;
     const u = tl?.usage;
     if (u && (u.inputTokens !== undefined || u.outputTokens !== undefined)) node.tokens = (u.inputTokens ?? 0) + (u.outputTokens ?? 0);
     if (session.billing === 'metered' && u?.costUsd !== undefined) {
