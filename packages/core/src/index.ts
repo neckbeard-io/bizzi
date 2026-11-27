@@ -105,3 +105,17 @@ export {
   renderTemplate,
   type PipelinesDeps,
 } from './pipelines.ts';
+export {
+  History,
+  OVERVIEW_DEFAULT_LIMIT,
+  OVERVIEW_MAX_LIMIT,
+  inputText,
+  isBizziPrompt,
+  parseSince,
+  trailingQuestion,
+  type OverviewEntry,
+  type OverviewFilter,
+  type OverviewResult,
+  type OverviewWaiting,
+  type PeekResult,
+} from './history.ts';

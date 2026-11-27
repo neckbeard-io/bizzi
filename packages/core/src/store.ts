@@ -175,6 +175,19 @@ export class Store {
     return row ? JSON.parse(row.data) : undefined;
   }
 
+  /**
+   * Events of the given types on a channel, newest first, lazily: stop iterating to stop reading. Walks the
+   * (ch, seq) key backwards, so finding the last few of a type costs a scan back to them, not the whole log.
+   */
+  *latestOfTypes(ch: string, types: readonly string[]): Generator<ChannelEvent> {
+    const stmt = this.#db.prepare(
+      `SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND type IN (${types.map(() => '?').join(', ')}) ORDER BY seq DESC`,
+    );
+    for (const r of stmt.iterate(ch, ...types) as Iterable<{ ch: string; seq: number; ts: string; type: string; data: string }>) {
+      yield { ch: r.ch, seq: r.seq, ts: r.ts, type: r.type, data: JSON.parse(r.data) } as ChannelEvent;
+    }
+  }
+
   /** Events with seq > since, oldest first, at most `limit`. */
   replay(ch: string, since: number, limit: number): ChannelEvent[] {
     const rows = this.#replay.all(ch, since, limit) as unknown as {

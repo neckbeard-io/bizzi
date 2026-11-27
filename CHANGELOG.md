@@ -8,6 +8,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Added
 - bizzi keeps a Mac awake while its agents work, so it doesn't fall asleep mid-turn (the display still sleeps). Choose on the machine page whether that's only while a turn runs (the default) or also while an agent watches background work, and whether it applies only on a power adapter (the default) or on battery too. A small sun in the sidebar shows when it's holding the machine awake. Linux and Windows aren't supported yet.
+- Agents can see every session on the machine, not just the helpers they started: the new `sessions_overview` tool lists each session's last request and reply, and flags any that are waiting on you, and `session_peek` reads any one of them. Both are read-only.
 - Sessions whose agent is waiting on work it left running in the background, such as a command it's watching or a subagent, now show as still active in the sidebar: the mark bobs up and down, and the row names what's running.
 - Choose the interface font and the code font (code blocks, diffs and terminals) in Settings › Appearance; the choice applies on every device. The code font is now JetBrains Mono by default, included with bizzi so it works everywhere without installing it.
 - Paste, drop or attach images in the message box; large images are scaled down before sending, and sent images show in the conversation.
