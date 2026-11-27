@@ -12,6 +12,7 @@ import {
   selectMachineWorkspaces,
   selectWidgets,
   selectWorkspaceRow,
+  selectWorktreeUse,
   versionChip,
 } from '@bizzi/client';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
@@ -60,10 +61,10 @@ test('mock 1.2: accounts, widgets, sidebar rows, helpers and worktrees', async (
   assert.ok(selectWidgets(s, 'bar').some((w) => w.id === 'litellm-billed' && w.format === 'usd'));
   assert.ok(selectWidgets(s, 'machine', 'm_laptop').some((w) => w.error));
 
-  // acme-shop: s_review/s_plan wait; the parent s_lead carries its two helpers.
+  // acme-shop: s_review/s_plan wait; the parent s_lead carries its live helpers, in worktrees too (not the ended one).
   const row = selectWorkspaceRow(s, 'w_acme');
   const lead = row.marks.find((m) => m.sessionId === 's_lead');
-  assert.equal(lead?.helpers, 2);
+  assert.equal(lead?.helpers, 4);
   assert.equal(lead?.state, 'waiting', 'the budget-blocked helper escalates the parent mark');
   assert.ok(!row.marks.some((m) => m.sessionId === 's_helper_review' || m.sessionId === 's_helper_explore'));
   assert.equal(row.urgent?.state, 'waiting');
@@ -79,7 +80,12 @@ test('mock 1.2: accounts, widgets, sidebar rows, helpers and worktrees', async (
   // Worktrees group under their repo; removing a dirty one needs force.
   assert.deepEqual(
     selectMachineWorkspaces(s, 'm_laptop').map((r) => `${r.workspace.id}@${r.depth}`),
-    ['w_acme@0', 'w_acme_oauth@1', 'w_fo1@1', 'w_fo2@1', 'w_fo3@1', 'w_notes@0'],
+    ['w_acme@0', 'w_acme_cart@1', 'w_acme_awake@1', 'w_acme_oauth@1', 'w_acme_tools@1', 'w_fo1@1', 'w_fo2@1', 'w_fo3@1', 'w_acme_spike@1', 'w_notes@0'],
+  );
+  // Helper worktrees have no node of their own (their helpers show under s_lead); the leftover is unused.
+  assert.deepEqual(
+    ['w_acme_cart', 'w_acme_awake', 'w_acme_oauth', 'w_acme_tools', 'w_acme_spike'].map((id) => selectWorktreeUse(s, id)),
+    ['sessions', 'helpers', 'helpers', 'empty', 'empty'],
   );
   // A live helper blocks removal outright; after it stops, uncommitted changes still need force.
   await assert.rejects(store.removeWorktree('w_acme_oauth', true), (e: unknown) => e instanceof BizziError && e.code === 'conflict' && (e.data as { sessions?: string[] }).sessions?.[0] === 's_helper_review');

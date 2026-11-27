@@ -25,6 +25,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 ### Changed
 - Sessions you didn't name keep up with the conversation: after `/clear`, your next message renames the session, and with a title model the title is refreshed now and then from your original request plus your latest messages.
 - The sidebar is a file tree: each workspace lists its open sessions (and then its worktrees) with guide lines, and each session shows its state, name and how full its context window is. Fold a workspace to get the old one-line summary back.
+- Helpers in the sidebar sit right under the session that started them, even when they work in their own worktree, with the branch shown on the helper's row. A session with helpers shows how many and folds them away with its caret. Worktrees get their own "Worktrees" heading and only show up for sessions you started in them, and leftover worktrees nothing uses fold into one "unused worktrees" line you can remove them from.
 - In the desktop app's File menu, ⌘N / Ctrl+N is now New Workspace and New Prompt moved to ⌘⇧N / Ctrl+Shift+N.
 - A session's delete button is red, and the separate End button is gone from its header; End session is still in the session's ⋯ menu.
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.

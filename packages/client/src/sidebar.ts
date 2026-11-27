@@ -92,6 +92,34 @@ export function isNestedHelper(s: BizziState, session: SessionInfo): boolean {
   return session.spawnedBy !== undefined && session.spawnedBy in s.sessions;
 }
 
+/**
+ * The parent a helper nests under in the sidebar: the session that started it, when that session is known,
+ * still live (not ended) and on the same machine. Otherwise the helper is a top-level row of its own workspace.
+ */
+export function liveParent(s: BizziState, session: SessionInfo): SessionInfo | null {
+  const p = session.spawnedBy !== undefined ? s.sessions[session.spawnedBy] : undefined;
+  if (!p || p.id === session.id || p.machineId !== session.machineId || !sessionMarkState(s, p)) return null;
+  return p;
+}
+
+/** Live helpers nested under a session in the sidebar (helpers of helpers too), depth-first in start order. */
+function liveHelperTree(s: BizziState, rootId: string): { session: SessionInfo; depth: number; parent: SessionInfo }[] {
+  const { byParent } = sessionIndex(s);
+  const out: { session: SessionInfo; depth: number; parent: SessionInfo }[] = [];
+  const seen = new Set<string>([rootId]);
+  const walk = (parent: SessionInfo, depth: number): void => {
+    for (const c of byParent.get(parent.id) ?? []) {
+      if (seen.has(c.id) || c.machineId !== parent.machineId || !sessionMarkState(s, c)) continue;
+      seen.add(c.id);
+      out.push({ session: c, depth, parent });
+      walk(c, depth + 1);
+    }
+  };
+  const root = s.sessions[rootId];
+  if (root) walk(root, 1);
+  return out;
+}
+
 /** The session's own mark state; null for sessions that aren't live (ended). */
 export function sessionMarkState(s: BizziState, session: SessionInfo): MarkState | null {
   const st = selectSessionStatus(s, session.id) ?? session.status;
@@ -167,12 +195,13 @@ export function selectWorkspaceRow(s: BizziState, workspaceId: string): Workspac
   const counts = emptyCounts();
   const candidates: { session: SessionInfo; state: MarkState }[] = [];
   for (const session of byWorkspace.get(workspaceId) ?? []) {
-    // Helpers count inside their parent's mark, not as marks of their own.
-    if (isNestedHelper(s, session)) continue;
+    // Helpers count inside their parent's mark (wherever they run), not as marks of their own.
+    if (liveParent(s, session)) continue;
     const own = sessionMarkState(s, session);
+    if (!own) continue;
     let state = own;
     let helpers = 0;
-    for (const h of selectDescendants(s, session.id)) {
+    for (const { session: h } of liveHelperTree(s, session.id)) {
       const hs = sessionMarkState(s, h);
       if (!hs) continue;
       helpers++;
@@ -180,11 +209,9 @@ export function selectWorkspaceRow(s: BizziState, workspaceId: string): Workspac
       candidates.push({ session: h, state: hs });
       state = state ? moreUrgent(state, hs) : hs;
     }
-    if (own) {
-      counts[own]++;
-      candidates.push({ session, state: own });
-    }
-    if (state) marks.push({ sessionId: session.id, agent: session.agent, state, helpers });
+    counts[own]++;
+    candidates.push({ session, state: own });
+    marks.push({ sessionId: session.id, agent: session.agent, state, helpers });
   }
   marks.sort((a, b) => MARK_ORDER[a.state] - MARK_ORDER[b.state]);
   return { workspaceId, marks, counts, urgent: pickUrgent(s, candidates) };
@@ -304,29 +331,70 @@ export interface SessionBreakdownLine {
   contextUsage?: SessionContext;
   /** Nesting under the parent session (0 for sessions you started). */
   depth: number;
+  /** The session that started it, for helpers nested under it. */
+  parentId?: string;
+  /** Live helpers nested under it (helpers of helpers too). */
+  helpers?: number;
+  /** Its own helpers that have ended (they're listed on its page, not in the sidebar). */
+  endedHelpers?: number;
+  /** A helper working in another workspace than its parent (a worktree, usually): that workspace and its branch. */
+  elsewhere?: { workspaceId: string; label: string };
 }
 
 /**
- * One line per live session of a workspace (helpers under their parent): the sidebar tree's session rows
- * and the long-press breakdown.
+ * One line per live session of a workspace, for the sidebar tree's session rows and the long-press breakdown.
+ * Top-level rows are the workspace's sessions without a live parent, most recent first; each is followed by
+ * its live helpers (recursively, in start order) wherever they run, so a helper in a worktree sits under the
+ * session that started it rather than under the worktree. Ended helpers aren't lines; their parent counts them.
  */
 export function selectWorkspaceBreakdown(s: BizziState, workspaceId: string): SessionBreakdownLine[] {
   const out: SessionBreakdownLine[] = [];
-  for (const { session, depth } of selectNestedSessions(s, workspaceId)) {
-    const state = sessionMarkState(s, session);
-    if (!state) continue;
-    const line: SessionBreakdownLine = { sessionId: session.id, agent: session.agent, mode: session.mode, title: session.title || 'Untitled session', state, updatedAt: session.updatedAt, depth };
-    if (state === 'waiting') line.reason = waitingText(s, session.id);
-    else if (state === 'failed') line.reason = failedText(s, session);
-    else if (state === 'background') line.reason = backgroundText(session);
-    const usage = sessionContextUsage(s, session);
-    if (usage) {
-      line.context = contextFraction(usage);
-      line.contextUsage = usage;
+  const { byParent } = sessionIndex(s);
+  for (const root of sessionIndex(s).byWorkspace.get(workspaceId) ?? []) {
+    if (liveParent(s, root) || !sessionMarkState(s, root)) continue;
+    const tree = liveHelperTree(s, root.id);
+    const rows: { session: SessionInfo; depth: number; parent?: SessionInfo }[] = [{ session: root, depth: 0 }, ...tree];
+    for (const { session, depth, parent } of rows) {
+      const line = breakdownLine(s, session, depth);
+      if (parent) {
+        line.parentId = parent.id;
+        if (session.workspaceId !== parent.workspaceId) {
+          const w = s.workspaces?.[session.workspaceId];
+          line.elsewhere = { workspaceId: session.workspaceId, label: w ? (w.branch ?? w.name) : session.workspaceId };
+        }
+      }
+      const helpers = depth === 0 ? tree.length : countBelow(rows, session.id);
+      if (helpers > 0) line.helpers = helpers;
+      const ended = (byParent.get(session.id) ?? []).filter((c) => c.machineId === session.machineId && !sessionMarkState(s, c)).length;
+      if (ended > 0) line.endedHelpers = ended;
+      out.push(line);
     }
-    out.push(line);
   }
   return out;
+}
+
+/** Live helpers below `id` in a root's rows (its descendants: the rows after it that sit deeper). */
+function countBelow(rows: readonly { session: SessionInfo; depth: number }[], id: string): number {
+  const at = rows.findIndex((r) => r.session.id === id);
+  if (at < 0) return 0;
+  let n = 0;
+  for (let i = at + 1; i < rows.length && rows[i]!.depth > rows[at]!.depth; i++) n++;
+  return n;
+}
+
+/** A live session's breakdown line (state, reason, context) at `depth`. */
+function breakdownLine(s: BizziState, session: SessionInfo, depth: number): SessionBreakdownLine {
+  const state = sessionMarkState(s, session)!;
+  const line: SessionBreakdownLine = { sessionId: session.id, agent: session.agent, mode: session.mode, title: session.title || 'Untitled session', state, updatedAt: session.updatedAt, depth };
+  if (state === 'waiting') line.reason = waitingText(s, session.id);
+  else if (state === 'failed') line.reason = failedText(s, session);
+  else if (state === 'background') line.reason = backgroundText(session);
+  const usage = sessionContextUsage(s, session);
+  if (usage) {
+    line.context = contextFraction(usage);
+    line.contextUsage = usage;
+  }
+  return line;
 }
 
 /**
@@ -347,7 +415,10 @@ export function nextSessionAfterClose(s: BizziState, sessionId: string): string 
   const session = s.sessions[sessionId];
   if (!session) return null;
   const gone = new Set([sessionId, ...selectDescendants(s, sessionId).map((h) => h.id)]);
-  const lines = selectWorkspaceBreakdown(s, session.workspaceId).filter((l) => s.sessions[l.sessionId]?.workspaceId === session.workspaceId);
+  // A helper's line is in the tree of the session at the top of its chain of live parents.
+  let root = session;
+  for (let p = liveParent(s, root), hops = 0; p && hops < 64; p = liveParent(s, p), hops++) root = p;
+  const lines = selectWorkspaceBreakdown(s, root.workspaceId);
   const at = lines.findIndex((l) => l.sessionId === sessionId);
   const depth = at < 0 ? 0 : lines[at]!.depth;
   const ok = (l: SessionBreakdownLine): boolean => !gone.has(l.sessionId) && l.depth <= depth;
@@ -365,8 +436,30 @@ export function breakdownEqual(a: readonly SessionBreakdownLine[], b: readonly S
     if (x.sessionId !== y.sessionId || x.state !== y.state || x.title !== y.title || x.reason !== y.reason || x.context !== y.context || x.depth !== y.depth) return false;
     if (x.updatedAt !== y.updatedAt || x.agent !== y.agent || x.mode !== y.mode) return false;
     if (x.contextUsage?.window !== y.contextUsage?.window || x.contextUsage?.compactAt !== y.contextUsage?.compactAt) return false;
+    if (x.parentId !== y.parentId || x.helpers !== y.helpers || x.endedHelpers !== y.endedHelpers) return false;
+    if (x.elsewhere?.workspaceId !== y.elsewhere?.workspaceId || x.elsewhere?.label !== y.elsewhere?.label) return false;
   }
   return true;
+}
+
+/**
+ * How a worktree shows in the sidebar: `sessions` when it has rows of its own (sessions you started there, or
+ * ended ones), `helpers` when only helpers nested under their parents work in it (so its own row would be
+ * empty), `empty` when nothing uses it (a leftover).
+ */
+export type WorktreeUse = 'sessions' | 'helpers' | 'empty';
+
+export function selectWorktreeUse(s: BizziState, workspaceId: string): WorktreeUse {
+  const list = sessionIndex(s).byWorkspace.get(workspaceId) ?? [];
+  if (list.length === 0) return 'empty';
+  if (selectEndedSessions(s, workspaceId).length > 0) return 'sessions';
+  let helpers = false;
+  for (const x of list) {
+    if (!sessionMarkState(s, x)) continue;
+    if (!liveParent(s, x)) return 'sessions';
+    helpers = true;
+  }
+  return helpers ? 'helpers' : 'empty';
 }
 
 // ---------------------------------------------------------------- session lists and helper trees

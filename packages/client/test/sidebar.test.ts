@@ -17,6 +17,7 @@ import {
   selectWaitingCount,
   selectWorkspaceBreakdown,
   selectWorkspaceRow,
+  selectWorktreeUse,
   sessionContext,
   sessionMarkState,
   workspaceRowEqual,
@@ -295,4 +296,58 @@ test('after closing a session: the next live one in its workspace, else the one 
   assert.equal(nextSessionAfterClose(st, 'gone'), 'a', 'already ended: the first live one');
   assert.equal(nextSessionAfterClose(st, 'other'), null, 'nothing else in its workspace');
   assert.equal(nextSessionAfterClose(st, 'nope'), null);
+});
+
+test('helpers nest under the session that started them, wherever they run; worktrees keep only their own sessions', () => {
+  const st = state(
+    [
+      sess('lead', { updatedAt: T(1) }),
+      sess('other', { updatedAt: T(9) }),
+      sess('h1', { spawnedBy: 'lead', workspaceId: 'wt1', createdAt: T(2), updatedAt: T(8) }),
+      sess('h1a', { spawnedBy: 'h1', workspaceId: 'wt1', createdAt: T(3) }),
+      sess('h2', { spawnedBy: 'lead', createdAt: T(4) }),
+      sess('h3', { spawnedBy: 'lead', workspaceId: 'wt2', status: 'ended', createdAt: T(5) }),
+      sess('mine', { workspaceId: 'wt3' }),
+      // A detached helper whose parent ended: a top-level row of its own workspace.
+      sess('gone', { status: 'ended', workspaceId: 'w1', updatedAt: T(0) }),
+      sess('orphan', { spawnedBy: 'gone', workspaceId: 'wt2', scope: 'detached' }),
+    ],
+    {
+      workspaces: {
+        w1: ws('w1'),
+        wt1: ws('wt1', { kind: 'worktree', parentWorkspaceId: 'w1', branch: 'feat/keep-awake' }),
+        wt2: ws('wt2', { kind: 'worktree', parentWorkspaceId: 'w1', branch: 'fix/old' }),
+        wt3: ws('wt3', { kind: 'worktree', parentWorkspaceId: 'w1', branch: 'feat/mine' }),
+        wt4: ws('wt4', { kind: 'worktree', parentWorkspaceId: 'w1', branch: 'leftover' }),
+      },
+    },
+  );
+  const lines = selectWorkspaceBreakdown(st, 'w1');
+  assert.deepEqual(
+    lines.map((l) => [l.sessionId, l.depth, l.parentId ?? null, l.helpers ?? 0, l.endedHelpers ?? 0, l.elsewhere?.label ?? null]),
+    [
+      ['other', 0, null, 0, 0, null],
+      ['lead', 0, null, 3, 1, null],
+      ['h1', 1, 'lead', 1, 0, 'feat/keep-awake'],
+      ['h1a', 2, 'h1', 0, 0, null],
+      ['h2', 1, 'lead', 0, 0, null],
+    ],
+  );
+  // The worktrees only list sessions started there without a live parent.
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'wt1'), []);
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'wt2').map((l) => l.sessionId), ['orphan']);
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'wt3').map((l) => l.sessionId), ['mine']);
+  assert.deepEqual(['wt1', 'wt2', 'wt3', 'wt4'].map((id) => selectWorktreeUse(st, id)), ['helpers', 'sessions', 'sessions', 'empty']);
+  // The folded workspace's mark for the lead counts its helpers in worktrees; the worktree has no marks for them.
+  const lead = selectWorkspaceRow(st, 'w1').marks.find((m) => m.sessionId === 'lead');
+  assert.equal(lead?.helpers, 3);
+  assert.equal(selectWorkspaceRow(st, 'wt1').marks.length, 0);
+  // Closing a helper in a worktree moves on within its parent's tree.
+  assert.equal(nextSessionAfterClose(st, 'h1'), 'h2');
+});
+
+test('helpers on another machine are not nested under their parent', () => {
+  const st = state([sess('lead'), sess('remote', { spawnedBy: 'lead', machineId: 'm2', workspaceId: 'w9' })]);
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'w1').map((l) => l.sessionId), ['lead']);
+  assert.deepEqual(selectWorkspaceBreakdown(st, 'w9').map((l) => l.sessionId), ['remote']);
 });
