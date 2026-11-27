@@ -189,7 +189,9 @@ export interface ClampResult {
 
 /**
  * A helper's permission mode is never looser than its parent's (spec §12.2). An unknown parent mode
- * counts as level 1 (asks). An unknown requested mode inherits the parent's. Agents without a known
+ * counts as level 1 (asks). With no mode requested, a helper of the parent's own agent starts in the
+ * parent's mode (or the closest one at that level its adapter offers); another agent starts at its
+ * default, capped. An unknown requested mode inherits the parent's. Agents without a known
  * permission model (agy, shell) run at their own defaults, which ask, so they are refused under a
  * read-only parent.
  */
@@ -212,8 +214,11 @@ export function clampPermission(o: {
     return o.requested ? { note: `${o.agent} has no permission modes bizzi can set; ignored ${o.requested}` } : {};
   }
   const candidates = Object.entries(order).filter(([m]) => !o.available?.length || o.available.includes(m));
-  let wanted = o.requested ?? DEFAULT_PERMISSION_MODE[o.agent];
-  let wantedLevel = wanted === undefined ? undefined : order[wanted];
+  // No request, same agent: the parent's mode, or the closest one at its level the adapter offers.
+  const inherit = o.requested === undefined && o.agent === o.parentAgent && o.parentMode !== undefined && order[o.parentMode] !== undefined;
+  if (inherit && candidates.some(([m]) => m === o.parentMode)) return { permissionMode: o.parentMode! };
+  let wanted = inherit ? undefined : (o.requested ?? DEFAULT_PERMISSION_MODE[o.agent]);
+  let wantedLevel = inherit ? parentLevel : wanted === undefined ? undefined : order[wanted];
   let note: string | undefined;
   if (wanted !== undefined && wantedLevel === undefined) {
     // Unknown mode: inherit the parent's (same agent), else its level.

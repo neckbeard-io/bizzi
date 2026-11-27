@@ -112,7 +112,7 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string, opts: A
           .describe('Workspace id or path registered on the target machine. Default: yours, or on another machine the one linked to yours (same repository).'),
         worktree: z.string().optional().describe('Branch name: run in a worktree of the workspace on this branch.'),
         model: z.string().optional(),
-        permissionMode: z.string().optional().describe('Agent permission mode; clamped to be no looser than yours.'),
+        permissionMode: z.string().optional().describe("Agent permission mode; clamped to be no looser than yours. Omit it to use yours (same agent) or the agent's default."),
         effort: z.string().optional(),
         scope: z.enum(['child', 'detached']).optional(),
         title: z.string().optional().describe('Shown in the session list. Default: the start of the prompt.'),

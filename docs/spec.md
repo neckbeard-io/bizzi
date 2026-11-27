@@ -532,7 +532,7 @@ The helper records `spawned_by`. A `child` helper stops when its parent stops or
 
 - **Depth limit:** default 2 (parent → helper → helper's helper), configurable per workspace. `session_start` beyond the limit fails with a `BizziError`.
 - **Concurrency:** max live helpers per parent and per machine; extra starts queue or fail, by setting.
-- **Permissions:** a helper's permission mode is never looser than its parent's.
+- **Permissions:** a helper's permission mode is never looser than its parent's. When `session_start` names no mode, a helper of the parent's own agent starts in the parent's mode; another agent starts at its default, capped at the parent's level.
 - **Approvals:** a helper's approvals go to you (inbox, push) by default. Letting the parent answer them is an explicit per-workspace opt-in.
 - **Budget:** an optional spend cap per session tree, counted on `metered` providers only (§12.3).
 

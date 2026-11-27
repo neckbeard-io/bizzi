@@ -243,8 +243,14 @@ test('permission clamping: never looser than the parent, across agents', () => {
     permissionMode: 'plan',
     note: "permission mode bypassPermissions is looser than the parent's (plan); using plan",
   });
-  // No request: the helper agent's default, capped at the parent's level.
-  assert.deepEqual(clamp('claude', 'bypassPermissions', 'claude', undefined, claudeModes), { permissionMode: 'default' });
+  // No request, same agent: the parent's mode.
+  assert.deepEqual(clamp('claude', 'bypassPermissions', 'claude', undefined, claudeModes), { permissionMode: 'bypassPermissions' });
+  assert.deepEqual(clamp('claude', 'acceptEdits', 'claude', undefined, claudeModes), { permissionMode: 'acceptEdits' });
+  // ...unless the adapter doesn't offer it, or the parent never set one: the default, capped.
+  assert.deepEqual(clamp('claude', 'bypassPermissions', 'claude', undefined, ['default', 'acceptEdits', 'plan']), { permissionMode: 'acceptEdits' });
+  assert.deepEqual(clamp('claude', undefined, 'claude', undefined, claudeModes), { permissionMode: 'default' });
+  // No request, another agent: that agent's default, capped at the parent's level.
+  assert.deepEqual(clamp('claude', 'bypassPermissions', 'codex'), { permissionMode: 'auto' });
   assert.deepEqual(clamp('claude', 'plan', 'codex'), { permissionMode: 'read-only' });
   assert.deepEqual(clamp('claude', 'default', 'codex', 'full-access').permissionMode, 'untrusted');
   assert.deepEqual(clamp('codex', 'full-access', 'claude', 'bypassPermissions', claudeModes), { permissionMode: 'bypassPermissions' });
