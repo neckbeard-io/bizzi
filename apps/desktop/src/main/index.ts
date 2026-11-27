@@ -11,6 +11,7 @@ import {
   ipcMain,
   Menu,
   powerMonitor,
+  screen,
   session,
   shell,
   systemPreferences,
@@ -23,6 +24,7 @@ import { CoreManager, type CoreStatus } from '../core/manager.ts';
 import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, testBuildFor } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
 import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
+import { initialBounds, parseWindowState, type WindowState } from '../shared/window-state.ts';
 import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, parseUpdateAction } from '../shared/update.ts';
 import { filePrefs, UpdateController } from '../update/controller.ts';
 import { detectInstall, installUpdate, relaunchEnv } from '../update/install.ts';
@@ -59,6 +61,9 @@ const titleBar = titleBarFor(process.platform, env);
 /** The theme's last chrome colors, kept so the next launch's first frame already matches. */
 const chromeFile = join(app.getPath('userData'), 'chrome.json');
 let chrome: ChromeColors = loadChrome();
+/** The main window's last size, position and maximized/full-screen state, restored on the next launch. */
+const windowStateFile = join(app.getPath('userData'), 'window.json');
+let windowStateTimer: NodeJS.Timeout | null = null;
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -165,6 +170,7 @@ function setup(): void {
     e.preventDefault();
     if (quitting) return;
     quitting = true;
+    saveWindowState();
     // The core keeps running (and its sessions with it) unless it runs from inside the bundle or
     // the user chose to stop it; the next launch re-adopts it.
     const keepCore = bundledCoreId !== null && !stopCoreOnQuit;
@@ -335,12 +341,41 @@ function onCoreStatus(status: CoreStatus): void {
   win.webContents.reload();
 }
 
+function loadWindowState(): WindowState | null {
+  try {
+    return parseWindowState(JSON.parse(readFileSync(windowStateFile, 'utf8')));
+  } catch {
+    return null;
+  }
+}
+
+function saveWindowState(): void {
+  if (windowStateTimer) clearTimeout(windowStateTimer);
+  windowStateTimer = null;
+  if (!win || win.isDestroyed()) return;
+  const state: WindowState = { bounds: win.getNormalBounds(), maximized: win.isMaximized(), fullScreen: win.isFullScreen() };
+  try {
+    writeFileSync(windowStateFile, JSON.stringify(state));
+  } catch (err) {
+    log.log('warn', 'could not save window state', { error: String(err) });
+  }
+}
+
+/** Moves and resizes fire continuously while dragging; write once things settle. */
+function saveWindowStateSoon(): void {
+  if (windowStateTimer) clearTimeout(windowStateTimer);
+  windowStateTimer = setTimeout(saveWindowState, 500);
+}
+
 function createWindow(): void {
+  const saved = loadWindowState();
+  const primary = screen.getPrimaryDisplay();
+  const workAreas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea);
+  const min = { width: 720, height: 480 };
   win = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 720,
-    minHeight: 480,
+    ...initialBounds(saved, workAreas, { width: 1280, height: 820 }, min),
+    minWidth: min.width,
+    minHeight: min.height,
     show: false,
     title: appName,
     ...(isMac ? {} : { icon: appIcon }),
@@ -356,8 +391,20 @@ function createWindow(): void {
       spellcheck: false,
     },
   });
-  win.once('ready-to-show', () => win?.show());
+  win.once('ready-to-show', () => {
+    if (!win) return;
+    if (saved?.maximized) win.maximize();
+    win.show();
+    if (saved?.fullScreen) win.setFullScreen(true);
+  });
+  win.on('resize', saveWindowStateSoon);
+  win.on('move', saveWindowStateSoon);
+  win.on('maximize', saveWindowStateSoon);
+  win.on('unmaximize', saveWindowStateSoon);
+  win.on('enter-full-screen', saveWindowStateSoon);
+  win.on('leave-full-screen', saveWindowStateSoon);
   win.on('close', (e) => {
+    saveWindowState();
     // macOS: closing the window keeps bizzi in the menu bar; Quit exits.
     if (isMac && !quitting) {
       e.preventDefault();

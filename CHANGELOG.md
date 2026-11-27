@@ -17,6 +17,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three restarts in a row with no message from you, it waits for you instead.
 
 ### Fixed
+- The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
 - Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
 - Text you've typed but not sent stays in the composer, per session, when bizzi reloads, restarts or updates.
 - Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
