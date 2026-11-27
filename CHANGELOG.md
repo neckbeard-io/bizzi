@@ -13,3 +13,6 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - Right-click menus for machines, workspaces and sessions.
 - Rename a session; your name sticks even when the agent retitles it.
 - Remove a workspace from bizzi (worktrees are deleted with it).
+
+### Fixed
+- Updating no longer leaves the downloaded installer (about 160 MB) behind in the temp folder.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -242,4 +242,25 @@ test('controller: deb installs finish by hand, install failures are reported', a
   await failing.c.act({ type: 'install' });
   assert.equal(failing.c.state.stage, 'error');
   assert.match(failing.c.state.error ?? '', /Install failed: codesign failed/);
+});
+
+test('controller: start clears what earlier updates downloaded', () => {
+  const downloadDir = mkdtempSync(join(tmpdir(), 'bizzi-upd-old-'));
+  writeFileSync(join(downloadDir, 'bizzi-0.1.0-macos-arm64.zip'), 'old update');
+  const c = new UpdateController({
+    currentVersion: '0.1.1',
+    arch: 'arm64',
+    target: { method: 'mac-app', label: 'macOS app', path: '/Applications/bizzi.app' },
+    fetch: async () => Response.json([]),
+    prefs: memoryPrefs(),
+    downloadDir,
+    install: async () => 'quit',
+    onState: () => {},
+    log: () => {},
+    setTimer: () => ({ cancel() {} }),
+  });
+  c.start();
+  assert.equal(existsSync(downloadDir), false);
+  c.start(); // nothing left to clear: no error
+  c.stop();
 });
