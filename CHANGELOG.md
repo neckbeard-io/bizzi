@@ -22,6 +22,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
 - Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
 - A session you renamed keeps its name after bizzi restarts, instead of taking the agent's title again.
+- A Claude session you opened but never sent a message to works after bizzi restarts, instead of failing with "No conversation found with session ID".
 
 ## v0.1.1 — 2026-11-26
 

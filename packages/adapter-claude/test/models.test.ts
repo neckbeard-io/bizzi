@@ -14,7 +14,7 @@ test('listModels reads supportedModels from a process that never gets a prompt, 
       ];
     },
   );
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
   assert.deepEqual(await adapter.listModels(), [
     { id: 'default', label: 'Default (recommended)', description: 'Opus · everyday', isDefault: true, efforts: ['low', 'high'] },
     { id: 'haiku', label: 'Haiku', description: 'Fastest' },

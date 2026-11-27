@@ -24,7 +24,7 @@ const base: StartSessionOptions = { sessionId: 's_1', mode: 'structured', cwd: '
 
 async function setup(script: Script, start: Partial<StartSessionOptions> = {}, adapterOpts: ClaudeAdapterOptions = {}) {
   const fq = fakeQueryFn(script);
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, ...adapterOpts });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true, ...adapterOpts });
   const c = collector();
   const session = (await adapter.start({ ...base, ...start }, c.emit, { logger: silentLogger })) as ClaudeSession;
   return { adapter, session, c, fq: fq.last() };
@@ -96,6 +96,29 @@ test('launch options: preset system prompt + append, MCP, settings, resume/fork,
   assert.equal(forked.fq.options.forkSession, true);
   assert.notEqual(forked.session.agentSessionRef(), 'abc');
   assert.equal(forked.fq.options.sessionId, forked.session.agentSessionRef());
+});
+
+test('resuming a session that never sent a message starts it fresh under the same id', async () => {
+  const seen: Array<[string, string | undefined]> = [];
+  const hasTranscript = async (id: string, env: Record<string, string | undefined>) => {
+    seen.push([id, env.CLAUDE_CONFIG_DIR]);
+    return false;
+  };
+  const r = await setup(() => {}, { resumeRef: 'abc', env: { CLAUDE_CONFIG_DIR: '/cfg' } }, { hasTranscript });
+  assert.deepEqual(seen, [['abc', '/cfg']]);
+  assert.equal(r.fq.options.resume, undefined);
+  assert.equal(r.fq.options.sessionId, 'abc');
+  assert.equal(r.session.agentSessionRef(), 'abc');
+
+  const f = await setup(() => {}, { resumeRef: 'abc', fork: true }, { hasTranscript });
+  assert.equal(f.fq.options.resume, undefined);
+  assert.equal(f.fq.options.forkSession, undefined);
+  assert.notEqual(f.session.agentSessionRef(), 'abc');
+
+  // Unknown (or a container launch, which isn't checked): resume as asked.
+  const u = await setup(() => {}, { resumeRef: 'abc' }, { hasTranscript: async () => undefined });
+  assert.equal(u.fq.options.resume, 'abc');
+  assert.equal(u.fq.options.sessionId, undefined);
 });
 
 test('a text turn maps to exact normalized events', async () => {
