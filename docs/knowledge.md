@@ -159,11 +159,17 @@ Runs on every node (stdio for local agents), backed by the local replica, so it 
 | `memory_search(query, scope?)` | ranked search (FTS5; embeddings later) across visible scopes |
 | `memory_add(title, body, kind, scope?, appliesTo?)` | save a memory, then the policy engine decides |
 | `rule_add(title, body, scope, appliesTo?, userRequested)` | propose a rule |
-| `knowledge_update(id, …)` / `knowledge_forget(id)` | edit or retire an item (creates `supersedes` / tombstone) |
+| `knowledge_update(id, …)` / `knowledge_forget(id)` | edit or retire an item (creates `supersedes` / tombstone); on a pending suggestion the same session made, amend or withdraw it without review |
+| `knowledge_list(type?, scope?, kind?, tags?, status?, mine?, offset?, limit?)` | browse visible rules and memories, newest first, trimmed bodies, paged; includes suggestions this session or its agent proposed |
+| `rules_in_effect()` | the rules applying to this session, from the same resolver as injection, general → specific, with ids |
+| `knowledge_get(id)` | one item in full, with its version history (`supersedes` both ways) |
+| `knowledge_promote(id, scope, userRequested?, dryRun?)` | move an item to a wider scope (e.g. workspace → project) as a new version, through the acceptance policy |
 | `history_search(query)` | past sessions across all agents and machines in this project |
 | `handoff_brief(sessionId)` | what an earlier session was doing |
 
 The server's instructions tell agents when to save, and which scope means what.
+
+What a session can reach: reads never leave the scopes the session sees (the same scope test as resolution). Besides live items, a session sees the pending suggestions it made and those made by other sessions of the same agent kind, so it can tell a proposal is already waiting (or duplicates a live rule) before making it again. It can amend or withdraw only its own; another session's suggestion is refused with a `conflict` that says so, and other agents' suggestions are not visible. `knowledge_get` also reads earlier versions in visible scopes, so an agent can follow an id from its prompt to the current version. `knowledge_promote` writes a new version at the wider scope that supersedes the old one once live; when the policy wants review it waits in the inbox and the old item stays live. An identical item already at the target is reported instead of duplicated. Decision: there are no accept, reject or approve tools. Approving suggestions is the user's, in the inbox.
 
 ## 6. Other shared layers
 

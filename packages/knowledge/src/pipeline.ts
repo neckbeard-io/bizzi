@@ -5,7 +5,7 @@ import { BizziError } from '@bizzi/protocol';
 import type { AgentKind } from '@bizzi/protocol';
 import { decide, loadSettings, policySourceOf } from './policy.ts';
 import type { KnowledgeSettings, PolicyDecision } from './policy.ts';
-import { contextHasLevel, isScopeLevel, isVisible, normalizeScope, scopeEquals, scopeForLevel } from './scope.ts';
+import { contextHasLevel, isOwnSuggestion, isScopeLevel, isVisible, normalizeScope, scopeEquals, scopeForLevel, scopeMatches } from './scope.ts';
 import { contentHash } from './store.ts';
 import type { KnowledgeStore } from './store.ts';
 import type {
@@ -183,10 +183,15 @@ export interface UpdateInput {
 
 function assertAccess(item: KnowledgeItem, ctx: KnowledgeContext | undefined): void {
   if (!ctx) return;
-  const ownPending = item.status === 'suggested' && item.source.sessionId !== undefined && item.source.sessionId === ctx.sessionId;
-  if (!isVisible(item, ctx) && !ownPending) {
-    throw new BizziError('not_found', `knowledge item not found or not visible here: ${item.id}`);
+  if (isVisible(item, ctx) || isOwnSuggestion(item, ctx.sessionId)) return;
+  if (item.status === 'suggested' && scopeMatches(item.scope, ctx) && item.source.agent === ctx.agent) {
+    // Another session's pending suggestion: it can see it, but only that session may change it.
+    throw new BizziError(
+      'conflict',
+      `knowledge item ${item.id} is a pending suggestion from another session; only that session can amend or withdraw it, and approving or rejecting it is the user's`,
+    );
   }
+  throw new BizziError('not_found', `knowledge item not found or not visible here: ${item.id}`);
 }
 
 /**
@@ -210,7 +215,7 @@ export function updateKnowledge(
   const scope = patch.scope === undefined ? cur.scope : resolveScope(patch.scope, origin, settings).scope;
   const appliesTo = patch.appliesTo === undefined ? cur.appliesTo : patch.appliesTo ?? undefined;
   const kind = patch.kind ?? cur.kind;
-  const ownPending = cur.status === 'suggested' && cur.source.sessionId !== undefined && cur.source.sessionId === origin.sessionId;
+  const ownPending = isOwnSuggestion(cur, origin.sessionId);
   const res = addKnowledge(
     store,
     {
@@ -252,7 +257,7 @@ export function forgetKnowledge(
     ...(projectId !== undefined ? { projectId } : {}),
   });
   // Withdrawing your own pending suggestion never needs review.
-  const ownPending = cur.status === 'suggested' && cur.source.sessionId !== undefined && cur.source.sessionId === origin.sessionId;
+  const ownPending = isOwnSuggestion(cur, origin.sessionId);
   const decision: PolicyDecision = ownPending ? 'live' : opts.forceSuggested ? 'suggest' : res.decision;
   return store.transaction(() => {
     if (decision !== 'suggest') {

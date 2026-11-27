@@ -56,10 +56,14 @@ test('bizzi-memory MCP server over stdio, end to end', async () => {
       'handoff_brief',
       'history_search',
       'knowledge_forget',
+      'knowledge_get',
+      'knowledge_list',
+      'knowledge_promote',
       'knowledge_update',
       'memory_add',
       'memory_search',
       'rule_add',
+      'rules_in_effect',
     ]);
     const instructions = client.getInstructions() ?? '';
     assert.match(instructions, /workspace" = only this directory on this machine/);

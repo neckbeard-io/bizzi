@@ -9,6 +9,7 @@ import { AGENT_KINDS, BizziError } from '@bizzi/protocol';
 import type { AgentKind } from '@bizzi/protocol';
 import { addKnowledge, defaultScopeLevel, forgetKnowledge, originFromContext, updateKnowledge } from './pipeline.ts';
 import type { WriteResult } from './pipeline.ts';
+import { registerBrowseTools } from './mcp-browse.ts';
 import { loadSettings } from './policy.ts';
 import { rankMemories } from './resolver.ts';
 import { contextHasLevel, scopeLabel } from './scope.ts';
@@ -37,6 +38,13 @@ export function serverInstructions(ctx: KnowledgeContext): string {
     '- When the user tells you to always / never do something, record it with rule_add and userRequested: true. ' +
       'Only propose rules on your own initiative (userRequested: false) when clearly useful; they go to the user for review.',
     '- If something you find is wrong or outdated, fix it with knowledge_update or retire it with knowledge_forget.',
+    '- To see what applies to you: rules_in_effect lists the rules in force with their ids (to cite or fix them); ' +
+      'knowledge_list browses rules and memories by scope, kind, tags and status, including suggestions you proposed ' +
+      'that are still waiting for review; knowledge_get reads one item in full with its history.',
+    '- Before proposing something, check knowledge_list for a pending suggestion that already says it. You can amend ' +
+      '(knowledge_update) or withdraw (knowledge_forget) suggestions this session made, not other sessions\' ones.',
+    '- When a workspace or project item turns out to hold more widely, propose the move with knowledge_promote.',
+    'Approving or rejecting suggestions is the user\'s, in their inbox; no tool does it.',
     SCOPE_GUIDE,
     `Scopes available in this session: ${available.join(', ')}. When you omit scope, the user's default applies.`,
     'Depending on the user\'s settings a write may go live immediately or wait in their inbox as a suggestion; the tool result says which.',
@@ -239,7 +247,8 @@ export function createKnowledgeMcpServer(store: KnowledgeStore, ctx: KnowledgeCo
       description:
         'Correct or refine an existing rule or memory by id (ids appear in [brackets] in your instructions and in ' +
         'search results). Creates a new version that supersedes the old one, so the change is auditable and ' +
-        `reversible. Only pass the fields that change. ${scopeDesc}`,
+        'reversible. Also amends a pending suggestion this session made (not other sessions\' suggestions; ' +
+        `approval is the user's). To widen an item's scope, prefer knowledge_promote. Only pass the fields that change. ${scopeDesc}`,
       inputSchema: {
         id: z.string().min(1),
         title: z.string().min(1).max(200).optional(),
@@ -281,7 +290,8 @@ export function createKnowledgeMcpServer(store: KnowledgeStore, ctx: KnowledgeCo
       description:
         'Retire a rule or memory that is wrong or no longer true, by id. It is tombstoned (kept for audit, hidden ' +
         'from every session) or, when the user\'s policy requires review, a forget request goes to their inbox. ' +
-        'Prefer knowledge_update when the item just needs correcting.',
+        'Prefer knowledge_update when the item just needs correcting. On a pending suggestion this session made, it ' +
+        'withdraws the suggestion at once; other sessions\' suggestions are the user\'s to reject.',
       inputSchema: {
         id: z.string().min(1),
         reason: z.string().optional().describe('Why it should go (shown to the user on review).'),
@@ -311,6 +321,8 @@ export function createKnowledgeMcpServer(store: KnowledgeStore, ctx: KnowledgeCo
       }
     },
   );
+
+  registerBrowseTools(server, store, ctx);
 
   const notYet = (tool: string, what: string): CallToolResult =>
     text(`${tool} is not available yet in this version of bizzi (${what}). Use memory_search for saved knowledge instead.`, {

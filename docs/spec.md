@@ -341,6 +341,7 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 
 - **Rules** (always injected) and **memories** (ranked digest + search), one scope model: global > machine > project > workspace > session, optionally limited to certain agents.
 - **One pipeline for every agent:** MCP tool calls, harvested native memory, transcript extraction and UI edits all go through a configurable acceptance policy; reads come from one resolver keyed on (agent, machine, project, workspace).
+- **bizzi-memory MCP tools** (every agent session): `memory_search`, `memory_add`, `rule_add`, `knowledge_update`, `knowledge_forget` to search and write; `knowledge_list`, `rules_in_effect` and `knowledge_get` to see what applies to the session (with ids, history and its own pending suggestions); `knowledge_promote` to propose moving an item to a wider scope; `history_search` and `handoff_brief` for earlier sessions. Writes go through the acceptance policy; approving suggestions stays with the user. Details in [knowledge.md](knowledge.md) §5.
 - **Launch mode** injects into sessions bizzi starts; opt-in **ambient mode** serves the same knowledge to agent sessions bizzi didn't start.
 
 ## 10. Security & auth
