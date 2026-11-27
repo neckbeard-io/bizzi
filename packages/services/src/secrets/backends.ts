@@ -15,6 +15,15 @@ import { runCommand, type CommandRunner, type RunResult } from './run.ts';
 
 export const SECRET_SERVICE = 'bizzi';
 
+/**
+ * The keychain / Secret Service name secrets are stored under: `$BIZZI_SECRET_SERVICE`, else `bizzi`.
+ * Test builds of the desktop app set it (to `bizzi-dev`) so they never read or overwrite the secrets of
+ * the bizzi you actually use.
+ */
+export function secretService(env: NodeJS.ProcessEnv = process.env): string {
+  return env['BIZZI_SECRET_SERVICE'] || SECRET_SERVICE;
+}
+
 export interface SecretBackend {
   readonly name: string;
   get(account: string): Promise<string | undefined>;
@@ -72,7 +81,7 @@ export class KeychainSecretBackend implements SecretBackend {
   constructor(opts: KeychainOptions = {}) {
     this.#run = opts.run ?? runCommand;
     this.#bin = opts.securityPath ?? '/usr/bin/security';
-    this.#service = opts.service ?? SECRET_SERVICE;
+    this.#service = opts.service ?? secretService();
   }
 
   async get(account: string): Promise<string | undefined> {
@@ -122,13 +131,13 @@ export class LibsecretBackend implements SecretBackend {
   constructor(opts: LibsecretOptions = {}) {
     this.#run = opts.run ?? runCommand;
     this.#bin = opts.secretToolPath ?? 'secret-tool';
-    this.#service = opts.service ?? SECRET_SERVICE;
+    this.#service = opts.service ?? secretService();
   }
 
   /** secret-tool exists and a Secret Service answers (headless boxes usually have no D-Bus session). */
   static async available(opts: LibsecretOptions = {}): Promise<boolean> {
     const run = opts.run ?? runCommand;
-    const r = await run(opts.secretToolPath ?? 'secret-tool', ['lookup', 'service', opts.service ?? SECRET_SERVICE, 'account', '__bizzi_probe__'], {
+    const r = await run(opts.secretToolPath ?? 'secret-tool', ['lookup', 'service', opts.service ?? secretService(), 'account', '__bizzi_probe__'], {
       timeoutMs: 5000,
     });
     // exit 0 (found) or 1 with no complaint (not found) means the service works.

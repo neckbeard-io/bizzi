@@ -59,6 +59,7 @@ export {
   LibsecretBackend,
   MemorySecretBackend,
   SECRET_SERVICE,
+  secretService,
   SECRETS_DATA_FILE,
   SECRETS_KEY_FILE,
   createDefaultSecretBackend,

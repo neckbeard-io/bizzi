@@ -82,6 +82,9 @@ test('detectInstall', () => {
   const appImage = detectInstall({ ...base, platform: 'linux', env: { APPIMAGE: '/home/u/bizzi.AppImage' }, execPath: '/tmp/.mount_x/bizzi' });
   assert.deepEqual([appImage.method, appImage.path], ['appimage', '/home/u/bizzi.AppImage']);
   assert.equal(detectInstall({ ...base, platform: 'linux', execPath: '/opt/bizzi/bizzi' }).method, 'deb');
+  const test = detectInstall({ ...base, testBuild: '/src/bizzi', platform: 'darwin', execPath: '/src/bizzi/apps/desktop/release/mac-arm64/bizzi.app/Contents/MacOS/bizzi' });
+  assert.equal(test.method, 'unsupported', 'a test build never replaces its own build folder');
+  assert.match(test.hint ?? '', /test build/);
   assert.equal(detectInstall({ ...base, platform: 'win32', execPath: 'C:\\Users\\u\\AppData\\Local\\Programs\\bizzi\\bizzi.exe' }).method, 'nsis');
 });
 
