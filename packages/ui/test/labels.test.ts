@@ -9,7 +9,7 @@ import type { WorkspaceInfo } from '@bizzi/protocol';
 import { BizziClient, BizziStore, createManualScheduler } from '@bizzi/client';
 import { BUILTIN_THEMES, DEFAULT_AGENT_COLORS, DEFAULT_LABELS, LABEL_MIN_CONTRAST, STATE_KEYS, bizziDefault, contrast, deltaE, resolveTheme, themeCssVars } from '../src/lib/theme/index.ts';
 import type { Theme } from '../src/lib/theme/index.ts';
-import { iconInputError, machineTagsLabel, workspaceColor, workspaceMonogram } from '../src/lib/labels.ts';
+import { autoLabelColor, iconInputError, machineTagsLabel, workspaceColor, workspaceMonogram, workspaceTileColor } from '../src/lib/labels.ts';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
 
 /** Identity colors must read as clearly different colors, not shades of one. */
@@ -112,6 +112,20 @@ test('labels helpers: worktrees borrow their repo color, monograms, icon input, 
   assert.ok(iconInputError('a b'));
   assert.equal(machineTagsLabel({ tags: ['gui', 'prod-access'] }), 'gui · prod-access');
   assert.equal(machineTagsLabel({ tags: [] }), '');
+});
+
+test('workspaces without a color get a stable automatic one, spread over the palette; worktrees match their repo', () => {
+  const plain: WorkspaceInfo = { id: 'w_plain', machineId: 'm', name: 'site', path: '/s', kind: 'git', createdAt: '' };
+  const tree: WorkspaceInfo = { id: 'w_tree', machineId: 'm', name: 'site (x)', path: '/t', kind: 'worktree', parentWorkspaceId: 'w_plain', createdAt: '' };
+  const all = { w_plain: plain, w_tree: tree };
+  assert.equal(workspaceColor(plain, all), undefined, 'nothing is saved');
+  assert.equal(workspaceTileColor(plain, all), autoLabelColor('w_plain'));
+  assert.equal(workspaceTileColor(plain, all), workspaceTileColor({ ...plain }, null), 'stable');
+  assert.equal(workspaceTileColor(tree, all), workspaceTileColor(plain, all));
+  assert.equal(workspaceTileColor({ ...plain, color: 'pink' }, all), 'pink');
+  assert.equal(workspaceTileColor(tree, { ...all, w_plain: { ...plain, color: 'teal' } }), 'teal');
+  const used = new Set(Array.from({ length: 64 }, (_, i) => autoLabelColor(`w_${i.toString(36)}x${i * 7}`)));
+  assert.equal(used.size, LABEL_COLORS.length, 'every palette color gets used');
 });
 
 async function connect(t: TestContext) {

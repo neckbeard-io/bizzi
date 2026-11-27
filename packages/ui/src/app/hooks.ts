@@ -71,6 +71,40 @@ export function useNow(intervalMs = 1000, enabled = true): number {
   return now;
 }
 
+// One clock for every age label (sidebar rows): a single interval while any is mounted, and each label
+// re-renders only when its own text changes.
+const AGE_TICK_MS = 20_000;
+let ageNow = Date.now();
+let ageTimer: ReturnType<typeof setInterval> | null = null;
+const ageListeners = new Set<() => void>();
+
+function subscribeAge(cb: () => void): () => void {
+  ageListeners.add(cb);
+  if (!ageTimer) {
+    ageNow = Date.now();
+    ageTimer = setInterval(() => {
+      ageNow = Date.now();
+      for (const l of ageListeners) l();
+    }, AGE_TICK_MS);
+  }
+  return () => {
+    ageListeners.delete(cb);
+    if (ageListeners.size === 0 && ageTimer) {
+      clearInterval(ageTimer);
+      ageTimer = null;
+    }
+  };
+}
+
+/** `format(iso, now)` kept current by the shared clock ("4m", "2h"). */
+export function useAge(iso: string | undefined, format: (iso: string | undefined, now: number) => string): string {
+  return useSyncExternalStore(
+    subscribeAge,
+    () => format(iso, ageNow),
+    () => format(iso, Date.now()),
+  );
+}
+
 /** Run an async action with busy/error state. */
 export function useAction<A extends unknown[], R>(fn: (...args: A) => Promise<R>): { run: (...args: A) => Promise<R | undefined>; busy: boolean; error: unknown; reset: () => void } {
   const [busy, setBusy] = useState(false);

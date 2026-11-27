@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connectionKey, defaultUrl, isMockQuery, normalizeUrl, resolveInitialTarget, staleDesktopKeys } from '../src/lib/connection.ts';
-import { contextUse, formatCost, formatDuration, formatRelative, formatTokens, joinPath, keepAwakeSummary, parentPath, tail, usageSummary } from '../src/lib/format.ts';
+import { contextUse, formatAgeShort, formatCost, formatDuration, formatRelative, formatTokens, joinPath, keepAwakeSummary, parentPath, tail, usageSummary } from '../src/lib/format.ts';
 import { escapeHtml, renderMarkdown, safeUrl } from '../src/lib/markdown.ts';
 import { parseHash, restorableHash, routeHref } from '../src/lib/router.ts';
 import type { Route } from '../src/lib/router.ts';
@@ -17,6 +17,15 @@ test('format helpers', () => {
   assert.equal(formatDuration(12_300), '12 s');
   assert.equal(formatDuration(125_000), '2m 5s');
   assert.equal(formatRelative('2026-11-05T10:00:00Z', Date.parse('2026-11-05T10:30:00Z')), '30 min ago');
+  const at = Date.parse('2026-11-05T10:00:00Z');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at + 30_000), 'now');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at + 4 * 60_000), '4m');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at + 2 * 3_600_000 + 5 * 60_000), '2h');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at + 3 * 86_400_000), '3d');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at + 15 * 86_400_000), '2w');
+  assert.equal(formatAgeShort('2026-11-05T10:00:00Z', at - 60_000), 'now', 'clock skew');
+  assert.equal(formatAgeShort(undefined), '');
+  assert.equal(formatAgeShort('nope'), '');
   assert.equal(usageSummary({ inputTokens: 1000, outputTokens: 20, costUsd: 0.5 }), '1.0k in · 20 out · $0.50');
   assert.equal(contextUse({ inputTokens: 50_000, contextWindow: 200_000 }), 0.25);
   assert.equal(contextUse({ inputTokens: 1 }), null);

@@ -52,6 +52,22 @@ export function formatRelative(iso: string | undefined, now: number = Date.now()
   return new Date(t).toISOString().slice(0, 10);
 }
 
+/** A compact age for tight rows: "now", "4m", "2h", "3d", "5w", "1y". '' when unknown. */
+export function formatAgeShort(iso: string | undefined, now: number = Date.now()): string {
+  if (!iso) return '';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '';
+  const min = Math.floor(Math.max(0, now - t) / 60_000);
+  if (min < 1) return 'now';
+  if (min < 60) return `${min}m`;
+  const h = Math.floor(min / 60);
+  if (h < 24) return `${h}h`;
+  const d = Math.floor(h / 24);
+  if (d < 7) return `${d}d`;
+  if (d < 365) return `${Math.floor(d / 7)}w`;
+  return `${Math.floor(d / 365)}y`;
+}
+
 export function usageSummary(u: Usage | null | undefined): string {
   if (!u) return '';
   const parts: string[] = [];

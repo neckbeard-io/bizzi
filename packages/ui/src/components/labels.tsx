@@ -4,7 +4,7 @@
 import type { CSSProperties, ReactNode } from 'react';
 import type { LabelColor, MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
 import { useBizzi } from '../app/context.tsx';
-import { LABEL_COLORS, LABEL_COLOR_NAME, labelVar, machineTagsLabel, workspaceColor, workspaceMonogram } from '../lib/labels.ts';
+import { LABEL_COLORS, LABEL_COLOR_NAME, labelVar, machineTagsLabel, workspaceMonogram, workspaceTileColor } from '../lib/labels.ts';
 import { Icon } from './icons.tsx';
 import { cx } from './ui.tsx';
 
@@ -27,25 +27,21 @@ export function LabelDot(props: { color: LabelColor | undefined; className?: str
 }
 
 /**
- * The workspace's tile: its icon or first letter, filled with its color (a worktree borrows its repo's).
- * Worktrees show the branch glyph instead, in the color.
+ * The workspace's tile: its icon or first letter, filled with its color (a worktree borrows its repo's; one
+ * with none set gets a stable automatic one, so every workspace has an identity color). Worktrees show the
+ * branch glyph instead, in the color.
  */
 export function WorkspaceTile(props: { workspace: WorkspaceInfo; size?: 'sm' | 'md'; className?: string }): ReactNode {
   const w = props.workspace;
-  const color = useBizzi((s) => workspaceColor(w, s.workspaces));
+  const color = useBizzi((s) => workspaceTileColor(w, s.workspaces));
   const md = props.size === 'md';
   if (w.kind === 'worktree' && !w.icon) {
-    return <Icon name="branch" size={md ? 16 : 13} className={cx('shrink-0', !color && 'text-muted', props.className)} {...(color ? { style: { color: labelVar(color) } } : {})} />;
+    return <Icon name="branch" size={md ? 16 : 13} className={cx('shrink-0', props.className)} style={{ color: labelVar(color) }} />;
   }
   return (
     <span
-      className={cx(
-        'flex shrink-0 items-center justify-center overflow-hidden rounded font-semibold leading-none',
-        md ? 'h-6 w-6 text-xs' : 'h-4 w-4 text-[10px]',
-        color ? '' : 'bg-panel-2 text-muted',
-        props.className,
-      )}
-      style={color ? { backgroundColor: labelVar(color), color: 'var(--card)' } : undefined}
+      className={cx('flex shrink-0 items-center justify-center overflow-hidden rounded font-bold leading-none', md ? 'h-6 w-6 text-xs' : 'h-4 w-4 text-[10px]', props.className)}
+      style={{ backgroundColor: labelVar(color), color: 'var(--card)' }}
       aria-hidden="true"
     >
       {workspaceMonogram(w)}
