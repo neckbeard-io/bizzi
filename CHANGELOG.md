@@ -28,6 +28,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - Quitting, updating or reinstalling the desktop app no longer stops running sessions: the core keeps running and the relaunched app reconnects to it. The core restarts only when an update actually changes it. To stop everything, use **Quit and Stop Sessions** in the menu bar.
 - Sessions only end when you close them. If an agent exits or crashes, the session stays open and your next message picks the conversation back up. A terminal session restarts its process when you press a key.
 - A helper keeps running when its parent's agent crashes; helpers stop only when their parent is closed.
+- The desktop app opens on a plain logo while bizzi starts, instead of a status line and a "Connect to something else" link; the link to connect elsewhere only shows if starting takes longer than 10 seconds.
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three crashes in a row with no message from you it waits for you instead; a run of ordinary restarts (updates, local installs) gets ten.
 
 ### Fixed
