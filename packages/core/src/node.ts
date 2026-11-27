@@ -687,6 +687,7 @@ class Node implements BizziNode {
         await s.stop(reqString(p, 'sessionId'));
         return {};
       },
+      'session.reopen': (p) => ({ session: s.reopen(reqString(p, 'sessionId')) }),
       'session.set': async (p) => {
         const params: MethodParams<'session.set'> = { sessionId: reqString(p, 'sessionId') };
         for (const k of ['model', 'permissionMode', 'effort'] as const) {

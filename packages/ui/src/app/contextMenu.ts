@@ -34,6 +34,13 @@ export interface Toast {
   id: number;
   message: string;
   tone: 'err' | 'ok';
+  /** A button next to the message (Undo, say); running it dismisses the toast. */
+  action?: ToastAction;
+}
+
+export interface ToastAction {
+  label: string;
+  run: () => void;
 }
 
 function signal<T>(initial: T) {
@@ -101,10 +108,11 @@ export function closeDialog(): void {
   dialog.set(null);
 }
 
-export function showToast(message: string, tone: Toast['tone'] = 'ok'): void {
+export function showToast(message: string, tone: Toast['tone'] = 'ok', action?: ToastAction): void {
   clearTimeout(toastTimer);
-  toast.set({ id: ++toastSeq, message, tone });
-  toastTimer = setTimeout(() => toast.set(null), tone === 'err' ? 6000 : 2500);
+  toast.set({ id: ++toastSeq, message, tone, ...(action ? { action } : {}) });
+  // Long enough to reach for the action.
+  toastTimer = setTimeout(() => toast.set(null), tone === 'err' || action ? 6000 : 2500);
 }
 
 export function dismissToast(): void {

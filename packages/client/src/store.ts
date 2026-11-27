@@ -1154,6 +1154,13 @@ export class BizziStore {
     await this.client.request('session.stop', { sessionId });
   }
 
+  /** Reopen an ended session: it takes messages again and keeps its history. */
+  async reopenSession(sessionId: string): Promise<SessionInfo> {
+    const { session } = await this.client.request('session.reopen', { sessionId });
+    this.upsertSession(session);
+    return session;
+  }
+
   /** A fresh conversation in the same session (`/clear`): the agent forgets everything so far. */
   async clearSession(sessionId: string): Promise<void> {
     await this.client.request('session.clear', { sessionId });

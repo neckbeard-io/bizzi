@@ -155,6 +155,8 @@ Navigation follows the model: **machine → workspace → session**. The project
 
 `ended` is therefore final and always means closed, and only `ended` cascades to `child` helpers. A helper whose parent crashed keeps running, because the parent resumes. Adapters still report `session.status ended/failed` when their process goes away; the core turns that into the above and never ends the session for it. Sessions that older versions ended without anyone closing them reopen on the next node start.
 
+Closing is not deleting: an ended session keeps its history, and `session.reopen` makes it `idle` again, so its next message starts the agent and resumes the conversation when the agent can (a terminal session starts again on its next keystroke). Helpers that ended with it stay ended. `session.delete` removes a session and its events for good.
+
 ## 5. Protocols
 
 Two protocols (client↔hub/node, node↔hub), one shared schema package, JSON envelopes over WebSocket (or in-process), versioned `bizzi/1`. Transport rationale: tech-choices D1.
@@ -367,7 +369,7 @@ Theming: themes are semantic UI tokens, a terminal palette and layout tokens, pe
 
 ### 11.1 Sidebar: machines, workspaces, agent indicators
 
-A file tree: machines first, workspaces (usually a repo) under each, and under each workspace its open sessions, then its worktrees, with guide lines and a chevron to fold each level. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
+A file tree: machines first, workspaces (usually a repo) under each, and under each workspace its open sessions, then a folded **Ended (n)** line listing its closed sessions (newest first; open one to read it, its ↻ button or right-click › Reopen session lets it take messages again), then its worktrees, with guide lines and a chevron to fold each level. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
 
 ```
 ▾ This computer              6 · 1 waiting
@@ -399,7 +401,7 @@ A file tree: machines first, workspaces (usually a repo) under each, and under e
 
 **Desktop sidebar = the tree** (Herdr-style; no separate Machines/Workspaces pages, `#/machines` and `#/workspaces` open the selected machine's page). Header: logo and connection status, then icon buttons for Inbox (waiting badge), Knowledge (suggestion badge) and Settings. Footer: light/dark toggle and disconnect.
 
-**Hotkeys** (Settings › Hotkeys, each switchable per device): **⌘N / Ctrl+N** opens Add workspace for the machine you're on (the open page's machine, else the selected one); **⌘T / Ctrl+T** starts a session in the open workspace (the workspace page, or a session's) with the default agent's ★ profile and opens it; **⌘W / Ctrl+W** deletes the open session after a confirmation (on other pages of the desktop app it closes the window, which otherwise closes with ⇧⌘W / Ctrl+Shift+W). The desktop File menu lists all three without registering them, so the keys reach the UI; clicking the item sends the same command (`bizzi:command`). In a terminal session on Windows and Linux, Ctrl+N, Ctrl+T and Ctrl+W go to the shell. Browsers may keep these keys for new window, new tab and close tab.
+**Hotkeys** (Settings › Hotkeys, each switchable per device): **⌘N / Ctrl+N** opens Add workspace for the machine you're on (the open page's machine, else the selected one); **⌘T / Ctrl+T** starts a session in the open workspace (the workspace page, or a session's) with the default agent's ★ profile and opens it; **⌘W / Ctrl+W** ends the open session (`session.stop`; it asks only while a turn is running) and opens the next live session in its workspace, else the workspace page; a toast offers Undo (`session.reopen`). On other pages of the desktop app it closes the window, which otherwise closes with ⇧⌘W / Ctrl+Shift+W. Deleting a session for good is the session page's red trash button or Delete… in its menu. The desktop File menu lists all three without registering them, so the keys reach the UI; clicking the item sends the same command (`bizzi:command`). In a terminal session on Windows and Linux, Ctrl+N, Ctrl+T and Ctrl+W go to the shell. Browsers may keep these keys for new window, new tab and close tab.
 
 **Width:** a drag handle on the right edge (keyboard: focus it, arrows resize, Home/End jump, Enter fits) sets a manual width in [200, min(480, 40% of the window)]. **Auto** (the default) fits the widest row 1 or machine header (rows 2 and 3 don't count), clamped to [220, 360], and shrinks on narrow windows so the main pane keeps 640 px. Double-click the handle, its context menu, or Settings → Appearance returns to auto. Stored per device; rows ellipsise at any width. Measured once per frame at most, from a hidden max-content copy, only when the tree changes.
 

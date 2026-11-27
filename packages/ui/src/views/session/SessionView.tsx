@@ -5,14 +5,13 @@ import type { SessionStatus } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { navigate, useAction, useMediaQuery } from '../../app/hooks.ts';
 import { menuButtonHandler } from '../../app/contextMenu.ts';
+import { reopenSessionFlow } from '../../app/sessionActions.ts';
 import { useIsHub, useMachine, useMachineOnline, useShowMachine } from '../../app/machine.ts';
 import { Icon } from '../../components/icons.tsx';
 import { MachineChip, WorkspaceTile, stripeStyle } from '../../components/labels.tsx';
 import { PageHeader } from '../../components/layout.tsx';
-import { Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
+import { Button, Empty, ErrorText, IconButton, Spinner, StatusBadge, Tabs, cx } from '../../components/ui.tsx';
 import { STATUS_LABEL, machinePresence } from '../../lib/format.ts';
-import { hotkeyLabel } from '../../lib/hotkeys.ts';
-import { isMac } from '../../app/hotkeys.ts';
 import { statusSourceLabel } from '../../lib/states.ts';
 import type { SessionTab } from '../../lib/router.ts';
 import { Composer } from './Composer.tsx';
@@ -64,6 +63,9 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
   const fork = useAction(async () => {
     const s = await store.forkSession(sessionId);
     navigate({ name: 'session', sessionId: s.id, tab: 'chat' });
+  });
+  const reopen = useAction(async () => {
+    if (session) await reopenSessionFlow(store, session);
   });
   const remove = useAction(async () => {
     const workspaceId = session?.workspaceId;
@@ -177,7 +179,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             <IconButton icon="more" label="More session actions" onClick={menuButtonHandler(() => sessionMenu(store, session, online), session.title || 'Untitled session')} />
             <IconButton
               icon="trash"
-              label={`Delete session (${hotkeyLabel({ key: 'w' }, isMac())})`}
+              label="Delete session permanently"
               disabled={!online || remove.busy}
               onClick={() => {
                 if (window.confirm(`Delete "${session.title || 'this session'}"? The agent is stopped and the session and its history are removed. This cannot be undone.`)) void remove.run();
@@ -206,6 +208,15 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
             <span className="font-medium">{machine?.name ?? 'The machine'} is offline</span>
             {machine ? ` (${machinePresence(machine)})` : ''}. Showing the cached timeline; sending, approvals and changes are disabled until it reconnects.
           </span>
+        </div>
+      ) : null}
+      {status === 'ended' ? (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border bg-panel-2 px-3 py-1.5 text-xs text-muted md:px-5" role="status">
+          <Icon name="stop" size={14} className="shrink-0" />
+          <span className="min-w-0 flex-1">This session has ended. Its history is kept; reopen it to {terminal ? 'start its terminal again' : 'send it messages again'}.</span>
+          <Button size="sm" variant="ghost" icon="refresh" busy={reopen.busy} disabled={!online} onClick={() => void reopen.run()}>
+            Reopen
+          </Button>
         </div>
       ) : null}
       {isLogin ? (

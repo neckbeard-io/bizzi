@@ -925,6 +925,27 @@ export class Sessions {
   }
 
   /**
+   * Undo session.stop: an ended session is open again (`idle`) and its next message starts the agent,
+   * resuming the conversation when the agent can (a terminal starts again on its next keystroke).
+   * Helpers that were stopped with it stay ended. A no-op on a session that isn't ended.
+   */
+  reopen(id: string): SessionInfo {
+    const rt = this.#get(id);
+    if (rt.deleted) throw new BizziError('conflict', 'session is being deleted');
+    if (rt.stopping) throw new BizziError('conflict', 'session is still stopping');
+    if (rt.info.status !== 'ended') return { ...rt.info };
+    this.#assertAccepting();
+    rt.state.closed = undefined;
+    rt.state.queued = undefined;
+    this.#append(rt, { type: 'session.status', data: { status: 'idle', reason: 'reopened' } });
+    if (rt.state.budgetBlocked) {
+      this.#append(rt, { type: 'session.status', data: { status: 'waiting_input', prompt: 'budget', reason: rt.state.budgetBlocked } });
+    }
+    this.#persist(rt);
+    return { ...rt.info };
+  }
+
+  /**
    * A fresh conversation in the same bizzi session: stop the agent process, forget its session ref
    * (and an unstarted fork's source) so the next start doesn't resume, then start a new one.
    */

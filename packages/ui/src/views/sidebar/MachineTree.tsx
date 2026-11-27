@@ -9,6 +9,7 @@ import {
   machineTotalsLabel,
   selectMachineList,
   selectMachineSummary,
+  selectEndedSessions,
   selectMachineWorkspaces,
   selectWorkspaceBreakdown,
   selectWorkspaceRow,
@@ -17,11 +18,12 @@ import {
   workspaceTreeEqual,
 } from '@bizzi/client';
 import type { ContextView, SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
-import type { MachineInfo } from '@bizzi/protocol';
+import type { MachineInfo, SessionInfo } from '@bizzi/protocol';
 import { openAddWorkspace } from '../../app/addWorkspace.ts';
 import { contextMenuHandler } from '../../app/contextMenu.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { isMac, startDefaultSession } from '../../app/hotkeys.ts';
+import { reopenSessionFlow } from '../../app/sessionActions.ts';
 import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { WorkspaceTile } from '../../components/labels.tsx';
@@ -45,7 +47,7 @@ const FOLDED_KEY = 'bizzi.sidebar.folded';
 
 /**
  * A file tree (spec §11.1): machines, their workspaces, and under each workspace its open sessions (helpers
- * under their parent) and then its worktrees, with guide lines. Each session row shows its state, name and a
+ * under their parent), a folded "Ended (n)" group of closed sessions, and then its worktrees, with guide lines. Each session row shows its state, name and a
  * context bar. Machines and workspaces fold and remember it on this device; a folded workspace summarizes
  * its sessions as marks, an urgent line and a hover breakdown. Each machine header opens the machine's page.
  *
@@ -235,6 +237,7 @@ function WorkspaceNode(props: {
   // Each session sits under its own workspace only: a helper running in a worktree isn't repeated under
   // its parent's workspace (the hover breakdown still nests it there).
   const lines = useBizzi((s) => selectWorkspaceBreakdown(s, w.id).filter((l) => s.sessions[l.sessionId]?.workspaceId === w.id), breakdownEqual);
+  const ended = useBizzi((s) => selectEndedSessions(s, w.id), shallowEqual);
   const git = useBizzi((s) => s.gitStatus[w.id] ?? null);
   const iconsFit = useMediaQuery('(min-width: 1024px)');
   const phone = variant === 'phone';
@@ -242,7 +245,7 @@ function WorkspaceNode(props: {
   const [sheet, setSheet] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const hasChildren = lines.length > 0 || group.worktrees.length > 0;
+  const hasChildren = lines.length > 0 || ended.length > 0 || group.worktrees.length > 0;
   const open = hasChildren && !folded[w.id];
   const longPress = useLongPress(() => {
     if (!open) setSheet(true);
@@ -278,7 +281,8 @@ function WorkspaceNode(props: {
   };
   const here = props.activeWorkspaceId === w.id;
   // The open session gets the highlight when its row is showing; otherwise its workspace does.
-  const highlighted = here && !(open && lines.some((l) => l.sessionId === props.activeSessionId));
+  const activeEnded = ended.some((x) => x.id === props.activeSessionId);
+  const highlighted = here && !(open && (lines.some((l) => l.sessionId === props.activeSessionId) || activeEnded));
   const newSession = HOTKEYS.find((h) => h.id === 'newSession')!;
 
   return (
@@ -373,6 +377,7 @@ function WorkspaceNode(props: {
               ))}
             </div>
           ) : null}
+          {ended.length > 0 ? <EndedGroup sessions={ended} phone={phone} online={online} activeSessionId={props.activeSessionId} /> : null}
           {group.worktrees.map((t) => (
             <WorkspaceNode
               key={t.id}
@@ -427,6 +432,72 @@ function SessionLeaf(props: { line: SessionBreakdownLine; phone: boolean; online
       </span>
       {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
     </a>
+  );
+}
+
+/**
+ * A workspace's ended sessions, folded to one muted "Ended (n)" line (opened while one of them is open).
+ * Each row opens the session to read it; its button (or right-click › Reopen) lets it take messages again.
+ */
+function EndedGroup(props: { sessions: SessionInfo[]; phone: boolean; online: boolean; activeSessionId: string | null }): ReactNode {
+  const { sessions, phone } = props;
+  const store = useStore();
+  const holdsActive = sessions.some((x) => x.id === props.activeSessionId);
+  const [shown, setShown] = useState(false);
+  const open = shown || holdsActive;
+  return (
+    <div data-fit-ignore className="flex flex-col">
+      <button
+        type="button"
+        onClick={() => setShown(!open)}
+        className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
+        aria-expanded={open}
+        title={open ? 'Hide ended sessions' : 'Show ended sessions: read them, or reopen one to take messages again'}
+      >
+        <Icon name={open ? 'chevronDown' : 'chevronRight'} size={11} />
+        <span>Ended ({sessions.length})</span>
+      </button>
+      {open
+        ? sessions.map((x) => {
+            const title = x.title || 'Untitled session';
+            const active = props.activeSessionId === x.id;
+            return (
+              <div
+                key={x.id}
+                onContextMenu={contextMenuHandler(() => sessionMenu(store, x, props.online), title)}
+                className={cx(
+                  'group relative flex items-center rounded-md',
+                  active ? (phone ? 'bg-panel-2 text-fg' : 'bg-sidebar-accent text-sidebar-accent-foreground') : phone ? 'text-muted active:bg-panel-2' : 'text-muted hover:bg-sidebar-accent/70 hover:text-fg',
+                )}
+              >
+                <a
+                  href={routeHref({ name: 'session', sessionId: x.id, tab: 'chat' })}
+                  className={cx('flex min-w-0 flex-1 items-center gap-1.5 pr-2 pl-[18px]', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]')}
+                  title={`${AGENT_LABEL[x.agent]} · ${title} · ended ${formatRelative(x.updatedAt)}`}
+                  aria-current={active ? 'page' : undefined}
+                >
+                  {x.mode === 'terminal' ? <Icon name="terminal" size={12} className="shrink-0" /> : null}
+                  <span className="min-w-0 flex-1 truncate">{title}</span>
+                  <span className="shrink-0 text-[10px] tabular-nums">{formatRelative(x.updatedAt)}</span>
+                </a>
+                <button
+                  type="button"
+                  className={cx(
+                    'flex shrink-0 items-center justify-center rounded text-muted hover:bg-sidebar hover:text-fg disabled:opacity-40',
+                    phone ? 'h-11 w-9' : 'absolute top-1/2 right-1 hidden h-6 w-6 -translate-y-1/2 bg-sidebar-accent group-focus-within:flex group-hover:flex',
+                  )}
+                  title={`Reopen ${title}: it takes messages again`}
+                  aria-label={`Reopen ${title}`}
+                  disabled={!props.online}
+                  onClick={() => void reopenSessionFlow(store, x, { open: true })}
+                >
+                  <Icon name="refresh" size={13} />
+                </button>
+              </div>
+            );
+          })
+        : null}
+    </div>
   );
 }
 

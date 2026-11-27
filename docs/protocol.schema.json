@@ -209,6 +209,15 @@
         "$ref": "#/$defs/result:session.stop"
       }
     },
+    "session.reopen": {
+      "description": "Reopen an ended session: it is `idle` again, keeps its history, and the next message starts the agent, resuming the conversation when the agent can. Helpers stopped with it stay ended. A no-op on a session that isn't ended.",
+      "params": {
+        "$ref": "#/$defs/params:session.reopen"
+      },
+      "result": {
+        "$ref": "#/$defs/result:session.reopen"
+      }
+    },
     "session.clear": {
       "description": "Start a fresh conversation in the same session (`/clear`): the agent process is stopped and the next one starts without resuming, so the agent forgets everything so far. The timeline, budget and settings stay. Emits `context.cleared`. `conflict` while a turn runs; `unsupported` for terminal sessions (type the agent's own command there).",
       "params": {
@@ -3610,6 +3619,7 @@
         "session.markSeen",
         "session.restart",
         "session.stop",
+        "session.reopen",
         "session.clear",
         "session.set",
         "approval.respond",
@@ -4655,6 +4665,25 @@
             },
             "params": {
               "$ref": "#/$defs/params:session.stop"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "session.reopen"
+            },
+            "params": {
+              "$ref": "#/$defs/params:session.reopen"
             }
           }
         },
@@ -9661,6 +9690,17 @@
         "seq"
       ]
     },
+    "params:session.reopen": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
     "params:session.restart": {
       "type": "object",
       "properties": {
@@ -10901,6 +10941,17 @@
       },
       "required": [
         "seenThrough"
+      ]
+    },
+    "result:session.reopen": {
+      "type": "object",
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
       ]
     },
     "result:session.restart": {

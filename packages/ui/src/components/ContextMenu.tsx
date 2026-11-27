@@ -164,16 +164,41 @@ export function ToastHost(): ReactNode {
   if (!t) return null;
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-16 z-50 flex justify-center px-4" role="status" aria-live="polite">
-      <button
-        type="button"
-        onClick={dismissToast}
-        className={cx(
-          'pointer-events-auto max-w-lg rounded-md border px-3 py-2 text-sm shadow-lg',
-          t.tone === 'err' ? 'border-err/40 bg-panel text-err' : 'border-border bg-panel text-fg',
-        )}
-      >
-        {t.message}
-      </button>
+      {t.action ? (
+        <div
+          className={cx(
+            'pointer-events-auto flex max-w-lg items-center gap-3 rounded-md border py-1 pr-1 pl-3 text-sm shadow-lg',
+            t.tone === 'err' ? 'border-err/40 bg-panel text-err' : 'border-border bg-panel text-fg',
+          )}
+        >
+          <span className="min-w-0 truncate">{t.message}</span>
+          <button
+            type="button"
+            className="shrink-0 rounded px-2 py-1 font-medium text-accent-text hover:bg-panel-2"
+            onClick={() => {
+              const run = t.action?.run;
+              dismissToast();
+              run?.();
+            }}
+          >
+            {t.action.label}
+          </button>
+          <button type="button" onClick={dismissToast} className="shrink-0 rounded p-1 text-muted hover:bg-panel-2 hover:text-fg" aria-label="Dismiss">
+            <Icon name="x" size={14} />
+          </button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={dismissToast}
+          className={cx(
+            'pointer-events-auto max-w-lg rounded-md border px-3 py-2 text-sm shadow-lg',
+            t.tone === 'err' ? 'border-err/40 bg-panel text-err' : 'border-border bg-panel text-fg',
+          )}
+        >
+          {t.message}
+        </button>
+      )}
     </div>
   );
 }

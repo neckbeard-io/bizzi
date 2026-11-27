@@ -193,6 +193,12 @@ export interface Methods {
   'session.restart': { params: { sessionId: string }; result: Empty };
   'session.stop': { params: { sessionId: string }; result: Empty };
   /**
+   * Reopen an ended session: it is `idle` again, keeps its history, and the next message starts the
+   * agent, resuming the conversation when the agent can. Helpers stopped with it stay ended. A no-op
+   * on a session that isn't ended.
+   */
+  'session.reopen': { params: { sessionId: string }; result: { session: SessionInfo } };
+  /**
    * Start a fresh conversation in the same session (`/clear`): the agent process is stopped and the
    * next one starts without resuming, so the agent forgets everything so far. The timeline, budget
    * and settings stay. Emits `context.cleared`. `conflict` while a turn runs; `unsupported` for

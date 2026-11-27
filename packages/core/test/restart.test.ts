@@ -133,4 +133,17 @@ test('a closed session stays ended after a restart; one that ended without being
   await n2.call('session.send', { sessionId: legacyEnded, input: [{ type: 'text', text: 'again' }] });
   await ch.waitFor('turn.completed', (e) => e.data.stopReason === 'end_turn');
   assert.equal(fake2.starts[0]?.resumeRef, ref);
+
+  // A closed session reopens on request, resumes its conversation, and stays open across the next restart.
+  const closedRef = n2.sessions.get(closed).session.agentSessionRef;
+  const { session: reopened } = await n2.call('session.reopen', { sessionId: closed });
+  assert.equal(reopened.status, 'idle');
+  const chClosed = record(n2, sessionChannel(closed));
+  await n2.call('session.send', { sessionId: closed, input: [{ type: 'text', text: 'back again' }] });
+  await chClosed.waitFor('turn.completed', (e) => e.data.stopReason === 'end_turn');
+  assert.equal(fake2.starts.at(-1)?.resumeRef, closedRef);
+  await n2.close();
+  const n3 = await makeNode(dir.path, [new FakeAdapter()]);
+  t.after(() => n3.close());
+  assert.equal(n3.sessions.get(closed).session.status, 'idle');
 });

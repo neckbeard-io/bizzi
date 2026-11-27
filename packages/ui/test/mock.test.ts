@@ -186,3 +186,19 @@ test('mock rejects a bad token as unauthorized', async () => {
   await assert.rejects(client.connect('mock://local', 'bad'), /invalid token/);
   assert.equal(client.getConnection().state, 'closed');
 });
+
+test('mock: an ended session reopens, keeps its history and takes messages again', async (t) => {
+  const { store, until } = await connectMock(t);
+  await store.openSession('s_demo');
+  await until(() => (store.getState().timelines['s_demo']?.lastSeq ?? 0) > 5);
+  await store.stop('s_demo');
+  await until(() => store.getState().sessions['s_demo']?.status === 'ended');
+  const before = store.getState().timelines['s_demo']!.lastSeq;
+  await assert.rejects(store.send('s_demo', 'hello?'));
+  const reopened = await store.reopenSession('s_demo');
+  assert.equal(reopened.status, 'idle');
+  await until(() => store.getState().timelines['s_demo']?.status === 'idle');
+  assert.ok(store.getState().timelines['s_demo']!.lastSeq > before, 'history kept, reopen recorded');
+  const { turnId } = await store.send('s_demo', 'back again');
+  assert.match(turnId, /^t_/);
+});
