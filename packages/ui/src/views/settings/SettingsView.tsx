@@ -8,6 +8,8 @@ import { KnowledgeSettings } from '../knowledge/KnowledgeSettings.tsx';
 import { AppearanceSettings } from './AppearanceSettings.tsx';
 import { DevicesSettings } from './DevicesSettings.tsx';
 import { NotificationSettings } from './NotificationSettings.tsx';
+import { UpdateSettings } from './UpdateSettings.tsx';
+import { updateBridge } from '../../lib/updates.ts';
 
 /**
  * App-level settings only (the gear in the sidebar header): appearance, knowledge, devices (hub), connection.
@@ -21,12 +23,15 @@ export function SettingsView(props: { section: SettingsSection }): ReactNode {
     { value: 'knowledge', label: 'Knowledge' },
   ];
   if (hub) items.push({ value: 'devices', label: 'Devices' });
+  // The desktop app updates itself; browsers and phones get new UI from the server they talk to.
+  const updates = updateBridge() !== undefined;
+  if (updates) items.push({ value: 'updates', label: 'Updates' });
   items.push({ value: 'connection', label: 'Connection' });
-  const section = props.section === 'devices' && !hub ? 'general' : props.section;
+  const section = (props.section === 'devices' && !hub) || (props.section === 'updates' && !updates) ? 'general' : props.section;
   return (
     <Page header={<PageHeader title="Settings" subtitle="For the whole app; machine settings are on each machine's page" />}>
       <Tabs<SettingsSection> className="mb-4" value={section} onChange={(s) => navigate({ name: 'settings', section: s }, { replace: true })} items={items} />
-      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'devices' ? (
+      {section === 'general' ? <AppearanceSettings /> : section === 'knowledge' ? <KnowledgeSettings /> : section === 'updates' ? <UpdateSettings /> : section === 'devices' ? (
         <>
           <NotificationSettings />
           <DevicesSettings />

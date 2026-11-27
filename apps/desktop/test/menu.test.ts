@@ -14,6 +14,7 @@ function actions() {
       forward: () => calls.push('forward'),
       showCoreLog: () => calls.push('log'),
       openDataDir: () => calls.push('data'),
+      checkForUpdates: () => calls.push('updates'),
     },
   };
 }

@@ -17,6 +17,7 @@ import { pickerRequestFromHash } from '../lib/picker.ts';
 import { desktopRedirect, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { SIDEBAR_MIN, keyWidth, manualMax, clampManual, sidebarWidth } from '../lib/sidebarWidth.ts';
+import { pillLabel, updateOffered, useUpdates } from '../lib/updates.ts';
 import { AddWorkspaceDialog } from './AddWorkspaceDialog.tsx';
 import { Logo } from '../components/Logo.tsx';
 import { InboxView } from './InboxView.tsx';
@@ -303,6 +304,7 @@ function Sidebar(props: { route: Route }): ReactNode {
         </div>
         <HeaderNav route={props.route} />
       </div>
+      <UpdatePill />
       <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto border-t border-sidebar-border px-1 pt-2 pb-2">
         <div ref={treeRef}>
           <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} />
@@ -317,6 +319,27 @@ function Sidebar(props: { route: Route }): ReactNode {
       </div>
       <ResizeHandle width={width} windowWidth={windowWidth} auto={pref.mode === 'auto'} />
     </aside>
+  );
+}
+
+/** The desktop app has an update on offer: one slim row under the header, to Settings › Updates. */
+function UpdatePill(): ReactNode {
+  const s = useUpdates();
+  if (!s || !updateOffered(s)) return null;
+  const icon: IconName = s.stage === 'ready' || s.stage === 'installing' ? 'refresh' : 'download';
+  return (
+    <div className="px-3 pb-2">
+      <button
+        type="button"
+        onClick={() => navigate({ name: 'settings', section: 'updates' })}
+        className="flex w-full items-center gap-1.5 rounded-md border border-accent/50 bg-accent/10 px-2 py-1 text-left text-xs font-medium text-fg hover:bg-accent/20"
+        title={`bizzi v${s.latest?.version ?? ''} is available`}
+      >
+        <Icon name={icon} size={14} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 truncate">{s.stage === 'available' ? 'Update available' : 'Update'}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted">{pillLabel(s)}</span>
+      </button>
+    </div>
   );
 }
 

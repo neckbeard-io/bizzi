@@ -10,6 +10,8 @@ export interface MenuActions {
   forward(): void;
   showCoreLog(): void;
   openDataDir(): void;
+  /** Open Settings › Updates and check GitHub Releases now. */
+  checkForUpdates(): void;
 }
 
 /** Hash routes the menu opens; the preload accepts only this shape (`isMenuRoute`, shared/ipc.ts). */
@@ -18,6 +20,7 @@ export const MENU_ROUTES = {
   addWorkspace: '#/workspaces?add=1',
   devices: '#/settings/devices',
   settings: '#/settings',
+  updates: '#/settings/updates',
   machines: '#/machines',
   inbox: '#/inbox',
   knowledge: '#/knowledge',
@@ -27,6 +30,7 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
   const mac = platform === 'darwin';
   const sep: MenuItemConstructorOptions = { type: 'separator' };
   const settings: MenuItemConstructorOptions = { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: () => a.navigate(MENU_ROUTES.settings) };
+  const updates: MenuItemConstructorOptions = { label: 'Check for Updates…', click: () => a.checkForUpdates() };
   return [
     ...(mac
       ? [
@@ -34,6 +38,7 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
             label: 'bizzi',
             submenu: [
               { role: 'about', label: 'About bizzi' },
+              updates,
               sep,
               settings,
               sep,
@@ -92,7 +97,7 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
       submenu: [
         { label: 'Show Core Log', click: () => a.showCoreLog() },
         { label: 'Open Data Folder', click: () => a.openDataDir() },
-        ...(mac ? [] : [sep, { role: 'about', label: 'About bizzi' } satisfies MenuItemConstructorOptions]),
+        ...(mac ? [] : [sep, updates, { role: 'about', label: 'About bizzi' } satisfies MenuItemConstructorOptions]),
       ],
     },
   ];
