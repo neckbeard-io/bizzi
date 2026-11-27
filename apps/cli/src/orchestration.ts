@@ -7,11 +7,16 @@ import { isMissing } from './adapters.ts';
 
 export const ORCHESTRATION_PACKAGE = '@bizzi/orchestration';
 
+/** The extension, plus session history for the bizzi-memory server when this version serves it. */
+export type OrchestrationExtension = NodeExtension & {
+  historyEndpoint?(sessionId: string): { url: string; token: string } | undefined;
+};
+
 interface OrchestrationModule {
-  createOrchestrationExtension?: (opts?: { host?: string; port?: number }) => NodeExtension;
+  createOrchestrationExtension?: (opts?: { host?: string; port?: number }) => OrchestrationExtension;
 }
 
-export async function loadOrchestration(logger: Logger, name = ORCHESTRATION_PACKAGE): Promise<NodeExtension | undefined> {
+export async function loadOrchestration(logger: Logger, name = ORCHESTRATION_PACKAGE): Promise<OrchestrationExtension | undefined> {
   let mod: OrchestrationModule;
   try {
     mod = (await import(name)) as OrchestrationModule;

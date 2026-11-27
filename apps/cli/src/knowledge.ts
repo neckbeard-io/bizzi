@@ -16,6 +16,8 @@ export interface KnowledgeRuntime {
   prepareStart: PrepareStart;
   /** The node's machine (tags, description) for the card and tag rules; read at each session start. */
   bindMachine(machine: () => MachineInfo): void;
+  /** Where the bizzi-memory server reaches session history (history_search, handoff_brief), per session. */
+  bindHistory(history: (sessionId: string) => { url: string; token: string } | undefined): void;
   close(): void;
 }
 
@@ -34,10 +36,14 @@ export async function createKnowledgeRuntime(dataDir: string, logger: Logger): P
     return store;
   };
   let machine: (() => MachineInfo) | undefined;
+  let history: ((sessionId: string) => { url: string; token: string } | undefined) | undefined;
   return {
     store: open,
     bindMachine(fn) {
       machine = fn;
+    },
+    bindHistory(fn) {
+      history = fn;
     },
     prepareStart: (session, workspace) => {
       // Terminal sessions type into a TUI; they get no injected prompt or MCP server for now.
@@ -51,7 +57,9 @@ export async function createKnowledgeRuntime(dataDir: string, logger: Logger): P
         sessionId: session.id,
         ...(workspace.projectId ? { projectId: workspace.projectId } : {}),
       };
-      return mod.knowledgeForSession(context, { store: open(session.machineId), ...(m ? { machine: m } : {}) });
+      const h = history?.(session.id);
+      const env = h ? { [mod.HISTORY_URL_ENV]: h.url, [mod.HISTORY_TOKEN_ENV]: h.token } : undefined;
+      return mod.knowledgeForSession(context, { store: open(session.machineId), ...(m ? { machine: m } : {}), ...(env ? { env } : {}) });
     },
     close() {
       store?.close();

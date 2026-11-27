@@ -231,6 +231,55 @@ export interface SessionInfo {
   lastSeq: number;
 }
 
+// ---- session history (history.search, history.brief)
+
+export interface HistoryHit {
+  sessionId: string;
+  title?: string;
+  agent: AgentKind;
+  workspaceId: string;
+  /** `user`: a prompt · `assistant`: a top-level reply. */
+  role: 'user' | 'assistant';
+  /** The event's seq on the session channel. */
+  seq: number;
+  ts: string;
+  /** Text around the match, matches in [ ]. */
+  snippet: string;
+}
+
+export interface HistorySearchResult {
+  hits: HistoryHit[];
+  /** Pass as `offset` for more. */
+  nextOffset?: number;
+  /** false: this SQLite has no FTS5, so terms matched as substrings, newest first. */
+  fullText: boolean;
+}
+
+/** What a session was asked, what it did, where it ended and what is still open; no transcript. */
+export interface SessionBrief {
+  sessionId: string;
+  title?: string;
+  agent: AgentKind;
+  status: SessionStatus;
+  workspace: { id: string; path?: string; branch?: string };
+  parentId?: string;
+  createdAt: string;
+  updatedAt: string;
+  asked: { first?: string; later: string[]; prompts: number };
+  did: {
+    turns: number;
+    tools: { total: number; byKind: Record<string, number>; failed: number };
+    changedFiles: { path: string; change: string }[];
+    /** Pull requests mentioned in replies, prompts and tool output (URLs, or "#n" when that's all there is). */
+    prs: string[];
+  };
+  ended: { state: SessionStatus; stopReason?: string; error?: string; lastReply?: string };
+  open: { approvals: string[]; questions: string[]; budget?: string; /** Heuristic: the last reply asks the user this. */ asks?: string };
+  /** The same as markdown, ready to hand to another session. */
+  text: string;
+  truncated: boolean;
+}
+
 /** Only `metered` spend counts toward `usd`; budgetless providers count tokens only (usage.md §2). */
 export interface SessionBudget {
   usd?: number;

@@ -21,6 +21,7 @@ import type {
   HelperStartResult,
   HelperWaitResult,
   HelperWaitUntil,
+  HistorySearchResult,
   InputBlock,
   InstallAction,
   InstallPlan,
@@ -47,6 +48,7 @@ import type {
   RouteSuggestion,
   RoutingRule,
   SecretInfo,
+  SessionBrief,
   SessionBudget,
   SessionInfo,
   SessionMode,
@@ -185,6 +187,26 @@ export interface Methods {
   'session.fork': { params: { sessionId: string; title?: string }; result: { session: SessionInfo } };
   /** Stop the session if needed and remove it and its events. */
   'session.delete': { params: { sessionId: string }; result: Empty };
+  /**
+   * Full-text search over past sessions on this node: the user's prompts and the agents' top-level replies
+   * (bizzi-memory `history_search`). Words are ANDed; "quoted phrases", `word*` prefixes and `OR` work.
+   * `workspaceId` includes a repo's worktrees; `projectId` every workspace of the project. Best match first.
+   * `limit` default 10, max 50.
+   */
+  'history.search': {
+    params: MachineTarget & {
+      query: string;
+      workspaceId?: string;
+      projectId?: string;
+      sessionId?: string;
+      role?: 'user' | 'assistant';
+      limit?: number;
+      offset?: number;
+    };
+    result: HistorySearchResult;
+  };
+  /** A compact brief of one session for picking up its work (bizzi-memory `handoff_brief`). */
+  'history.brief': { params: { sessionId: string }; result: { brief: SessionBrief } };
   'session.send': { params: { sessionId: string; input: InputBlock[] }; result: { turnId: string } };
   'session.steer': { params: { sessionId: string; input: InputBlock[] }; result: Empty };
   'session.interrupt': { params: { sessionId: string }; result: Empty };
