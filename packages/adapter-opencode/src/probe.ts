@@ -8,6 +8,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { AgentProbe } from '@bizzi/protocol';
+import { locateBinary } from './locate.ts';
 
 export interface ProbeOptions {
   binary: string;
@@ -113,8 +114,9 @@ export async function probeOpenCode(opts: ProbeOptions): Promise<AgentProbe> {
   const env = { ...process.env, ...opts.env };
   const probe: AgentProbe = { agent: 'opencode', installed: false, auth: 'unknown' };
   const notes: string[] = [];
+  const binary = locateBinary(opts.binary, env);
   try {
-    const ver = await run(opts.binary, ['--version'], env, Math.min(opts.timeoutMs, 10_000));
+    const ver = await run(binary, ['--version'], env, Math.min(opts.timeoutMs, 10_000));
     if (ver.notFound) {
       probe.notes = [`${opts.binary} not found on PATH`];
       return probe;
@@ -125,7 +127,7 @@ export async function probeOpenCode(opts: ProbeOptions): Promise<AgentProbe> {
       return probe;
     }
     probe.installed = true;
-    probe.path = opts.binary;
+    probe.path = binary;
     if (m?.[1]) probe.version = m[1];
     const major = probe.version ? Number(probe.version.split('.')[0]) : NaN;
     if (Number.isFinite(major) && major < 2) {
@@ -147,7 +149,7 @@ export async function probeOpenCode(opts: ProbeOptions): Promise<AgentProbe> {
     const args = ['auth', 'list', '--format', 'json', ...(opts.server ? ['--server', opts.server.url] : ['--standalone'])];
     const authEnv = { ...env };
     if (opts.server?.password) authEnv.OPENCODE_PASSWORD = opts.server.password;
-    const res = await run(opts.binary, args, authEnv, opts.timeoutMs);
+    const res = await run(binary, args, authEnv, opts.timeoutMs);
     if (res.ok) {
       const list = JSON.parse(res.stdout || '[]') as { id: string; name?: string; connections?: unknown[] }[];
       const connected = list.filter((i) => Array.isArray(i.connections) && i.connections.length > 0);

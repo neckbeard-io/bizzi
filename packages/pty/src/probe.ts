@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { accessSync, constants as fsConstants, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join } from 'node:path';
+import { isProjectBinDir } from '@bizzi/protocol';
 
 /** Directories searched after $PATH (agents often install here without touching PATH). */
 export function commonBinDirs(): string[] {
@@ -23,17 +24,19 @@ function isExecutableFile(p: string): boolean {
 
 /**
  * Find `name` on PATH, then in `extraDirs` (default: ~/.local/bin, /opt/homebrew/bin,
- * /usr/local/bin). Absolute paths are checked as-is.
+ * /usr/local/bin). Absolute paths are checked as-is. `agent` skips project-local PATH entries
+ * (a package's `node_modules/.bin`, relative dirs): an agent's install is never one of those, and
+ * which one is on PATH depends on where bizzi was started from.
  */
 export function findBinary(
   name: string,
-  opts: { path?: string; extraDirs?: string[] } = {},
+  opts: { path?: string; extraDirs?: string[]; agent?: boolean } = {},
 ): string | undefined {
   if (isAbsolute(name)) return isExecutableFile(name) ? name : undefined;
   const dirs = [...(opts.path ?? process.env.PATH ?? '').split(delimiter), ...(opts.extraDirs ?? commonBinDirs())];
   const seen = new Set<string>();
   for (const dir of dirs) {
-    if (!dir || seen.has(dir)) continue;
+    if (!dir || seen.has(dir) || (opts.agent && isProjectBinDir(dir))) continue;
     seen.add(dir);
     const candidate = join(dir, name);
     if (isExecutableFile(candidate)) return candidate;

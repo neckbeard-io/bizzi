@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { access, constants } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
+import { agentSearchDirs } from '@bizzi/protocol';
 
 async function isExecutable(path: string): Promise<boolean> {
   try {
@@ -33,8 +34,9 @@ async function npmGlobalBin(env: NodeJS.ProcessEnv): Promise<string | undefined>
 }
 
 /**
- * Candidate locations, in order: explicit path, PATH, common install dirs, npm's global bin.
- * Returns the first executable match.
+ * Candidate locations, in order: explicit path, PATH (without project-local `node_modules/.bin`
+ * entries, see agentSearchDirs), common install dirs, npm's global bin. Returns the first
+ * executable match.
  */
 export async function findCodex(opts: { codexPath?: string; env?: NodeJS.ProcessEnv } = {}): Promise<string | undefined> {
   const env = opts.env ?? process.env;
@@ -43,7 +45,7 @@ export async function findCodex(opts: { codexPath?: string; env?: NodeJS.Process
     const p = isAbsolute(opts.codexPath) ? opts.codexPath : resolve(opts.codexPath);
     return (await isExecutable(p)) ? p : undefined;
   }
-  const dirs = (env.PATH ?? '').split(delimiter).filter(Boolean);
+  const dirs = agentSearchDirs((env.PATH ?? '').split(delimiter).filter(Boolean));
   const home = homedir();
   dirs.push('/opt/homebrew/bin', '/usr/local/bin', join(home, '.local', 'bin'), join(home, '.npm-global', 'bin'));
   const seen = new Set<string>();

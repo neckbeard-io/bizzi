@@ -5,7 +5,7 @@ import { constants } from 'node:fs';
 import { access, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
-import type { AgentAuthState, AgentProbe } from '@bizzi/protocol';
+import { agentSearchDirs, type AgentAuthState, type AgentProbe } from '@bizzi/protocol';
 
 export interface FindClaudeOptions {
   /** Explicit binary path; used as-is when it exists. */
@@ -23,7 +23,8 @@ export interface FoundBinary {
 
 export function defaultSearchDirs(env: NodeJS.ProcessEnv = process.env): string[] {
   const home = homedir();
-  const fromPath = (env.PATH ?? '').split(delimiter).filter(Boolean);
+  // A project's node_modules/.bin is not an install (agentSearchDirs).
+  const fromPath = agentSearchDirs((env.PATH ?? '').split(delimiter).filter(Boolean));
   const wellKnown = [join(home, '.local', 'bin'), join(home, '.claude', 'local'), '/opt/homebrew/bin', '/usr/local/bin'];
   return [...new Set([...fromPath, ...wellKnown])];
 }

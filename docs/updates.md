@@ -15,6 +15,7 @@ Updates that bizzi didn't run are normal, not an edge case: Claude's own auto-up
   - Codex script: `~/.codex/packages/standalone/current`;
   - Homebrew: `Cellar/<name>/` and `Caskroom/<name>/`;
   - OpenCode script: `~/.opencode/bin/opencode`.
+- **Which install:** the probe and the session spawn resolve the binary the same way: PATH, then the well-known install dirs, skipping project-local PATH entries (a package's `node_modules/.bin`, npm's script-only dirs, relative dirs; `isProjectBinDir` in `@bizzi/protocol`). `npm run …` puts those first on PATH and an app reopened from such a script inherits them, so a repo with an agent CLI as a dev dependency used to shadow the real install. A change of resolved path is reported as a different install ("codex now runs … instead of …"), not as an upgrade.
 - **Running version:** recorded per process at spawn: the probe's version plus the real path of the executable launched (`agent_version`, spec §4). For processes bizzi didn't start, it asks them: OpenCode's `GET /api/info` returns `{ version, pid, urls }` for the shared background service, for example.
 - **Stale:** the running version differs from the installed one, or the running executable's path no longer exists.
 

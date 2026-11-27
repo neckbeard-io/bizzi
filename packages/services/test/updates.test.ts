@@ -279,6 +279,28 @@ describe('installed-version watching', () => {
     assert.deepEqual(s.updates.installedVersions(), { claude: '2.1.322' });
   });
 
+  it('a different binary path is announced as another install, not as an upgrade', async () => {
+    const codex = new FakeAdapter({ agent: 'codex' });
+    const s = await setup([codex]);
+    const other = fakeBinary(join(s.dir, 'repo/worktree/bin/codex'));
+    const real = fakeBinary(join(s.home, '.local/bin/codex'));
+    codex.options.probe = { path: other, version: '0.167.0' };
+    await s.updates.reprobe('first');
+    s.global.length = 0;
+
+    codex.options.probe = { path: real, version: '0.172.0' };
+    assert.deepEqual(await s.updates.reprobe('switched'), ['codex']);
+    const detected = s.global.filter((e) => e.type === 'install.progress').map((e) => (e.data as { message: string }).message);
+    assert.deepEqual(detected, [`codex now runs ${real} (0.172.0) instead of ${other} (0.167.0)`]);
+
+    // Same path, new version: an upgrade.
+    s.global.length = 0;
+    codex.options.probe = { path: real, version: '0.173.0' };
+    await s.updates.reprobe('upgraded');
+    const upgraded = s.global.filter((e) => e.type === 'install.progress').map((e) => (e.data as { message: string }).message);
+    assert.deepEqual(upgraded, ['codex 0.172.0 → 0.173.0 installed']);
+  });
+
   it('is off by default: no watches, no background probes', async () => {
     const fw = fakeWatch();
     const s = await setup([new FakeAdapter({ agent: 'claude' })], { watchFn: fw.watchFn });

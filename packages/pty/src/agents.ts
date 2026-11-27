@@ -50,7 +50,7 @@ function ignoredOpts(opts: StartSessionOptions, keys: (keyof StartSessionOptions
 
 function binarySpec(name: string, agentDirs: () => string[] = () => []) {
   return (lookup: { path?: string; extraDirs?: string[] }) =>
-    findBinary(name, { path: lookup.path, extraDirs: [...(lookup.extraDirs ?? commonBinDirs()), ...agentDirs()] });
+    findBinary(name, { path: lookup.path, extraDirs: [...(lookup.extraDirs ?? commonBinDirs()), ...agentDirs()], agent: true });
 }
 
 // ---------------------------------------------------------------------------------------------

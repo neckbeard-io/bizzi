@@ -50,6 +50,8 @@ export interface UpdatesExtension extends NodeExtension {
 interface Seen {
   installed: boolean;
   version?: string;
+  /** The binary the probe resolved (what sessions run). */
+  path?: string;
   realPath?: string;
 }
 
@@ -83,10 +85,18 @@ export function createUpdatesExtension(opts: UpdatesOptions = {}): UpdatesExtens
   function record(agents: AgentListing[]): AgentKind[] {
     const changed: AgentKind[] = [];
     for (const a of agents) {
-      const now: Seen = { installed: a.installed, ...(a.version ? { version: a.version } : {}), ...(a.realPath ? { realPath: a.realPath } : {}) };
+      const now: Seen = {
+        installed: a.installed,
+        ...(a.version ? { version: a.version } : {}),
+        ...(a.installed && a.path ? { path: a.path } : {}),
+        ...(a.realPath ? { realPath: a.realPath } : {}),
+      };
       const before = seen.get(a.agent);
       seen.set(a.agent, now);
-      if (before && (before.installed !== now.installed || before.version !== now.version || before.realPath !== now.realPath)) {
+      if (
+        before &&
+        (before.installed !== now.installed || before.version !== now.version || before.path !== now.path || before.realPath !== now.realPath)
+      ) {
         changed.push(a.agent);
         announce(a.agent, before, now);
       }
@@ -102,14 +112,26 @@ export function createUpdatesExtension(opts: UpdatesOptions = {}): UpdatesExtens
   function announce(agent: AgentKind, before: Seen, now: Seen): void {
     const c = ctx;
     if (!c) return;
+    // A different binary path is a different install, not an upgrade of the one before: the old one
+    // may still be there, at its own version (e.g. a second copy that was first on PATH).
+    const otherInstall = before.installed && now.installed && !!before.path && !!now.path && before.path !== now.path;
     const message = !now.installed
       ? `${agent} was removed`
       : !before.installed
         ? `${agent} ${now.version ?? ''} was installed`.replace(/ +/g, ' ')
-        : before.version !== now.version
-          ? `${agent} ${before.version ?? '?'} → ${now.version ?? '?'} installed`
-          : `${agent} now runs ${now.realPath ?? '?'}`;
-    c.logger.log('info', 'agent install changed', { agent, from: before.version, to: now.version, realPath: now.realPath });
+        : otherInstall
+          ? `${agent} now runs ${now.path}${now.version ? ` (${now.version})` : ''} instead of ${before.path}${before.version ? ` (${before.version})` : ''}`
+          : before.version !== now.version
+            ? `${agent} ${before.version ?? '?'} → ${now.version ?? '?'} installed`
+            : `${agent} now runs ${now.realPath ?? '?'}`;
+    c.logger.log('info', 'agent install changed', {
+      agent,
+      from: before.version,
+      to: now.version,
+      ...(otherInstall ? { fromPath: before.path } : {}),
+      path: now.path,
+      realPath: now.realPath,
+    });
     // Clients reload the agent list when an install job finishes; a detected change looks the same.
     c.emitGlobal({ type: 'install.progress', data: { agent, jobId: `watch_${ulid()}`, stage: 'detected', message, done: true, ok: true } });
     c.emitGlobal({ type: 'machine.updated', data: { machine: c.node.machine } });

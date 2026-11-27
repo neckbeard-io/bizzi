@@ -1,4 +1,5 @@
 export * from './adapter.ts';
+export * from './bin-path.ts';
 export * from './capabilities.ts';
 export * from './envelope.ts';
 export * from './events.ts';

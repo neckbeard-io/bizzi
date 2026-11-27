@@ -10,6 +10,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import type { Logger } from '@bizzi/protocol';
 import { OpenCodeClient } from './client.ts';
+import { locateBinary } from './locate.ts';
 import type { OcEvent } from './types.ts';
 
 export interface ServerListener {
@@ -139,8 +140,6 @@ export class OpenCodeServer {
     const o = this.opts;
     const log = o.logger;
     const password = this.opts.password ?? randomBytes(24).toString('base64url');
-    const [cmd, ...args] = o.command ?? [o.binary, 'serve', '--hostname', o.hostname, '--port', String(o.port)];
-    if (!cmd) throw new Error('empty opencode command');
     const env: Record<string, string | undefined> = {
       ...process.env,
       ...o.env,
@@ -150,6 +149,9 @@ export class OpenCodeServer {
       OPENCODE_SERVER_PASSWORD: password,
       OPENCODE_DISABLE_AUTOUPDATE: '1',
     };
+    // The same lookup as the probe, so the server runs the install the probe reported.
+    const [cmd, ...args] = o.command ?? [locateBinary(o.binary, env), 'serve', '--hostname', o.hostname, '--port', String(o.port)];
+    if (!cmd) throw new Error('empty opencode command');
     log.log('debug', 'spawning opencode server', { cmd, args });
     const child = spawn(cmd, args, { env, cwd: o.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
     this.#child = child;
