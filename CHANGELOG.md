@@ -6,6 +6,11 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ## Unreleased
 
+## v0.1.1 — 2026-11-26
+
+### Added
+- One-line installer for macOS and Linux: `curl -fsSL https://raw.githubusercontent.com/neckbeard-io/bizzi/main/scripts/install.sh | bash`, the recommended way to install.
+
 ## v0.1.0 — 2026-11-26
 
 ### Added

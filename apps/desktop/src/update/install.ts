@@ -30,12 +30,15 @@ export interface DetectOptions {
   platform: NodeJS.Platform;
   execPath: string;
   env: NodeJS.ProcessEnv;
+  /** The checkout a test build runs from: it never updates itself (it would replace its own build). */
+  testBuild?: string | null;
   writable?: (dir: string) => boolean;
 }
 
 export function detectInstall(o: DetectOptions): InstallTarget {
   const writable = o.writable ?? isWritable;
   if (!o.isPackaged) return { method: 'unsupported', label: 'source checkout', hint: 'Running from a source checkout: update it with git.' };
+  if (o.testBuild) return { method: 'unsupported', label: 'test build', hint: `A test build from ${o.testBuild}: it never updates itself. Rebuild it instead.` };
   if (o.platform === 'darwin') {
     const i = o.execPath.indexOf('.app/');
     if (i === -1) return { method: 'unsupported', label: 'macOS', hint: 'bizzi is not running from an app bundle.' };

@@ -1,7 +1,8 @@
 // `npm run dev:desktop`: run the Electron shell against the built UI (packages/ui/dist) and the real
 // core, with the repo-local data dir that `npm run serve` also uses (.bizzi-dev/data). If a
 // `npm run serve` is already running there, the desktop attaches to it; otherwise it spawns its own
-// core. Set BIZZI_DATA_DIR to use another data dir (e.g. ~/.bizzi). Extra args go to Electron.
+// core. The app keeps a test build apart from an installed bizzi by itself (testBuildFor in
+// apps/desktop/src/core/runtime.ts); BIZZI_DATA_DIR still picks another data dir. Extra args go to Electron.
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';

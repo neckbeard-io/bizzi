@@ -106,6 +106,19 @@ gh run watch "$(gh run list --workflow=release.yml -L1 --json databaseId --jq '.
 **Never set `version` in a `package.json` to cut a release.** The build stamps the version in
 (`-c.extraMetadata.version` for the app, `BIZZI_VERSION` for the core and images).
 
+## The installer
+
+`scripts/install.sh` is the recommended install on macOS and Linux (README). People run it straight
+from `main` (`raw.githubusercontent.com/neckbeard-io/bizzi/main/scripts/install.sh`), so a change to it
+reaches users only when it is promoted. It finds the latest stable release through the
+`/releases/latest` redirect rather than the API, which rate-limits shared addresses, so a release
+must not be marked pre-release by mistake or the installer won't see it. `--dev` uses the API.
+
+It downloads the self-updating asset for the machine (the macOS `.zip`, the Linux AppImage) and checks it
+against the release's `SHA256SUMS.txt`. On macOS it also runs `codesign --verify` and clears the
+quarantine attribute. `scripts/test-install.sh` (CI) covers version lookup, asset names and checksums.
+Rename an asset and the installer breaks along with the updater.
+
 ## Local builds
 
 ```sh

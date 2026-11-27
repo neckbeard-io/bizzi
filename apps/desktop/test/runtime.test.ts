@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { buildCsp } from '../src/main/csp.ts';
-import { coreNodeArgs, nodeMajor, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, type ResolveRuntimeOptions } from '../src/core/runtime.ts';
+import { coreNodeArgs, findCheckout, nodeMajor, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, testBuildFor, type ResolveRuntimeOptions } from '../src/core/runtime.ts';
 
 const base = (over: Partial<ResolveRuntimeOptions> = {}): ResolveRuntimeOptions => ({
   env: { PATH: '/a:/b', HOME: '/home/u' },
@@ -85,4 +85,21 @@ test('coreNodeArgs loads the workspaces hook only in a staged core (no node_modu
   assert.match(staged[1] ?? '', /^file:\/\/.*workspaces-hook\.ts$/);
   assert.deepEqual(coreNodeArgs(entry, (f) => f === hook || f === links), [], 'dev checkout: the links resolve');
   assert.deepEqual(coreNodeArgs(entry, () => false), [], 'no hook file (an older core)');
+});
+
+test('test builds: a build inside a checkout keeps its data, profile, secrets and widgets apart', () => {
+  const repo = join('/src', 'bizzi');
+  const files = new Set([join(repo, '.git'), join(repo, 'apps', 'desktop', 'package.json')]);
+  const exists = (p: string) => files.has(p);
+  // A dev run (the app dir) and a packaged build still in apps/desktop/release are both test builds.
+  assert.equal(findCheckout(join(repo, 'apps', 'desktop'), exists), repo);
+  assert.equal(findCheckout(join(repo, 'apps', 'desktop', 'release', 'mac-arm64', 'bizzi.app', 'Contents', 'Resources', 'app.asar'), exists), repo);
+  assert.equal(findCheckout('/Applications/bizzi.app/Contents/Resources/app.asar', exists), null, 'an installed app');
+  const tb = testBuildFor(join(repo, 'apps', 'desktop'), {}, exists)!;
+  assert.equal(tb.dataDir, join(repo, '.bizzi-dev', 'data'));
+  assert.equal(tb.userDataDir, join(repo, '.bizzi-dev', 'electron'));
+  assert.equal(tb.coreEnv['BIZZI_SECRET_SERVICE'], 'bizzi-dev');
+  assert.equal(resolveDataDir({ HOME: '/home/u' }, tb), tb.dataDir);
+  assert.equal(resolveDataDir({ HOME: '/home/u', BIZZI_DATA_DIR: '/d' }, tb), '/d', 'an explicit data dir still wins');
+  assert.equal(testBuildFor(join(repo, 'apps', 'desktop'), { BIZZI_TEST_BUILD: '0' }, exists), null, 'opt-out');
 });
