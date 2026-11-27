@@ -107,6 +107,26 @@ npm run dev -w @bizzi/desktop
 # add BIZZI_SMOKE_MS=1500 to log what the page sees, save <data dir>/smoke.png and quit
 ```
 
+Run modes (`src/main/presence.ts`):
+
+- **Headless** (`BIZZI_HEADLESS=1`, and every smoke run unless `BIZZI_HEADLESS=0`): nothing on screen.
+  The page renders offscreen, the app never becomes active and has no Dock or tray icon, and it
+  uses a throwaway Electron profile. On macOS `npm run dev` launches a background-only copy of the
+  dev bundle (`.dev-app/bizzi-headless.app`), so not even the launch reaches the Dock.
+- **Background** (`BIZZI_BACKGROUND=1`): the window opens behind the app you're in, with no Dock
+  icon; the menu bar icon brings it forward.
+
+Smoke checks (`BIZZI_SMOKE_MS=n`): once the page has settled `n` ms after its last load, run the
+check, save `smoke.png` and `smoke.json` (`ok`, the check's value, page text, console errors, core
+state), quit, and exit 1 if the check failed.
+
+| Variable | Meaning |
+| --- | --- |
+| `BIZZI_SMOKE_ROUTE` | UI route to open, e.g. `/settings/appearance` |
+| `BIZZI_SMOKE_EVAL` | JavaScript expression run in the page (awaited); a throw or `false` fails the check |
+| `BIZZI_SMOKE_OUT` | directory for `smoke.png` / `smoke.json` (default: the data dir) |
+| `BIZZI_SMOKE_SIZE` | window size, e.g. `1440x900` (default `1280x820`) |
+
 ## Packaging and updates
 
 `node ../../scripts/release/build-desktop.ts --version <v>` builds this platform's installers into the

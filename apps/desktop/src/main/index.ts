@@ -2,7 +2,8 @@
 // `bizzi://` deep links, and the core supervisor (which runs the core as a separate process).
 // No product logic lives here; the renderer talks to the core directly over WebSocket.
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
   app,
@@ -30,6 +31,7 @@ import { filePrefs, UpdateController } from '../update/controller.ts';
 import { detectInstall, installUpdate, relaunchEnv } from '../update/install.ts';
 import { buildCsp } from './csp.ts';
 import { appMenu } from './menu.ts';
+import { presenceFor, smokeOptions, smokePassed, withRoute, type CheckResult, type SmokeOptions } from './presence.ts';
 import { trayIcon } from './tray.ts';
 import { APP_ORIGIN, handleAppProtocol, registerAppScheme, resolveUiSource, uiEntryUrl } from './ui.ts';
 
@@ -40,8 +42,25 @@ const env = process.env;
 
 // A build run from a bizzi checkout keeps apart from the installed app (runtime.ts, TestBuild).
 const testBuild = testBuildFor(app.getAppPath(), env);
+// Headless runs (smoke checks) and background runs stay off your screen and never take focus (presence.ts).
+const presence = presenceFor(env);
+const headless = presence === 'headless';
+const smoke = smokeOptions(env);
+/**
+ * A headless run gets a throwaway Electron profile, so it never meets the single-instance lock of a
+ * test build that's open (which would bring that one's window forward) or of another headless run.
+ * `npm run dev` hands it one (BIZZI_USER_DATA_DIR) and removes it after exit; otherwise we make it.
+ */
+const scratchUserData = headless && !env['BIZZI_USER_DATA_DIR'] ? mkdtempSync(join(tmpdir(), 'bizzi-headless-')) : null;
 if (env['BIZZI_USER_DATA_DIR']) app.setPath('userData', env['BIZZI_USER_DATA_DIR']);
+else if (scratchUserData) app.setPath('userData', scratchUserData);
 else if (testBuild) app.setPath('userData', testBuild.userDataDir);
+// Before launch finishes, so macOS never makes the app active or gives it a Dock icon.
+if (isMac && presence !== 'foreground') app.setActivationPolicy(headless ? 'prohibited' : 'accessory');
+// Chromium still writes to the profile while it shuts down, so it goes only at the very end.
+if (scratchUserData) process.on('exit', () => rmSync(scratchUserData, { recursive: true, force: true }));
+/** Set when a smoke check fails: the process exits with it. */
+let exitCode = 0;
 const appName = testBuild ? 'bizzi (test build)' : 'bizzi';
 
 const appDir = app.getAppPath();
@@ -186,7 +205,7 @@ function setup(): void {
         tray?.destroy();
         // Next tick: detach() settles within the same turn as this before-quit, and Electron drops
         // an app.quit() made while it is still unwinding the quit this handler just cancelled.
-        setImmediate(() => app.quit());
+        setImmediate(() => (exitCode ? app.exit(exitCode) : app.quit()));
       });
   });
   app.on('window-all-closed', () => {
@@ -205,6 +224,7 @@ async function onReady(): Promise<void> {
     packaged: app.isPackaged,
     dataDir,
     ui: ui.kind === 'dev' ? ui.url : ui.dir,
+    ...(presence !== 'foreground' ? { presence } : {}),
   });
 
   const ses = session.defaultSession;
@@ -249,7 +269,7 @@ async function onReady(): Promise<void> {
   });
   // Packaged builds carry the icon in the bundle; in dev the Dock would show Electron's.
   // A packaged test build would otherwise pass for the installed app.
-  if (isMac && (!app.isPackaged || testBuild)) app.dock?.setIcon(appIcon);
+  if (isMac && !headless && (!app.isPackaged || testBuild)) app.dock?.setIcon(appIcon);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       appMenu(process.platform, {
@@ -263,12 +283,14 @@ async function onReady(): Promise<void> {
       }),
     ),
   );
-  tray = new Tray(trayIcon(process.platform, assetsDir, testBuild !== null));
-  tray.setToolTip(appName);
-  // The macOS menu bar icon is a monochrome template, so a test build says so in text.
-  if (isMac && testBuild) tray.setTitle('test');
-  if (!isMac) tray.on('click', () => showWindow());
-  updateTray(manager.status);
+  if (!headless) {
+    tray = new Tray(trayIcon(process.platform, assetsDir, testBuild !== null));
+    tray.setToolTip(appName);
+    // The macOS menu bar icon is a monochrome template, so a test build says so in text.
+    if (isMac && testBuild) tray.setTitle('test');
+    if (!isMac) tray.on('click', () => showWindow());
+    updateTray(manager.status);
+  }
 
   // The window comes up right away and shows "starting" until the core is there (replacing an
   // out-of-date core takes a moment); then it reloads onto the connection (onCoreStatus).
@@ -283,7 +305,7 @@ async function onReady(): Promise<void> {
       log.log('warn', 'could not prune old core copies', { error: String(err) });
     }
   }
-  if (!conn && !quitting) {
+  if (!conn && !quitting && !headless) {
     void dialog.showMessageBox({
       type: 'warning',
       message: 'bizzi could not start its core',
@@ -371,7 +393,7 @@ function loadWindowState(): WindowState | null {
 function saveWindowState(): void {
   if (windowStateTimer) clearTimeout(windowStateTimer);
   windowStateTimer = null;
-  if (!win || win.isDestroyed()) return;
+  if (!win || win.isDestroyed() || headless) return;
   const state: WindowState = { bounds: win.getNormalBounds(), maximized: win.isMaximized(), fullScreen: win.isFullScreen() };
   try {
     writeFileSync(windowStateFile, JSON.stringify(state));
@@ -393,12 +415,12 @@ function createWindow(): void {
     showWindow();
     return;
   }
-  const saved = loadWindowState();
+  const saved = headless ? null : loadWindowState();
   const primary = screen.getPrimaryDisplay();
   const workAreas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea);
   const min = { width: 720, height: 480 };
   win = new BrowserWindow({
-    ...initialBounds(saved, workAreas, { width: 1280, height: 820 }, min),
+    ...initialBounds(saved, workAreas, smoke?.size ?? { width: 1280, height: 820 }, min),
     minWidth: min.width,
     minHeight: min.height,
     show: false,
@@ -414,15 +436,20 @@ function createWindow(): void {
       webSecurity: true,
       allowRunningInsecureContent: false,
       spellcheck: false,
+      // Headless: the page renders in memory and never reaches the screen; capturePage still works.
+      offscreen: headless,
+      // A smoke check screenshots a window that may sit behind other apps; keep it painting.
+      ...(smoke ? { backgroundThrottling: false } : {}),
     },
   });
   win.once('ready-to-show', () => {
-    if (!win) return;
-    // A test build opens behind whatever you're working in rather than taking focus; the Dock or
-    // the tray brings it forward.
-    if (testBuild) win.showInactive();
+    if (!win || headless) return;
+    // A test build or a background run opens behind whatever you're working in rather than taking
+    // focus; the Dock or the tray brings it forward.
+    const behind = testBuild !== null || presence === 'background';
+    if (behind) win.showInactive();
     if (saved?.maximized) win.maximize();
-    if (!testBuild) win.show();
+    if (!behind) win.show();
     if (saved?.fullScreen) win.setFullScreen(true);
   });
   win.on('resize', saveWindowStateSoon);
@@ -443,13 +470,14 @@ function createWindow(): void {
   win.on('closed', () => {
     win = null;
   });
-  if (env['BIZZI_SMOKE_MS']) smokeTest(win, Number(env['BIZZI_SMOKE_MS']));
+  if (smoke) smokeTest(win, smoke);
   loadedConn = undefined;
-  void win.loadURL(uiEntryUrl(ui));
+  void win.loadURL(withRoute(uiEntryUrl(ui), smoke?.route ?? null));
 }
 
 function showWindow(): void {
-  if (!app.isReady()) return;
+  // Headless runs never come on screen, whatever asks (a second launch, a deep link, the Dock).
+  if (!app.isReady() || headless) return;
   if (!win) createWindow();
   else {
     if (win.isMinimized()) win.restore();
@@ -557,24 +585,71 @@ function originOf(url: string): string {
   }
 }
 
-/** Dev check (BIZZI_SMOKE_MS=n): log what the page sees, save a screenshot, then quit. */
-function smokeTest(w: BrowserWindow, delayMs: number): void {
-  w.webContents.on('console-message', (e) => log.log('info', 'renderer console', { level: e.level, message: e.message }));
-  w.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
-      try {
-        const seen: unknown = await w.webContents.executeJavaScript(
-          `JSON.stringify({ url: location.href, bizzi: window.bizzi && { ...window.bizzi, connection: window.bizzi.connection && { url: window.bizzi.connection.url, token: window.bizzi.connection.token ? '<redacted>' : '' } }, keys: window.bizzi ? Object.keys(window.bizzi) : null, hasRequire: typeof require !== 'undefined', hasProcess: typeof process !== 'undefined', text: document.body.innerText.slice(0, 400) })`,
-        );
-        log.log('info', 'smoke: page state', { seen: JSON.parse(String(seen)) });
-        const png = await w.webContents.capturePage();
-        const { writeFile } = await import('node:fs/promises');
-        await writeFile(join(dataDir, 'smoke.png'), png.toPNG());
-        log.log('info', 'smoke: screenshot saved', { file: join(dataDir, 'smoke.png') });
-      } catch (err) {
-        log.log('error', 'smoke: failed', { error: String(err) });
-      }
-      app.quit();
-    }, delayMs);
+/**
+ * Smoke check (BIZZI_SMOKE_MS=n, presence.ts): once the page has settled n ms after its last load
+ * (it reloads when the core connects), run the BIZZI_SMOKE_EVAL check, save smoke.png and
+ * smoke.json, then quit, with exit code 1 when the check failed.
+ */
+function smokeTest(w: BrowserWindow, o: SmokeOptions): void {
+  const consoleErrors: string[] = [];
+  w.webContents.on('console-message', (e) => {
+    log.log('info', 'renderer console', { level: e.level, message: e.message });
+    if (e.level === 'error' && consoleErrors.length < 50) consoleErrors.push(e.message);
   });
+  const outDir = o.outDir ?? dataDir;
+  let timer: NodeJS.Timeout | null = null;
+  w.webContents.on('did-finish-load', () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void run(), o.delayMs);
+  });
+  const run = async (): Promise<void> => {
+    let page: unknown = null;
+    let check: CheckResult | null = null;
+    let screenshot = false;
+    try {
+      mkdirSync(outDir, { recursive: true });
+      const seen: unknown = await w.webContents.executeJavaScript(
+          `JSON.stringify({ url: location.href, bizzi: window.bizzi && { ...window.bizzi, connection: window.bizzi.connection && { url: window.bizzi.connection.url, token: window.bizzi.connection.token ? '<redacted>' : '' } }, keys: window.bizzi ? Object.keys(window.bizzi) : null, hasRequire: typeof require !== 'undefined', hasProcess: typeof process !== 'undefined', text: document.body.innerText.slice(0, 2000) })`,
+      );
+      page = JSON.parse(String(seen));
+      log.log('info', 'smoke: page state', { seen: page });
+      if (o.check) {
+        try {
+          const out: unknown = await w.webContents.executeJavaScript(`(async () => JSON.stringify((await (${o.check})) ?? null))()`);
+          check = { value: JSON.parse(String(out)) };
+        } catch (err) {
+          check = { error: String(err) };
+        }
+        log.log('info', 'smoke: check', { check });
+      }
+      const png = await w.webContents.capturePage();
+      if (!png.isEmpty()) {
+        writeFileSync(join(outDir, 'smoke.png'), png.toPNG());
+        screenshot = true;
+        log.log('info', 'smoke: screenshot saved', { file: join(outDir, 'smoke.png') });
+      } else log.log('error', 'smoke: screenshot was empty');
+    } catch (err) {
+      log.log('error', 'smoke: failed', { error: String(err) });
+    }
+    const ok = smokePassed({ screenshot, check });
+    const status = manager.status;
+    const report = {
+      ok,
+      presence,
+      route: o.route,
+      page,
+      check,
+      consoleErrors,
+      core: { state: status.state, lastError: status.lastError ?? null },
+      screenshot: screenshot ? join(outDir, 'smoke.png') : null,
+    };
+    try {
+      writeFileSync(join(outDir, 'smoke.json'), JSON.stringify(report, null, 2) + '\n');
+    } catch (err) {
+      log.log('error', 'smoke: could not write smoke.json', { error: String(err) });
+    }
+    log.log(ok ? 'info' : 'error', ok ? 'smoke: passed' : 'smoke: failed', { report: join(outDir, 'smoke.json') });
+    if (!ok) exitCode = 1;
+    app.quit();
+  };
 }
