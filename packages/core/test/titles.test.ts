@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import type { InputBlock } from '@bizzi/protocol';
 import { autoTitle, cleanSuggestedTitle, createNode, isPlaceholderTitle, type BizziNode } from '../src/index.ts';
+import { CONTINUE_AFTER_RESTART } from '../src/sessions.ts';
+import { isBizziNote, retitlePrompt } from '../src/titles.ts';
 import { FakeAdapter } from '../src/testing/index.ts';
 import { tempDir, waitFor } from './helpers.ts';
 
@@ -116,4 +118,85 @@ test('a failing title model keeps the title from the message', async (t) => {
   await send('Speed up the test suite');
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(title(), 'Speed up the test suite');
+});
+
+test('bizzi’s own messages never title a session; the user’s next message does', async (t) => {
+  assert.ok(isBizziNote(CONTINUE_AFTER_RESTART));
+  assert.ok(!isBizziNote('fix the [bizzi] tag parser'));
+  const { title, send } = await setup(t);
+  // As older nodes sent it: a plain turn, no `auto` mark.
+  await send(CONTINUE_AFTER_RESTART);
+  assert.equal(title(), undefined);
+  await send('Fix the flaky upload test');
+  assert.equal(title(), 'Fix the flaky upload test');
+});
+
+test('after /clear the next message titles the session again, unless the user named it', async (t) => {
+  const { node, session, title, send, workspace } = await setup(t);
+  await send('Fix the flaky upload test');
+  await node.call('session.clear', { sessionId: session.id });
+  await waitFor(() => node.sessions.get(session.id).session.status === 'idle');
+  assert.equal(title(), 'Fix the flaky upload test', 'kept until the next message says what is next');
+  await send('Now add dark mode to the settings page');
+  assert.equal(title(), 'Now add dark mode to the settings page');
+  await send('and the sidebar too');
+  assert.equal(title(), 'Now add dark mode to the settings page');
+
+  const named = (await node.call('session.create', { workspaceId: workspace.id, agent: 'claude', title: 'Mine' })).session;
+  await waitFor(() => node.sessions.get(named.id).session.status === 'idle');
+  await node.call('session.send', { sessionId: named.id, input: text('hello') });
+  await waitFor(() => node.sessions.get(named.id).session.status === 'idle');
+  await node.call('session.set', { sessionId: named.id, title: 'Mine' });
+  await node.call('session.clear', { sessionId: named.id });
+  await waitFor(() => node.sessions.get(named.id).session.status === 'idle');
+  await node.call('session.send', { sessionId: named.id, input: text('something else entirely') });
+  await waitFor(() => node.sessions.get(named.id).session.status === 'idle');
+  assert.equal(node.sessions.get(named.id).session.title, 'Mine');
+});
+
+test('with a title model, an automatic title follows the conversation from the original request', async (t) => {
+  const asked: string[] = [];
+  const { node, session, title, send } = await setup(t, async (text) => {
+    asked.push(text);
+    return asked.length === 1 ? 'Flaky upload test' : 'Upload retries and backoff';
+  });
+  await send('the upload test is flaky, please look');
+  await waitFor(() => title() === 'Flaky upload test');
+  const before = node.sessions.get(session.id).session.updatedAt;
+  await send('ok, now add retries to the uploader');
+  await send('use exponential backoff');
+  assert.equal(asked.length, 1);
+  await send('and cap it at five attempts');
+  await waitFor(() => title() === 'Upload retries and backoff');
+  assert.equal(
+    asked[1],
+    retitlePrompt('the upload test is flaky, please look', ['ok, now add retries to the uploader', 'use exponential backoff', 'and cap it at five attempts']),
+  );
+  assert.match(asked[1]!, /^First message:\nthe upload test is flaky/);
+  assert.ok(node.sessions.get(session.id).session.updatedAt >= before);
+});
+
+test('at load, sessions named after bizzi’s restart message or never named take their first message', async (t) => {
+  const dir = tempDir();
+  t.after(dir.cleanup);
+  const open = (fake = new FakeAdapter()) => createNode({ dataDir: dir.path, adapters: [fake], version: '0.0.0-test', machineName: 'test-machine', interruptGraceMs: 200 });
+  const fake = new FakeAdapter();
+  const n1 = await open(fake);
+  const { workspace } = await n1.call('workspace.create', { path: dir.path + '/ws', create: true });
+  const { session } = await n1.call('session.create', { workspaceId: workspace.id, agent: 'claude' });
+  await waitFor(() => n1.sessions.get(session.id).session.status === 'idle');
+  await n1.call('session.send', { sessionId: session.id, input: text(CONTINUE_AFTER_RESTART) });
+  await waitFor(() => n1.sessions.get(session.id).session.status === 'idle');
+  await n1.call('session.send', { sessionId: session.id, input: text('Speed up the test suite') });
+  await waitFor(() => n1.sessions.get(session.id).session.status === 'idle');
+  // As an older node left it: titled from bizzi's message.
+  fake.sessions[0]!.emitEvent({ type: 'session.info', data: { title: autoTitle(text(CONTINUE_AFTER_RESTART))! } });
+  await waitFor(() => n1.sessions.get(session.id).session.title?.startsWith('[bizzi]'));
+  const updatedAt = n1.sessions.get(session.id).session.updatedAt;
+  await n1.close();
+
+  const n2 = await open();
+  t.after(() => n2.close());
+  assert.equal(n2.sessions.get(session.id).session.title, 'Speed up the test suite');
+  assert.equal(n2.sessions.get(session.id).session.updatedAt, updatedAt, 'the repair keeps its place in lists');
 });

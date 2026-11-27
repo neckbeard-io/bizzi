@@ -28,6 +28,12 @@ export interface SessionState {
   titleByUser?: boolean;
   /** The title was made by bizzi from the first message (titles.ts), not given by the user or the agent. */
   titleAuto?: boolean;
+  /** The user's first message, clipped (titles.ts `INTENT_MAX`): what re-titling starts from. */
+  intent?: string;
+  /** The user's messages since the automatic title was made; re-titles at `RETITLE_AT`. */
+  userTurns?: number;
+  /** `/clear` started a fresh conversation: the next user message titles the session again. */
+  retitleNext?: boolean;
   /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
   queued?: boolean;
   /**

@@ -36,11 +36,23 @@ import {
 } from '@bizzi/protocol';
 import type { AdapterRegistry } from './agents.ts';
 import { addTurn, budgetReached, parseBudget, sumSpent, usd, zeroSpent, type Spent } from './budget.ts';
-import type { EventBus } from './bus.ts';
+import { REPLAY_PAGE, type EventBus } from './bus.ts';
 import { clampPermission } from './orchestration.ts';
 import { installKey, precheckProblem } from './restart.ts';
 import type { SessionState, Store } from './store.ts';
-import { autoTitle, cleanSuggestedTitle, isPlaceholderTitle, messageText, TITLE_PROMPT_MAX, type TitleSuggester } from './titles.ts';
+import {
+  autoTitle,
+  cleanSuggestedTitle,
+  INTENT_MAX,
+  isBizziNote,
+  isPlaceholderTitle,
+  messageText,
+  RECENT_KEPT,
+  RETITLE_AT,
+  retitlePrompt,
+  TITLE_PROMPT_MAX,
+  type TitleSuggester,
+} from './titles.ts';
 import type { Workspaces } from './workspaces.ts';
 
 export type PrepareStartResult = Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend' | 'launcher'>>;
@@ -207,6 +219,8 @@ type QuestionAsked = SessionEventMap['question.asked'];
 interface Runtime {
   info: SessionInfo;
   state: SessionState;
+  /** The user's latest messages (text), newest last, for re-titling (not persisted). */
+  recent?: string[];
   adapter?: AgentAdapter;
   handle?: AdapterSession;
   starting?: Promise<AdapterSession>;
@@ -303,6 +317,7 @@ export class Sessions {
     } finally {
       this.#loading = false;
     }
+    this.#repairTitles();
     // Child helpers of sessions that were closed (before a crash, say) stop too.
     for (const rt of [...this.#byId.values()]) if (rt.info.status === 'ended') this.#cascade(rt.info.id);
   }
@@ -835,7 +850,7 @@ export class Sessions {
     } finally {
       rt.reservedTurn = undefined;
     }
-    this.#append(rt, { type: 'turn.started', data: { turnId, input } });
+    this.#append(rt, { type: 'turn.started', data: auto ? { turnId, input, auto: true } : { turnId, input } });
     try {
       await handle.send(turnId, input);
     } catch (err) {
@@ -1867,7 +1882,8 @@ export class Sessions {
         rt.cancelled.clear();
         setStatus('running');
         changed = true;
-        if (!info.title && !rt.state.titleByUser) this.#autoTitle(rt, body.data.input);
+        // bizzi's own continue-after-restart isn't the user's request: it never titles the session.
+        if (!body.data.auto) this.#noteUserTurn(rt, body.data.input);
         break;
       case 'turn.completed':
         rt.state.currentTurnId = undefined;
@@ -1932,10 +1948,15 @@ export class Sessions {
           delete info.agentSessionRef;
           changed = true;
         }
-        // A fresh conversation: the old one's context occupancy no longer applies.
+        // A fresh conversation: the old one's context occupancy no longer applies, and the next
+        // message says what the session is about now, so it titles the session again.
         if (info.context !== undefined) {
           delete info.context;
           changed = true;
+        }
+        if (!rt.state.titleByUser && !rt.state.retitleNext) {
+          rt.state.retitleNext = true;
+          pendingChanged = true;
         }
         if (rt.state.forkOf || rt.state.nodeRestarted) {
           rt.state.forkOf = undefined;
@@ -2076,28 +2097,113 @@ export class Sessions {
   }
 
   /**
-   * Title an untitled session from its first message (titles.ts), then ask the title model, when there
-   * is one, for a better one. The model's answer is dropped if the user or the agent named the
-   * session meanwhile. The caller publishes the change.
+   * A message from the user (not bizzi's own): titles an untitled session (or one just cleared with
+   * `/clear`) from it, and otherwise counts toward re-titling an automatic title as the conversation
+   * drifts (titles.ts `RETITLE_AT`, title model only). The caller publishes the change.
    */
-  #autoTitle(rt: Runtime, input: InputBlock[]): void {
+  #noteUserTurn(rt: Runtime, input: InputBlock[]): void {
+    const text = messageText(input);
+    // Older nodes sent the continue-after-restart message without `auto`.
+    if (isBizziNote(text) || rt.state.titleByUser) return;
+    rt.recent = [...(rt.recent ?? []), text].filter(Boolean).slice(-RECENT_KEPT);
+    if (!rt.info.title || rt.state.retitleNext) {
+      if (!autoTitle(input)) return;
+      rt.state.retitleNext = undefined;
+      rt.state.intent = text.slice(0, INTENT_MAX) || undefined;
+      rt.state.userTurns = 0;
+      rt.recent = [];
+      this.#autoTitle(rt, input);
+      return;
+    }
+    if (!rt.state.titleAuto) return;
+    rt.state.userTurns = (rt.state.userTurns ?? 0) + 1;
+    if (RETITLE_AT.includes(rt.state.userTurns)) this.#retitle(rt);
+  }
+
+  /**
+   * Title a session from a message (titles.ts), then ask the title model, when there is one, for a
+   * better one. The model's answer is dropped if the user or the agent named the session meanwhile.
+   * `quiet`: publish the model's answer without bumping `updatedAt` (titles repaired at load). The
+   * caller publishes the first change.
+   */
+  #autoTitle(rt: Runtime, input: InputBlock[], opts: { quiet?: boolean } = {}): void {
     const title = autoTitle(input);
     if (!title) return;
     rt.info.title = title;
     rt.state.titleAuto = true;
-    const suggest = this.#d.suggestTitle;
     const text = messageText(input).slice(0, TITLE_PROMPT_MAX);
-    if (!suggest || !text) return;
-    suggest(text).then(
+    if (text) this.#suggest(rt, text, title, opts.quiet ?? false);
+  }
+
+  /** Re-title an automatic title from the original request and the latest messages (title model only). */
+  #retitle(rt: Runtime): void {
+    const title = rt.info.title;
+    if (!this.#d.suggestTitle || !title) return;
+    const intent = rt.state.intent ?? messageText(this.#firstUserInput(rt) ?? []);
+    if (!intent || !rt.recent?.length) return;
+    this.#suggest(rt, retitlePrompt(intent, rt.recent), title, true);
+  }
+
+  #suggest(rt: Runtime, prompt: string, title: string, quiet: boolean): void {
+    const suggest = this.#d.suggestTitle;
+    if (!suggest) return;
+    suggest(prompt).then(
       (raw) => {
         const better = raw === undefined ? undefined : cleanSuggestedTitle(raw);
         if (!better || rt.deleted || this.#closed || !this.#d.store.isOpen) return;
         if (!rt.state.titleAuto || rt.state.titleByUser || rt.info.title !== title || better === title) return;
         rt.info.title = better;
-        this.#changed(rt, new Date().toISOString());
+        if (quiet) this.#publish(rt);
+        else this.#changed(rt, new Date().toISOString());
       },
       (err: unknown) => this.#log.log('debug', 'title suggestion failed', { sessionId: rt.info.id, err }),
     );
+  }
+
+  /** The user's first message in the session's history (bizzi's own messages skipped), if any. */
+  #firstUserInput(rt: Runtime): InputBlock[] | undefined {
+    const ch = sessionChannel(rt.info.id);
+    let since = 0;
+    // Bounded: the first message is near the start; a session without one in 5000 events has none worth it.
+    for (let page = 0; page < 10; page++) {
+      const evs = this.#d.bus.replay(ch, since, REPLAY_PAGE);
+      for (const ev of evs) {
+        if (ev.type === 'turn.started' && !ev.data.auto && !isBizziNote(messageText(ev.data.input)) && autoTitle(ev.data.input)) return ev.data.input;
+      }
+      if (evs.length < REPLAY_PAGE) return undefined;
+      since = evs[evs.length - 1]!.seq;
+    }
+    return undefined;
+  }
+
+  /**
+   * At load: sessions titled from bizzi's own continue-after-restart message (before bizzi marked it),
+   * and sessions never titled, take their title from the user's first message in their history.
+   * Publishes without bumping `updatedAt`, so lists keep their order.
+   */
+  #repairTitles(): void {
+    for (const rt of this.#byId.values()) {
+      if (rt.state.titleByUser || rt.info.lastSeq === 0) continue;
+      const bad = rt.info.title !== undefined && isBizziNote(rt.info.title);
+      if (rt.info.title !== undefined && !bad) continue;
+      const input = this.#firstUserInput(rt);
+      if (!input) {
+        if (!bad) continue;
+        delete rt.info.title;
+        rt.state.titleAuto = undefined;
+      } else {
+        rt.state.intent = messageText(input).slice(0, INTENT_MAX) || undefined;
+        this.#autoTitle(rt, input, { quiet: true });
+      }
+      this.#publish(rt);
+    }
+  }
+
+  /** Persist and broadcast the session's info without bumping `updatedAt` (not activity). */
+  #publish(rt: Runtime): void {
+    if (rt.deleted) return;
+    this.#persist(rt);
+    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
   }
 
   #setBilling(rt: Runtime, billing: BillingClass): void {
@@ -2155,6 +2261,9 @@ export class Sessions {
     if (rt.state.nodeRestarted) state.nodeRestarted = rt.state.nodeRestarted;
     if (rt.state.titleByUser) state.titleByUser = true;
     if (rt.state.titleAuto) state.titleAuto = true;
+    if (rt.state.intent) state.intent = rt.state.intent;
+    if (rt.state.userTurns) state.userTurns = rt.state.userTurns;
+    if (rt.state.retitleNext) state.retitleNext = true;
     if (rt.state.closed) state.closed = true;
     if (rt.state.startFresh) state.startFresh = true;
     if (rt.state.interruptedTurn) state.interruptedTurn = rt.state.interruptedTurn;

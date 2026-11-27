@@ -4,8 +4,9 @@ import { isMissing } from './adapters.ts';
 
 export const TITLE_SYSTEM_PROMPT = [
   'You name conversations between a developer and a coding agent.',
-  "Given the developer's first message, reply with a title for the conversation and nothing else:",
+  "Given the developer's first message (and sometimes their latest messages), reply with a title for the conversation and nothing else:",
   '3 to 7 words, sentence case, no quotes, no trailing punctuation. Name the task, not the request ("Fix login redirect loop", not "Help me fix...").',
+  'When latest messages are given, name what the conversation is about now; keep the first message’s task unless the work has clearly moved on.',
 ].join(' ');
 
 /** The part of @bizzi/adapter-api used here. */
