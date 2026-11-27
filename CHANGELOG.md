@@ -36,6 +36,8 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Fixed
 - bizzi no longer picks up an agent CLI that a project installs as a dev dependency (a `node_modules/.bin/codex`, for example) in place of the one you installed. Starting bizzi from an `npm` script used to trigger this, and it led to spurious "codex 0.167.0 → 0.172.0 installed" notices and needless session restarts. Switching to a different copy of an agent now says which binary it runs instead of calling it an upgrade.
+- Starting a helper when the helper limit is reached no longer leaves an empty worktree in the sidebar.
+- Long waits on a helper no longer fail after five minutes in Claude sessions; they return early and can be called again.
 - Finished install and update notices on a machine's agent cards (such as "codex 0.166.0 → 0.172.0 installed") no longer come back every time bizzi restarts or the window reloads. Once dismissed, they stay gone.
 - After an update or a restart that replaces the core, the desktop app reopens the page you were on and shows your sessions right away, instead of starting over on the machine page.
 - When Claude picks its work back up on its own after a background task finishes, the session shows as working and can be stopped, and the timeline marks it "continued on its own". Before, that work ran unseen, and a restart during it left its last command spinning forever.

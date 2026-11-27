@@ -10,7 +10,7 @@ import { AgentsServer } from './server.ts';
 import { MCP_SERVER_NAME, TOOLS_NOTE } from './tools.ts';
 
 export { AgentsServer, MCP_PATH } from './server.ts';
-export { MCP_SERVER_NAME, SERVER_INSTRUCTIONS, TOOLS_NOTE, createAgentsMcpServer } from './tools.ts';
+export { MCP_SERVER_NAME, PROGRESS_EVERY_MS, SERVER_INSTRUCTIONS, SILENT_WAIT_MAX_MS, TOOLS_NOTE, createAgentsMcpServer, type AgentsMcpOptions } from './tools.ts';
 
 export interface OrchestrationExtensionOptions {
   /** Loopback address for the MCP listener (default 127.0.0.1). */
