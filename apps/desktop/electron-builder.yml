@@ -5,6 +5,9 @@
 # runtime as extraResources, and the main process runs it as a separate process.
 appId: dev.bizzi.desktop
 productName: bizzi
+# Plain file names: the default uses the package name (@bizzi/desktop), and its slash breaks the
+# .deb output path. scripts/release/build-desktop.ts renames outputs for the release anyway.
+artifactName: bizzi-${version}-${arch}.${ext}
 copyright: bizzi contributors
 directories:
   output: release
@@ -21,8 +24,12 @@ extraMetadata:
 extraResources:
   - from: staging/ui
     to: ui
+  # electron-builder skips node_modules directories inside an extraResources tree, so the core's
+  # production dependencies are their own entry.
   - from: staging/core
     to: core
+  - from: staging/core/node_modules
+    to: core/node_modules
   - from: staging/node
     to: node
 protocols:
@@ -39,6 +46,9 @@ mac:
 
 linux:
   category: Development
+  # Defaults to the package name (@bizzi/desktop), which isn't a valid file name. The .deb
+  # installs /opt/bizzi/bizzi, which the updater recognizes (src/update/install.ts).
+  executableName: bizzi
   maintainer: bizzi contributors <noreply@bizzi.invalid>
   target:
     - target: AppImage

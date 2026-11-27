@@ -13,9 +13,10 @@
 // This is the single place to change that policy.
 
 import { execFile } from 'node:child_process';
-import { accessSync, constants } from 'node:fs';
+import { accessSync, constants, existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { delimiter, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 export const MIN_NODE_MAJOR = 26;
 
@@ -154,6 +155,15 @@ export function resolveCoreEntry(o: CoreEntryOptions): string {
   if (override) return override;
   if (o.isPackaged && o.resourcesPath) return join(o.resourcesPath, 'core', 'apps', 'cli', 'src', 'main.ts');
   return join(o.appDir, '..', 'cli', 'src', 'main.ts');
+}
+
+/**
+ * Node flags for the core. Packaged builds load apps/cli/src/workspaces-hook.ts first: the staged core
+ * has no node_modules/@bizzi links (scripts/stage.ts), and the hook resolves those imports instead.
+ */
+export function coreNodeArgs(entry: string, exists: (file: string) => boolean = existsSync): string[] {
+  const hook = join(dirname(entry), 'workspaces-hook.ts');
+  return exists(hook) && !exists(join(dirname(entry), '..', '..', '..', 'node_modules', '@bizzi')) ? ['--import', pathToFileURL(hook).href] : [];
 }
 
 /** The data dir shared with a launchd `bizzi serve` on the same laptop. */

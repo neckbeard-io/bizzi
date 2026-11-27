@@ -7,7 +7,7 @@ import { connect, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BizziError } from '@bizzi/protocol';
+import { BizziError, inheritedImportArgs } from '@bizzi/protocol';
 import type { ExitInfo, PtyBackend, PtySpawnOptions } from './backend.ts';
 import {
   SUPERVISOR_ID_RE,
@@ -93,7 +93,9 @@ export async function spawnSupervisor(opts: SpawnSupervisorOptions): Promise<str
 
   const env: Record<string, string | undefined> = { ...process.env };
   if (process.versions.electron) env.ELECTRON_RUN_AS_NODE = '1';
-  const child = spawn(opts.nodePath ?? process.execPath, [opts.script ?? SUPERVISOR_SCRIPT, specFile], {
+  // The parent's `--import` hook (packaged builds resolve @bizzi/* with it) goes along.
+  const args = [...inheritedImportArgs(process.execArgv), opts.script ?? SUPERVISOR_SCRIPT, specFile];
+  const child = spawn(opts.nodePath ?? process.execPath, args, {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     cwd: opts.runtimeDir,

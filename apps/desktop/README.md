@@ -58,7 +58,7 @@ default in that function.
 - CSP (header): `script-src 'self' 'wasm-unsafe-eval'`, `connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*`,
   `object-src 'none'`, and so on. In dev it also allows the Vite origin, its HMR websocket and
   inline scripts (React Refresh).
-- The preload exposes only `window.bizzi = { connection: { url, token }, platform, versions }`, read
+- The preload exposes only `window.bizzi = { connection: { url, token }, platform, versions, updates, … }`, read
   once from main with a sync IPC call that only answers the main window's UI origin.
 
 **Note for the core:** the renderer's origin is `app://bizzi`, or the Vite origin in dev. If the
@@ -107,18 +107,23 @@ npm run dev -w @bizzi/desktop
 # add BIZZI_SMOKE_MS=1500 to log what the page sees, save <data dir>/smoke.png and quit
 ```
 
-## Packaging plan (status)
+## Packaging and updates
 
-`scripts/stage.ts` fills `staging/`, which electron-builder copies to the app's resources (outside
-`app.asar`):
+`node ../../scripts/release/build-desktop.ts --version <v>` builds this platform's installers into the
+repo's `dist/`. It runs esbuild, then `scripts/stage.ts`, then electron-builder; on macOS it also signs
+ad hoc and creates the `.dmg` and `.zip`. `scripts/stage.ts` fills `staging/`, which electron-builder
+copies to the app's resources (outside `app.asar`):
 
-- `ui/`: `packages/ui/dist`, or a placeholder page. **Done.**
-- `core/`: root package files, `packages/*` (except `ui`) and `apps/cli` sources. **Done.**
-  `npm ci --omit=dev` under the target Node is behind `BIZZI_STAGE_INSTALL=1`. It works for the
-  host arch only and will need a pruned lockfile. **Stub.**
-- `node/`: a Node >= 26 runtime per target, copied from `BIZZI_STAGE_NODE_DIR`. The plan is to
-  download the nodejs.org tarball per platform/arch and check it against `SHASUMS256.txt`. Native
-  addons must be installed per arch, so mac arm64 and x64 need separate staging (per-arch CI
-  runners). **Stub.**
-- Signing and notarization (mac), including the bundled `node` binary: not yet (`identity: null`).
-- App icon: the bee (`build-resources/icon.{icns,ico,png}`). **Done.**
+- `ui/`: `packages/ui/dist`, or a placeholder page.
+- `core/`: root package files, `packages/*` (except `ui`), `apps/cli`, and production dependencies
+  installed for the host (`npm ci --omit=dev`). There are no `node_modules/@bizzi` links: packaged
+  cores start with `--import apps/cli/src/workspaces-hook.ts` (`coreNodeArgs` in `src/core/runtime.ts`).
+  The Claude Agent SDK's bundled `claude` binary is dropped unless `BIZZI_STAGE_CLAUDE_BINARY=1`.
+- `node/`: the official Node build of the version running the script, checked against
+  `SHASUMS256.txt` and cached in `.cache/node` (`BIZZI_STAGE_NODE_DIR` overrides it, and
+  `BIZZI_STAGE_NODE=0` skips it).
+
+The self-updater lives in `src/update/`: `controller.ts` (the state machine), `github.ts` (the feed and
+asset names), `download.ts` (with sha256 check) and `install.ts` (detection and per-platform installs).
+The renderer reaches it through `window.bizzi.updates`. Details and signing are in
+[docs/releasing.md](../../docs/releasing.md).

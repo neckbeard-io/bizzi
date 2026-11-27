@@ -1,9 +1,10 @@
 // Sandboxed preload: exposes exactly `window.bizzi = { connection, platform, versions, accentColor,
-// titleBar, setChrome }`, and applies menu navigation (a hash route) to the page's location.
+// titleBar, setChrome, updates }`, and applies menu navigation (a hash route) to the page's location.
 // Nothing else from Electron or Node reaches the page.
 
 import { contextBridge, ipcRenderer } from 'electron';
 import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
+import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, type UpdateAction, type UpdateState } from '../shared/update.ts';
 
 const boot = (ipcRenderer.sendSync(IPC_BOOTSTRAP) as Bootstrap | null) ?? { connection: null, appVersion: '0.0.0' };
 
@@ -15,6 +16,16 @@ contextBridge.exposeInMainWorld('bizzi', {
   // Only the color fields go over IPC; main validates them again.
   setChrome: (c: { background?: unknown; card?: unknown; sidebar?: unknown; foreground?: unknown; dark?: unknown }) =>
     ipcRenderer.send(IPC_CHROME, { background: c?.background, card: c?.card, sidebar: c?.sidebar, foreground: c?.foreground, dark: c?.dark }),
+  // Self-updater (src/update/): main validates every action and returns the new state.
+  updates: {
+    get: (): Promise<UpdateState | null> => ipcRenderer.invoke(IPC_UPDATE_ACTION, 'get'),
+    act: (a: UpdateAction): Promise<UpdateState | null> => ipcRenderer.invoke(IPC_UPDATE_ACTION, a),
+    subscribe: (cb: (s: UpdateState) => void): (() => void) => {
+      const listener = (_e: unknown, s: UpdateState) => cb(s);
+      ipcRenderer.on(IPC_UPDATE_STATE, listener);
+      return () => ipcRenderer.removeListener(IPC_UPDATE_STATE, listener);
+    },
+  },
   versions: {
     app: boot.appVersion,
     electron: process.versions['electron'],

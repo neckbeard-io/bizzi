@@ -5,6 +5,8 @@
   "private": true,
   "description": "bizzi desktop app: Electron shell that attaches to or supervises the bizzi core",
   "author": "bizzi",
+  "homepage": "https://github.com/neckbeard-io/bizzi",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "out/main.cjs",
   "exports": {

@@ -53,7 +53,9 @@ npm run dev:ui        # the UI alone, with a mock server
 ```
 
 [CONTRIBUTING.md](CONTRIBUTING.md) covers the workflow, and [AGENTS.md](AGENTS.md) the layout and
-conventions. The design is in [docs/](docs/): start with [docs/spec.md](docs/spec.md).
+conventions. The design is in [docs/](docs/): start with [docs/spec.md](docs/spec.md). Releases are
+described in [docs/releasing.md](docs/releasing.md), and what changed in each one in
+[CHANGELOG.md](CHANGELOG.md).
 
 ## License
 

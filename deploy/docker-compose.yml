@@ -8,7 +8,7 @@ name: bizzi
 
 services:
   hub:
-    image: bizzi/hub:${BIZZI_TAG:-latest}
+    image: ${BIZZI_HUB_IMAGE:-bizzi/hub}:${BIZZI_TAG:-latest}
     build:
       context: ..
       dockerfile: deploy/Dockerfile.hub
@@ -33,7 +33,7 @@ services:
     # ports: ["7777:7777"]                  # only for a first try without a reverse proxy
 
   node:
-    image: bizzi/node:${BIZZI_TAG:-latest}  # or your own `FROM bizzi/node` + toolchains
+    image: ${BIZZI_NODE_IMAGE:-bizzi/node}:${BIZZI_TAG:-latest}  # or your own `FROM bizzi/node` + toolchains
     build:
       context: ..
       dockerfile: deploy/Dockerfile.node
