@@ -70,7 +70,7 @@ test('helpers: spawnedBy/scope/depth, sessions.list filter, child cascade on sto
   assert.equal(child.session.spawnedBy, parent.id);
   assert.equal(child.session.scope, 'child');
   assert.equal(child.session.depth, 1);
-  assert.equal(child.session.title, 'hello child');
+  assert.equal(child.session.title, 'child', 'titled from the gist of the prompt');
   assert.equal(detached.session.scope, 'detached');
   assert.equal(child.queued, false);
 

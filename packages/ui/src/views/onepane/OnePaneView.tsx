@@ -26,7 +26,6 @@ import {
   parseTokens,
   planRoute,
   routeReason,
-  titleFor,
   tokenAt,
 } from '../../lib/onePane.ts';
 import type { ActiveToken, Completion, RoutePlan } from '../../lib/onePane.ts';
@@ -205,7 +204,6 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
     if (draft.pending > 0) throw new Error('Wait for the images to finish reading.');
     const input = draft.build(sug.text);
     if (input.length === 0) throw new Error('Say what you want done, not only where.');
-    const prompt = draft.typed(sug.text) || (input.some((b) => b.type === 'image') ? 'Image' : '');
     if (store.getState().agents[t.machineId] === undefined) await store.loadAgents(t.machineId).catch(() => {});
     const m = machines.find((x) => x.id === t.machineId);
     const st = store.getState();
@@ -213,9 +211,8 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
       ? { agent: agentPick }
       : chooseAgent({ explicit: sug.agent, agents: st.agents[t.machineId], sessions: Object.values(st.sessions), workspaceId: t.workspaceId, machineName: m?.name ?? t.label });
     if ('error' in picked) throw new Error(picked.error);
-    const firstText = input.find((b) => b.type === 'text');
-    const title = titleFor(prompt || (firstText?.type === 'text' ? firstText.text : ''));
-    const created = await store.createSession({ workspaceId: t.workspaceId, agent: picked.agent, mode: 'structured', title });
+    // No title: the node names the session from this first message (and its title model, if any).
+    const created = await store.createSession({ workspaceId: t.workspaceId, agent: picked.agent, mode: 'structured' });
     await store.send(created.id, input);
     const decision = decisionFor(typed, sug, t, picked.agent, created.id);
     // A server without route.record (older) still routes; the label is just not kept.

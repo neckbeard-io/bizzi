@@ -4,10 +4,9 @@
 // titles the agent reports (Codex thread names, OpenCode's generated titles) replace automatic ones,
 // except the agent's own placeholders. Messages bizzi sends itself (`[bizzi] …`) never title a session.
 
-import type { InputBlock } from '@bizzi/protocol';
+import { AUTO_TITLE_MAX, clipTitle, titleFromText, type InputBlock } from '@bizzi/protocol';
 
-/** Longest automatic title, in characters (a cut title ends with "…"). */
-export const AUTO_TITLE_MAX = 60;
+export { AUTO_TITLE_MAX };
 
 /** Most text of the first message handed to a title model. */
 export const TITLE_PROMPT_MAX = 4000;
@@ -54,21 +53,15 @@ export function messageText(input: readonly InputBlock[]): string {
 }
 
 /**
- * A title from a first message: its first line with words in it, without markdown markers, collapsed
- * and cut at a word boundary. Attachments alone give "Attached <name>"; images alone give nothing.
+ * A title from a first message: the gist of its first line with words in it (`titleFromText` in
+ * @bizzi/protocol: preambles like "I'd like" dropped, cut before asides, a few words at most).
+ * Attachments alone give "Attached <name>"; images alone give nothing.
  */
 export function autoTitle(input: readonly InputBlock[]): string | undefined {
-  const text = messageText(input);
-  for (const raw of text.split('\n')) {
-    const line = raw
-      .replace(/^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+|\d+[.)]\s+)+/, '')
-      .replace(/`{3,}.*$/, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (/[\p{L}\p{N}]/u.test(line)) return clip(line, AUTO_TITLE_MAX);
-  }
+  const title = titleFromText(messageText(input));
+  if (title) return title;
   const file = input.find((b): b is InputBlock & { type: 'file' } => b.type === 'file');
-  if (file) return clip(`Attached ${file.path.split(/[\\/]/).pop() || file.path}`, AUTO_TITLE_MAX);
+  if (file) return clipTitle(`Attached ${file.path.split(/[\\/]/).pop() || file.path}`, AUTO_TITLE_MAX);
   return undefined;
 }
 
@@ -87,7 +80,7 @@ export function cleanSuggestedTitle(raw: string): string | undefined {
     .replace(/\s+/g, ' ')
     .trim();
   if (!/[\p{L}\p{N}]/u.test(t)) return undefined;
-  return clip(t, 80);
+  return clipTitle(t, 80);
 }
 
 /**
@@ -96,11 +89,4 @@ export function cleanSuggestedTitle(raw: string): string | undefined {
  */
 export function isPlaceholderTitle(title: string): boolean {
   return /^(?:New|Child) session - \d{4}-\d{2}-\d{2}T/.test(title.trim());
-}
-
-function clip(s: string, max: number): string {
-  if (s.length <= max) return s;
-  const cut = s.slice(0, max - 1);
-  const space = cut.lastIndexOf(' ');
-  return (space >= max / 2 ? cut.slice(0, space) : cut).replace(/[\s,;:.\-–—]+$/, '') + '…';
 }

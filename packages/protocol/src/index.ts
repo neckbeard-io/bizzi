@@ -7,3 +7,4 @@ export * from './ids.ts';
 export * from './methods.ts';
 export * from './model.ts';
 export * from './node-args.ts';
+export * from './titles.ts';

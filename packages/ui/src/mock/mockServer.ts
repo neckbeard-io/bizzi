@@ -2,7 +2,7 @@
 // It speaks the real wire protocol through a WebSocket-like object, so the client code path is the same.
 // By default it plays a hub with two machines (this laptop online, server-a offline); `role: 'node'`
 // makes it a single node instead.
-import { BizziError, GLOBAL_CHANNEL, LABEL_COLORS, PROTOCOL_VERSION, isLabelColor, isLabelIcon, isMachineTag, normalizePairingCode, parseChannel, sessionChannel } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, LABEL_COLORS, PROTOCOL_VERSION, isLabelColor, isLabelIcon, isMachineTag, normalizePairingCode, parseChannel, sessionChannel, titleFromText } from '@bizzi/protocol';
 import type {
   AgentKind,
   ApprovalDecisionKind,
@@ -676,8 +676,8 @@ export class MockCore implements MockHost {
         if (s.mode === 'terminal') throw new BizziError('unsupported', 'terminal sessions take term.input');
         if (this.runs.has(s.id)) throw new BizziError('conflict', 'a turn is already running; steer or interrupt');
         if (!s.title) {
-          const first = (p.input as InputBlock[]).flatMap((b) => (b.type === 'text' ? b.text.split('\n') : [])).find((l) => /\w/.test(l));
-          if (first) s.title = first.replace(/^\s*(?:#+|>|[-*+])\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+          const title = titleFromText((p.input as InputBlock[]).flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n'));
+          if (title) s.title = title;
         }
         const turnId = this.startTurn(s.id, p.input as InputBlock[]);
         return { turnId };
