@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { approvalKind, toolKind, toolTitle } from '../src/index.ts';
-import { trimOutput } from '../src/mapping.ts';
+import { backgroundTasks, trimOutput } from '../src/mapping.ts';
 
 test('tool kinds', () => {
   const cases: [string, string][] = [
@@ -51,4 +51,26 @@ test('trimOutput keeps head and tail', () => {
   assert.ok(t.startsWith('aaa'));
   assert.ok(t.endsWith('END'));
   assert.match(t, /chars trimmed/);
+});
+
+test('background tasks: kinds mapped, ambient watchers left out, junk ignored', () => {
+  assert.deepEqual(
+    backgroundTasks([
+      { task_id: 'b1', task_type: 'local_bash', description: ' Wait for CI ' },
+      { task_id: 'a1', task_type: 'local_agent', description: 'Review the diff' },
+      { task_id: 'w1', task_type: 'local_workflow', description: '' },
+      { task_id: 'm1', task_type: 'monitor_mcp', description: 'Watch the log', ambient: true },
+      { task_id: 'x1', task_type: 'something_new', description: 'New thing' },
+      { task_type: 'local_bash', description: 'no id' },
+      null,
+    ]),
+    [
+      { id: 'b1', kind: 'shell', description: 'Wait for CI' },
+      { id: 'a1', kind: 'agent', description: 'Review the diff' },
+      { id: 'w1', kind: 'workflow', description: 'local_workflow' },
+      { id: 'x1', kind: 'other', description: 'New thing' },
+    ],
+  );
+  assert.deepEqual(backgroundTasks(undefined), []);
+  assert.equal(backgroundTasks([{ task_id: 'b', task_type: 'local_bash', description: 'x'.repeat(500) }])[0]!.description.length, 200);
 });

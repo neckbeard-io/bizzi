@@ -31,6 +31,7 @@ import type {
 import {
   addUsage,
   approvalKind,
+  backgroundTasks,
   askUserQuestionAnswers,
   askUserQuestionItems,
   elicitationForm,
@@ -119,6 +120,8 @@ export class ClaudeSession implements AdapterSession {
   readonly #input = new PushQueue<SDKUserMessage>();
   #q: ClaudeQuery | undefined;
   #ref: string | undefined;
+  /** The last `background.updated` sent, so an unchanged set (an ambient task coming or going) isn't resent. */
+  #backgroundKey = '';
   #state: 'running' | 'stopping' | 'stopped' | 'dead' = 'running';
   #active: ActiveTurn | null = null;
   #waiting: { turnId: string; msg: SDKUserMessage }[] = [];
@@ -631,6 +634,15 @@ export class ClaudeSession implements AdapterSession {
         this.#emit({ type: 'context.compacted', data });
         this.#ctxKey = undefined; // the bar now shows `after`: always send the refreshed figure
         void this.#refreshContext();
+        return;
+      }
+      case 'background_tasks_changed': {
+        // A level signal (the whole set each time); the core keeps it on the session for lists.
+        const tasks = backgroundTasks(m.tasks);
+        const key = tasks.map((t) => `${t.id}\u0000${t.description}`).join('\u0001');
+        if (key === this.#backgroundKey) return;
+        this.#backgroundKey = key;
+        this.#emit({ type: 'background.updated', data: { tasks } });
         return;
       }
       case 'permission_denied': {

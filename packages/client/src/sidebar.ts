@@ -6,13 +6,16 @@ import type { BizziState } from './store.ts';
 import { selectSessionPrompt, selectSessionStatus } from './store.ts';
 import type { SessionPrompt } from './timeline.ts';
 
-/** Sidebar state of one live session: ⚠ waiting · ✗ failed · ◐ working · ✓ done, not yet seen · ● idle. */
-export type MarkState = 'waiting' | 'failed' | 'working' | 'done' | 'idle';
+/**
+ * Sidebar state of one live session: ⚠ waiting · ✗ failed · ◐ working · ∿ background (between turns, with
+ * background work still running) · ✓ done, not yet seen · ● idle.
+ */
+export type MarkState = 'waiting' | 'failed' | 'working' | 'background' | 'done' | 'idle';
 
 /** Display order of marks and urgency (lower first). */
-export const MARK_ORDER: Readonly<Record<MarkState, number>> = { waiting: 0, failed: 1, working: 2, done: 3, idle: 4 };
+export const MARK_ORDER: Readonly<Record<MarkState, number>> = { waiting: 0, failed: 1, working: 2, background: 3, done: 4, idle: 5 };
 
-export const MARK_STATES: readonly MarkState[] = ['waiting', 'failed', 'working', 'done', 'idle'];
+export const MARK_STATES: readonly MarkState[] = ['waiting', 'failed', 'working', 'background', 'done', 'idle'];
 
 // ---------------------------------------------------------------- indexes (memoized per sessions identity)
 
@@ -98,6 +101,8 @@ export function sessionMarkState(s: BizziState, session: SessionInfo): MarkState
   if (tl && (tl.pendingApprovals.length > 0 || tl.pendingQuestions.length > 0 || (tl.prompt !== null && st !== 'idle'))) return 'waiting';
   if (st === 'failed') return 'failed';
   if (st === 'running' || st === 'starting') return 'working';
+  // The turn is over but the agent left work running (a shell command, a subagent): still active.
+  if (session.background?.length) return 'background';
   return isDoneUnseen(s, session) ? 'done' : 'idle';
 }
 
@@ -152,7 +157,7 @@ export interface WorkspaceRowModel {
 }
 
 function emptyCounts(): Record<MarkState, number> {
-  return { waiting: 0, failed: 0, working: 0, done: 0, idle: 0 };
+  return { waiting: 0, failed: 0, working: 0, background: 0, done: 0, idle: 0 };
 }
 
 /** Rows 1–2 of a workspace in the sidebar. */
@@ -202,6 +207,13 @@ function pickUrgent(s: BizziState, list: { session: SessionInfo; state: MarkStat
   const { session, state } = best;
   const text = state === 'waiting' ? waitingText(s, session.id) : state === 'failed' ? failedText(s, session) : doneText(s, session);
   return { sessionId: session.id, agent: session.agent, state, text };
+}
+
+/** "Wait for CI" · "Wait for CI · +2 more" for a session's background work. */
+export function backgroundText(session: SessionInfo): string {
+  const tasks = session.background ?? [];
+  const first = tasks[0]?.description ?? 'background work';
+  return tasks.length > 1 ? `${first} · +${tasks.length - 1} more` : first;
 }
 
 function firstLine(text: string): string {
@@ -283,7 +295,7 @@ export interface SessionBreakdownLine {
   mode: SessionMode;
   title: string;
   state: MarkState;
-  /** Waiting reason / failure, when there is one. */
+  /** Waiting reason / failure, or what runs in the background, when there is one. */
   reason?: string;
   updatedAt: string;
   /** Context occupancy 0..1 of `usable` (or `window`), when the session reported it. */
@@ -306,6 +318,7 @@ export function selectWorkspaceBreakdown(s: BizziState, workspaceId: string): Se
     const line: SessionBreakdownLine = { sessionId: session.id, agent: session.agent, mode: session.mode, title: session.title || 'Untitled session', state, updatedAt: session.updatedAt, depth };
     if (state === 'waiting') line.reason = waitingText(s, session.id);
     else if (state === 'failed') line.reason = failedText(s, session);
+    else if (state === 'background') line.reason = backgroundText(session);
     const usage = sessionContextUsage(s, session);
     if (usage) {
       line.context = contextFraction(usage);

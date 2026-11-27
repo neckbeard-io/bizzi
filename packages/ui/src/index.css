@@ -432,3 +432,25 @@
     left: 100%;
   }
 }
+
+/* ---------------------------------------------------------------- marks */
+
+/* "background" mark (spec §11.1): between turns with background work still running, the glyph bobs up and
+   down inside a still ring, so it reads as active but distinct from a working turn's spinning ring. */
+@keyframes mark-bob {
+  0%,
+  100% {
+    transform: translateY(-22%);
+  }
+  50% {
+    transform: translateY(22%);
+  }
+}
+.animate-mark-bob {
+  animation: mark-bob 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .animate-mark-bob {
+    animation: none;
+  }
+}

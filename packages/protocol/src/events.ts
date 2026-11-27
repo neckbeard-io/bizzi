@@ -10,6 +10,7 @@ import type {
   AccountUsage,
   PipelineInfo,
   ContextUsage,
+  BackgroundTask,
   SessionInfo,
   WidgetValue,
   SessionStatus,
@@ -124,6 +125,11 @@ export interface SessionEventMap {
   /** Current context-window occupancy (usage.md §1.2). Agents without data never emit it. */
   'context.updated': ContextUsage;
   'context.compacted': { before?: number; after?: number };
+  /**
+   * The full set of background work the agent is running now (REPLACE semantics; `[]` when none is left).
+   * Only real activity: watchers and other ambient tasks are left out. Agents without the notion never emit it.
+   */
+  'background.updated': { tasks: BackgroundTask[] };
   /** `session.clear` started a fresh conversation; `previousRef` is the agent session it left. */
   'context.cleared': { previousRef?: string };
   /** Per-login usage observed during this session (rate-limit events etc.); the core republishes it globally. */

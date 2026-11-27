@@ -627,6 +627,9 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
     case 'account.usage':
       // Per-login usage; the store keeps it globally (and the core republishes it on the global channel).
       return;
+    case 'background.updated':
+      // Lists read it from the session info (`SessionInfo.background`), which the core keeps current.
+      return;
     case 'session.restarting': {
       const item: RestartItem = { ...base(d, `restart:${ev.seq}`, ev), kind: 'restart', state: 'restarting' };
       if (ev.data.fromVersion !== undefined) item.fromVersion = ev.data.fromVersion;

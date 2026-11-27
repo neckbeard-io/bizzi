@@ -6,7 +6,8 @@ import { cx } from './ui.tsx';
 
 /**
  * One live session in the sidebar (spec §11.1): the agent-type glyph inside a ring in the state color.
- * Waiting pulses, working spins; helpers show as a small number in the corner.
+ * Waiting pulses, working spins, background work (between turns) bobs the glyph inside a still ring; helpers
+ * show as a small number in the corner.
  */
 export function AgentMark(props: { agent: AgentKind; state: MarkState; helpers?: number; size?: number; title?: string }): ReactNode {
   const size = props.size ?? 18;
@@ -27,7 +28,7 @@ export function AgentMark(props: { agent: AgentKind; state: MarkState; helpers?:
           state === 'idle' && 'border',
         )}
       />
-      <span className={cx('font-mono leading-none font-semibold', state === 'idle' ? 'text-muted' : 'text-fg')} style={{ fontSize: Math.round(size * 0.5) }}>
+      <span className={cx('font-mono leading-none font-semibold', state === 'idle' ? 'text-muted' : 'text-fg', state === 'background' && 'animate-mark-bob')} style={{ fontSize: Math.round(size * 0.5) }}>
         {AGENT_GLYPH[props.agent]}
       </span>
       {props.helpers ? (
@@ -40,7 +41,7 @@ export function AgentMark(props: { agent: AgentKind; state: MarkState; helpers?:
 /** The narrow-sidebar form of a mark: a plain dot in the state color (idle is hollow). */
 export function MarkDot(props: { state: MarkState; title?: string; size?: number }): ReactNode {
   const s = props.size ?? 8;
-  return <span className={cx('inline-block shrink-0 rounded-full', MARK_DOT[props.state], props.state === 'waiting' && 'animate-pulse')} style={{ width: s, height: s }} title={props.title ?? MARK_LABEL[props.state]} />;
+  return <span className={cx('inline-block shrink-0 rounded-full', MARK_DOT[props.state], props.state === 'waiting' && 'animate-pulse', props.state === 'background' && 'animate-mark-bob')} style={{ width: s, height: s }} title={props.title ?? MARK_LABEL[props.state]} />;
 }
 
 /** `⚠1` style count used when marks collapse on the phone. */

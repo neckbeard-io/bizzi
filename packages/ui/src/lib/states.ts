@@ -7,17 +7,41 @@ export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex:
 /** One-letter glyph inside a mark (agent-type icon). */
 export const AGENT_GLYPH: Record<AgentKind, string> = { claude: 'C', codex: 'X', opencode: 'O', agy: 'A', shell: '$', api: '@' };
 
-export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', failed: 'failed', working: 'working', done: 'done, not yet seen', idle: 'idle' };
+export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', failed: 'failed', working: 'working', background: 'running in the background', done: 'done, not yet seen', idle: 'idle' };
 
 /** Text glyphs for compact counts (`⚠1 ◐2 ●3`). */
-export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', done: '✓', idle: '●' };
+export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', background: '∿', done: '✓', idle: '●' };
 
-/** Text color per state; color carries state only (theme state tokens, which themes can't camouflage). */
-export const MARK_TEXT: Record<MarkState, string> = { waiting: 'text-state-waiting', failed: 'text-state-failed', working: 'text-state-working', done: 'text-state-done', idle: 'text-state-idle' };
+/**
+ * Text color per state; color carries state only (theme state tokens, which themes can't camouflage).
+ * Background work is still activity, so it shares the working color; its motion (a bob, not a spin) tells them apart.
+ */
+export const MARK_TEXT: Record<MarkState, string> = {
+  waiting: 'text-state-waiting',
+  failed: 'text-state-failed',
+  working: 'text-state-working',
+  background: 'text-state-working',
+  done: 'text-state-done',
+  idle: 'text-state-idle',
+};
 /** Ring/border color per state. */
-export const MARK_RING: Record<MarkState, string> = { waiting: 'border-state-waiting', failed: 'border-state-failed', working: 'border-state-working', done: 'border-state-done', idle: 'border-state-idle' };
+export const MARK_RING: Record<MarkState, string> = {
+  waiting: 'border-state-waiting',
+  failed: 'border-state-failed',
+  working: 'border-state-working',
+  background: 'border-state-working',
+  done: 'border-state-done',
+  idle: 'border-state-idle',
+};
 /** Filled dot per state (idle is hollow). */
-export const MARK_DOT: Record<MarkState, string> = { waiting: 'bg-state-waiting', failed: 'bg-state-failed', working: 'bg-state-working', done: 'bg-state-done', idle: 'border border-state-idle bg-transparent' };
+export const MARK_DOT: Record<MarkState, string> = {
+  waiting: 'bg-state-waiting',
+  failed: 'bg-state-failed',
+  working: 'bg-state-working',
+  background: 'bg-state-working',
+  done: 'bg-state-done',
+  idle: 'border border-state-idle bg-transparent',
+};
 
 export const TONE_TEXT: Record<MeterTone, string> = { neutral: 'text-fg', warn: 'text-warn', err: 'text-err' };
 export const TONE_FILL: Record<MeterTone, string> = { neutral: 'bg-muted/70', warn: 'bg-warn', err: 'bg-err' };

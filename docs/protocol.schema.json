@@ -994,6 +994,12 @@
           "$ref": "#/$defs/session:context.compacted"
         }
       },
+      "background.updated": {
+        "description": "The full set of background work the agent is running now (REPLACE semantics; `[]` when none is left). Only real activity: watchers and other ambient tasks are left out. Agents without the notion never emit it.",
+        "data": {
+          "$ref": "#/$defs/session:background.updated"
+        }
+      },
       "context.cleared": {
         "description": "`session.clear` started a fresh conversation; `previousRef` is the agent session it left.",
         "data": {
@@ -1370,6 +1376,10 @@
           "description": "The adapter emits `context.updated` (usage.md §1).",
           "type": "boolean"
         },
+        "backgroundTasks": {
+          "description": "The adapter emits `background.updated` (background work between turns).",
+          "type": "boolean"
+        },
         "accountUsage": {
           "description": "The adapter emits `account.usage` snapshots (usage.md §3).",
           "type": "boolean"
@@ -1675,6 +1685,34 @@
         {
           "const": "cancelled"
         }
+      ]
+    },
+    "BackgroundTask": {
+      "description": "What `SessionInfo.context` keeps of a `ContextUsage` (no breakdown). */ /** One piece of background work an agent is running (`background.updated`).",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "description": "What runs: a shell command, a subagent, a workflow, or something else the agent names.",
+          "type": "string",
+          "enum": [
+            "shell",
+            "agent",
+            "workflow",
+            "other"
+          ]
+        },
+        "description": {
+          "description": "The agent's one-line description (\"Wait for PR checks to finish\").",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "description"
       ]
     },
     "BillingClass": {
@@ -6509,7 +6547,6 @@
       }
     },
     "SessionContext": {
-      "description": "What `SessionInfo.context` keeps of a `ContextUsage` (no breakdown).",
       "type": "object",
       "properties": {
         "used": {
@@ -6865,6 +6902,21 @@
           ],
           "properties": {
             "type": {
+              "const": "background.updated"
+            },
+            "data": {
+              "$ref": "#/$defs/session:background.updated"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "data"
+          ],
+          "properties": {
+            "type": {
               "const": "context.cleared"
             },
             "data": {
@@ -7063,6 +7115,7 @@
         "usage.updated",
         "context.updated",
         "context.compacted",
+        "background.updated",
         "context.cleared",
         "account.usage",
         "session.restarting",
@@ -7164,6 +7217,13 @@
         "context": {
           "description": "Latest context-window occupancy the agent reported (`context.updated`), without the breakdown, so lists (the sidebar tree) can show it for sessions nobody has open. Absent until the agent reports one.",
           "$ref": "#/$defs/SessionContext"
+        },
+        "background": {
+          "description": "Work the agent left running in the background between turns (`background.updated`): shell commands, subagents, workflows. Absent when there is none. Cleared whenever the agent process goes away, since the tasks die with it. Lists show such a session as still active (spec §11.1 \"background\").",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackgroundTask"
+          }
         },
         "parentAnswersApprovals": {
           "description": "Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals.",
@@ -11085,6 +11145,20 @@
       "required": [
         "approvalId",
         "decision"
+      ]
+    },
+    "session:background.updated": {
+      "type": "object",
+      "properties": {
+        "tasks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/BackgroundTask"
+          }
+        }
+      },
+      "required": [
+        "tasks"
       ]
     },
     "session:context.cleared": {
