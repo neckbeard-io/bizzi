@@ -13,6 +13,7 @@ import { navigate, useAction, useIsWide } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { PageHeader } from '../../components/layout.tsx';
 import { Button, ErrorText, Input, Kbd, Modal, Spinner, cx } from '../../components/ui.tsx';
+import { useDraft } from '../../lib/drafts.ts';
 import { errorInfo, isBusy } from '../../lib/format.ts';
 import {
   ROUTABLE_AGENTS,
@@ -125,7 +126,8 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   const activeTurn = useBizzi((s) => (sessionId ? (s.timelines[sessionId]?.activeTurnId ?? null) : null));
 
   // `#/ask?text=…` prefills the composer (launchers, share targets); nothing is sent until you press Enter.
-  const [text, setText] = useState(() => prefillFromHash(window.location.hash));
+  // Unsent text is kept per session (or for a new ask) across reloads and app restarts.
+  const [text, setText] = useDraft(sessionId ?? 'ask', () => prefillFromHash(window.location.hash));
   const [caret, setCaret] = useState(() => text.length);
   const [menuIndex, setMenuIndex] = useState(0);
   const [menuClosed, setMenuClosed] = useState(false);
