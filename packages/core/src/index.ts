@@ -27,6 +27,7 @@ export {
 } from './sessions.ts';
 export { Restarts, installKey, precheckProblem, staleReason, type RestartsDeps } from './restart.ts';
 export { Workspaces, sanitizeBranch } from './workspaces.ts';
+export { AUTO_TITLE_MAX, autoTitle, cleanSuggestedTitle, isPlaceholderTitle, messageText, type TitleSuggester } from './titles.ts';
 export {
   DEFAULT_PERMISSION_MODE,
   DEFAULT_READ_TOKENS,

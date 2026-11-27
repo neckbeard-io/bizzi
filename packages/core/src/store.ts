@@ -26,6 +26,8 @@ export interface SessionState {
   budgetBlocked?: string;
   /** The user renamed the session (`session.set` title): agent-reported titles no longer replace it. */
   titleByUser?: boolean;
+  /** The title was made by bizzi from the first message (titles.ts), not given by the user or the agent. */
+  titleAuto?: boolean;
   /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
   queued?: boolean;
   /**

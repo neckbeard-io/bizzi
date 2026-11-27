@@ -38,6 +38,7 @@ import type { EventBus } from './bus.ts';
 import { clampPermission } from './orchestration.ts';
 import { installKey, precheckProblem } from './restart.ts';
 import type { SessionState, Store } from './store.ts';
+import { autoTitle, cleanSuggestedTitle, isPlaceholderTitle, messageText, TITLE_PROMPT_MAX, type TitleSuggester } from './titles.ts';
 import type { Workspaces } from './workspaces.ts';
 
 export type PrepareStartResult = Partial<Pick<StartSessionOptions, 'env' | 'mcpServers' | 'systemPromptAppend' | 'launcher'>>;
@@ -133,6 +134,8 @@ export interface SessionsDeps {
   probeBilling?: (agent: AgentKind) => Promise<BillingClass | undefined>;
   /** How long a send (or session.set) arriving during an agent restart waits for it (default 60 s). */
   restartWaitMs?: number;
+  /** Replaces the title taken from an untitled session's first message with a short summary (titles.ts). */
+  suggestTitle?: TitleSuggester;
 }
 
 /** What `restartAgent` did (updates.md §5). Failures are also recorded on the session channel. */
@@ -621,6 +624,7 @@ export class Sessions {
     if (rt.deleted) throw new BizziError('not_found', `session ${rt.info.id} not found`);
     const title = raw.trim();
     rt.state.titleByUser = true;
+    rt.state.titleAuto = undefined;
     if ((rt.info.title ?? '') === title) {
       this.#persist(rt);
       return;
@@ -1826,6 +1830,7 @@ export class Sessions {
         rt.cancelled.clear();
         setStatus('running');
         changed = true;
+        if (!info.title && !rt.state.titleByUser) this.#autoTitle(rt, body.data.input);
         break;
       case 'turn.completed':
         rt.state.currentTurnId = undefined;
@@ -1867,10 +1872,15 @@ export class Sessions {
         break;
       case 'session.info':
         for (const k of ['agentSessionRef', 'model', 'permissionMode', 'effort', 'title'] as const) {
-          if (k === 'title' && rt.state.titleByUser) continue;
+          if (k === 'title' && (rt.state.titleByUser || !body.data.title?.trim() || isPlaceholderTitle(body.data.title))) continue;
           const v = body.data[k];
           if (v !== undefined && info[k] !== v) {
             info[k] = v;
+            changed = true;
+          }
+          // The agent named the session: its title stays over a title model's late answer.
+          if (k === 'title' && v !== undefined && rt.state.titleAuto) {
+            rt.state.titleAuto = undefined;
             changed = true;
           }
         }
@@ -2008,6 +2018,31 @@ export class Sessions {
     );
   }
 
+  /**
+   * Title an untitled session from its first message (titles.ts), then ask the title model, when there
+   * is one, for a better one. The model's answer is dropped if the user or the agent named the
+   * session meanwhile. The caller publishes the change.
+   */
+  #autoTitle(rt: Runtime, input: InputBlock[]): void {
+    const title = autoTitle(input);
+    if (!title) return;
+    rt.info.title = title;
+    rt.state.titleAuto = true;
+    const suggest = this.#d.suggestTitle;
+    const text = messageText(input).slice(0, TITLE_PROMPT_MAX);
+    if (!suggest || !text) return;
+    suggest(text).then(
+      (raw) => {
+        const better = raw === undefined ? undefined : cleanSuggestedTitle(raw);
+        if (!better || rt.deleted || this.#closed || !this.#d.store.isOpen) return;
+        if (!rt.state.titleAuto || rt.state.titleByUser || rt.info.title !== title || better === title) return;
+        rt.info.title = better;
+        this.#changed(rt, new Date().toISOString());
+      },
+      (err: unknown) => this.#log.log('debug', 'title suggestion failed', { sessionId: rt.info.id, err }),
+    );
+  }
+
   #setBilling(rt: Runtime, billing: BillingClass): void {
     if (rt.deleted || rt.info.billing === billing || this.#closed || !this.#d.store.isOpen) return;
     rt.info.billing = billing;
@@ -2037,6 +2072,7 @@ export class Sessions {
     if (rt.state.agentPath) state.agentPath = rt.state.agentPath;
     if (rt.state.nodeRestarted) state.nodeRestarted = rt.state.nodeRestarted;
     if (rt.state.titleByUser) state.titleByUser = true;
+    if (rt.state.titleAuto) state.titleAuto = true;
     if (rt.state.closed) state.closed = true;
     if (rt.state.startFresh) state.startFresh = true;
     if (rt.state.interruptedTurn) state.interruptedTurn = rt.state.interruptedTurn;

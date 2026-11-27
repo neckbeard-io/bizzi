@@ -616,9 +616,11 @@ export class MockCore implements MockHost {
         if (mode === 'structured' && listing.support === 'unsupported') {
           throw new BizziError('agent_unavailable', `${listing.supportReason ?? `${agent} ${listing.version ?? ''} is not supported.`} Start it in terminal mode instead.`);
         }
-        const title = typeof p.title === 'string' && p.title ? p.title : mode === 'terminal' ? `${agent} terminal` : 'New session';
+        // Like the core: an untitled structured session takes its title from its first message.
+        const title = typeof p.title === 'string' && p.title ? p.title : mode === 'terminal' ? `${agent} terminal` : undefined;
         const now = new Date().toISOString();
-        const s: SessionInfo = { id: id('s'), machineId: ws.machineId, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', title, createdAt: now, updatedAt: now, lastSeq: 0, seenThrough: 0, depth: 0 };
+        const s: SessionInfo = { id: id('s'), machineId: ws.machineId, workspaceId: ws.id, agent, mode, status: mode === 'terminal' ? 'running' : 'idle', createdAt: now, updatedAt: now, lastSeq: 0, seenThrough: 0, depth: 0 };
+        if (title) s.title = title;
         if (listing.version) s.agentVersion = listing.version;
         if (listing.billing) s.billing = listing.billing;
         if (p.budget && typeof p.budget === 'object') s.budget = { ...(p.budget as SessionInfo['budget']) };
@@ -666,6 +668,10 @@ export class MockCore implements MockHost {
         const s = this.liveSession(p.sessionId);
         if (s.mode === 'terminal') throw new BizziError('unsupported', 'terminal sessions take term.input');
         if (this.runs.has(s.id)) throw new BizziError('conflict', 'a turn is already running; steer or interrupt');
+        if (!s.title) {
+          const first = (p.input as InputBlock[]).flatMap((b) => (b.type === 'text' ? b.text.split('\n') : [])).find((l) => /\w/.test(l));
+          if (first) s.title = first.replace(/^\s*(?:#+|>|[-*+])\s*/, '').replace(/\s+/g, ' ').trim().slice(0, 60);
+        }
         const turnId = this.startTurn(s.id, p.input as InputBlock[]);
         return { turnId };
       }
