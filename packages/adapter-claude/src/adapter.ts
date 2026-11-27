@@ -83,6 +83,7 @@ const STRUCTURED_CAPABILITIES: AgentCapabilities = {
   terminal: false,
   questions: true,
   context: true,
+  backgroundTasks: true,
   accountUsage: true,
 };
 

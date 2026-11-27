@@ -68,7 +68,7 @@ function tl(sessionId: string, bodies: SessionEventBody[]): Timeline {
   return reduceTimeline(emptyTimeline(sessionId), evs);
 }
 
-test('mark states: waiting > failed > working > done-unseen > idle; ended sessions have no mark', () => {
+test('mark states: waiting > failed > working > background > done-unseen > idle; ended sessions have no mark', () => {
   const s = state([
     sess('idle'),
     sess('done', { lastSeq: 9, seenThrough: 5 }),
@@ -77,6 +77,10 @@ test('mark states: waiting > failed > working > done-unseen > idle; ended sessio
     sess('wait', { status: 'waiting_approval' }),
     sess('gone', { status: 'ended' }),
     sess('legacy', { lastSeq: 9, seenThrough: undefined }),
+    // Between turns with a background command still running; also unseen output, which it outranks.
+    sess('bg', { lastSeq: 9, seenThrough: 5, background: [{ id: 't1', kind: 'shell', description: 'Wait for CI' }] }),
+    // A running turn stays "working" whatever runs in the background.
+    sess('runbg', { status: 'running', background: [{ id: 't2', kind: 'agent', description: 'Review' }] }),
   ]);
   const st = (id: string): ReturnType<typeof sessionMarkState> => sessionMarkState(s, s.sessions[id] as SessionInfo);
   assert.equal(st('idle'), 'idle');
@@ -87,13 +91,16 @@ test('mark states: waiting > failed > working > done-unseen > idle; ended sessio
   assert.equal(st('gone'), null);
   // No seenThrough from the server: never "done, not yet seen".
   assert.equal(st('legacy'), 'idle');
+  assert.equal(st('bg'), 'background');
+  assert.equal(st('runbg'), 'working');
 
   const row = selectWorkspaceRow(s, 'w1');
   assert.deepEqual(
     row.marks.map((m) => m.state),
-    ['waiting', 'failed', 'working', 'done', 'idle', 'idle'],
+    ['waiting', 'failed', 'working', 'working', 'background', 'done', 'idle', 'idle'],
   );
   assert.equal(row.counts.idle, 2);
+  assert.equal(row.counts.background, 1);
   assert.equal(row.urgent?.sessionId, 'wait');
   assert.equal(row.urgent?.state, 'waiting');
 });

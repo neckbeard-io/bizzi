@@ -7,6 +7,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 ## Unreleased
 
 ### Added
+- Sessions whose agent is waiting on work it left running in the background, such as a command it's watching or a subagent, now show as still active in the sidebar: the mark bobs up and down, and the row names what's running.
 - Choose the interface font and the code font (code blocks, diffs and terminals) in Settings › Appearance; the choice applies on every device. The code font is now JetBrains Mono by default, included with bizzi so it works everywhere without installing it.
 - Paste, drop or attach images in the message box; large images are scaled down before sending, and sent images show in the conversation.
 - Slash commands in the message box: type `/` for a list with the agent's own commands (Claude's `/compact`, `/review`, …) and bizzi's `/clear`.

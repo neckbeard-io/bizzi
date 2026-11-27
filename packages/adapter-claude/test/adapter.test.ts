@@ -515,6 +515,19 @@ test('init updates session.info only on change; status permission mode changes a
   await session.stop();
 });
 
+test('background_tasks_changed becomes background.updated: the whole set, ambient left out, repeats dropped', async () => {
+  const bg = (tasks: unknown[]) => ({ type: 'system', subtype: 'background_tasks_changed', tasks, uuid: 'x', session_id: 's' });
+  const ci = { task_id: 'b1', task_type: 'local_bash', description: 'Wait for CI' };
+  const watcher = { task_id: 'm1', task_type: 'monitor_mcp', description: 'Watch', ambient: true };
+  const { session, c } = await setup((fq, u) => {
+    fq.emit(bg([ci]), bg([ci, watcher]), result([u.uuid!], 0), bg([watcher]), bg([]));
+  });
+  await session.send('t', [{ type: 'text', text: 'x' }]);
+  await waitFor(() => c.of('background.updated').length === 2);
+  assert.deepEqual(c.of('background.updated'), [{ tasks: [{ id: 'b1', kind: 'shell', description: 'Wait for CI' }] }, { tasks: [] }]);
+  await session.stop();
+});
+
 test('image and file input become SDK content blocks', async () => {
   const { session, fq } = await setup(() => {});
   await session.send('t', [

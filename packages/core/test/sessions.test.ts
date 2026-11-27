@@ -409,6 +409,40 @@ test('session.clear is refused for terminal sessions and ended sessions', async 
   await assert.rejects(node.call('session.clear', { sessionId: s.id }), (e: unknown) => e instanceof BizziError);
 });
 
+test('session info keeps the agent background work; it is not activity and ends with the agent process', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const session = await idleSession(node, workspace.id);
+  const before = node.sessions.get(session.id).session.updatedAt;
+  const updates: SessionInfo[] = [];
+  const off = node.bus.on(GLOBAL_CHANNEL, (ev) => {
+    if (ev.type === 'session.updated' && ev.data.session.id === session.id) updates.push(ev.data.session);
+  });
+  t.after(off);
+  const handle = fake.sessions[0]!;
+  const ci = { id: 't1', kind: 'shell' as const, description: 'Wait for CI' };
+
+  handle.emitEvent({ type: 'background.updated', data: { tasks: [ci] } });
+  await waitFor(() => node.sessions.get(session.id).session.background !== undefined);
+  assert.deepEqual(node.sessions.get(session.id).session.background, [ci]);
+  assert.equal(updates.length, 1);
+  assert.equal(node.sessions.get(session.id).session.updatedAt, before);
+  assert.equal(node.sessions.get(session.id).session.status, 'idle');
+
+  // The same set again: nothing to broadcast. An empty set removes the field.
+  handle.emitEvent({ type: 'background.updated', data: { tasks: [ci] } });
+  handle.emitEvent({ type: 'background.updated', data: { tasks: [] } });
+  await waitFor(() => node.sessions.get(session.id).session.background === undefined);
+  assert.equal(updates.length, 2);
+
+  // The agent process dying takes its background work with it.
+  handle.emitEvent({ type: 'background.updated', data: { tasks: [ci] } });
+  await waitFor(() => node.sessions.get(session.id).session.background !== undefined);
+  handle.emitEvent({ type: 'session.status', data: { status: 'failed', reason: 'gone' } });
+  await waitFor(() => node.sessions.get(session.id).session.status === 'failed');
+  assert.equal(node.sessions.get(session.id).session.background, undefined);
+});
+
 test('session info keeps the latest context occupancy; session.updated only when the percentage moves', async (t) => {
   const fake = new FakeAdapter();
   const { node, workspace } = await setup(t, [fake]);

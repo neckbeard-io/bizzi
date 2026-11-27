@@ -1,6 +1,7 @@
 // Pure mapping helpers: Claude Code tool names / SDK payloads -> bizzi protocol values.
 
-import type { ApprovalKind, InputBlock, PlanItem, QuestionAnswers, QuestionItem, StopReason, ToolKind, Usage } from '@bizzi/protocol';
+import { MAX_BACKGROUND_DESCRIPTION, MAX_BACKGROUND_TASKS } from '@bizzi/protocol';
+import type { ApprovalKind, BackgroundTask, InputBlock, PlanItem, QuestionAnswers, QuestionItem, StopReason, ToolKind, Usage } from '@bizzi/protocol';
 import type { SDKResultMessage, SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 export type UserContent = SDKUserMessage['message']['content'];
@@ -438,4 +439,36 @@ export function serverToolResult(b: Record<string, unknown>): { status: 'ok' | '
     return { status: 'ok', text: JSON.stringify(r) };
   }
   return { status: 'ok', text: typeof c === 'string' ? c : '' };
+}
+
+/** One entry of the SDK's `background_tasks_changed` (only the fields bizzi reads). */
+export interface SdkBackgroundTask {
+  task_id?: unknown;
+  task_type?: unknown;
+  description?: unknown;
+  ambient?: unknown;
+}
+
+const BACKGROUND_KIND: Record<string, BackgroundTask['kind']> = {
+  local_bash: 'shell',
+  local_agent: 'agent',
+  remote_agent: 'agent',
+  local_workflow: 'workflow',
+};
+
+/**
+ * `background_tasks_changed` → `background.updated` tasks. Ambient tasks (watchers, transcript-less work)
+ * aren't activity, so they're left out. The SDK sends the whole set each time, so this is the whole set too.
+ */
+export function backgroundTasks(list: unknown): BackgroundTask[] {
+  if (!Array.isArray(list)) return [];
+  const out: BackgroundTask[] = [];
+  for (const t of list as SdkBackgroundTask[]) {
+    if (!t || typeof t !== 'object' || t.ambient === true || typeof t.task_id !== 'string') continue;
+    const type = typeof t.task_type === 'string' ? t.task_type : '';
+    const description = typeof t.description === 'string' && t.description.trim() ? t.description.trim() : type || 'background task';
+    out.push({ id: t.task_id, kind: BACKGROUND_KIND[type] ?? 'other', description: description.slice(0, MAX_BACKGROUND_DESCRIPTION) });
+    if (out.length >= MAX_BACKGROUND_TASKS) break;
+  }
+  return out;
 }

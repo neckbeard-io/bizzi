@@ -175,6 +175,12 @@ export interface SessionInfo {
    * (the sidebar tree) can show it for sessions nobody has open. Absent until the agent reports one.
    */
   context?: SessionContext;
+  /**
+   * Work the agent left running in the background between turns (`background.updated`): shell commands,
+   * subagents, workflows. Absent when there is none. Cleared whenever the agent process goes away, since the
+   * tasks die with it. Lists show such a session as still active (spec §11.1 "background").
+   */
+  background?: BackgroundTask[];
   // ---- parent answers approvals (spec §12.5)
   /** Helpers only: started while `parentAnswersApprovals` was on, so its parent may answer some of its approvals. */
   parentAnswersApprovals?: boolean;
@@ -266,6 +272,18 @@ export interface ContextUsage {
 }
 
 /** What `SessionInfo.context` keeps of a `ContextUsage` (no breakdown). */
+/** One piece of background work an agent is running (`background.updated`). */
+export interface BackgroundTask {
+  id: string;
+  /** What runs: a shell command, a subagent, a workflow, or something else the agent names. */
+  kind: 'shell' | 'agent' | 'workflow' | 'other';
+  /** The agent's one-line description ("Wait for PR checks to finish"). */
+  description: string;
+}
+
+export const MAX_BACKGROUND_TASKS = 50;
+export const MAX_BACKGROUND_DESCRIPTION = 200;
+
 export interface SessionContext {
   used: number;
   window: number;

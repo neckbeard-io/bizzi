@@ -31,6 +31,8 @@ export interface AgentCapabilities {
   questions?: boolean;
   /** The adapter emits `context.updated` (usage.md §1). */
   context?: boolean;
+  /** The adapter emits `background.updated` (background work between turns). */
+  backgroundTasks?: boolean;
   /** The adapter emits `account.usage` snapshots (usage.md §3). */
   accountUsage?: boolean;
 }

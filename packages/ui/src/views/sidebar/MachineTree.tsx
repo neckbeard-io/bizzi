@@ -397,12 +397,12 @@ function WorkspaceNode(props: {
   );
 }
 
-/** One live session: its state, name and context bar; why it waits or failed on a second line. */
+/** One live session: its state, name and context bar; why it waits or failed, or what runs in the background, on a second line. */
 function SessionLeaf(props: { line: SessionBreakdownLine; phone: boolean; online: boolean; active: boolean }): ReactNode {
   const { line: l, phone } = props;
   const store = useStore();
   const ctx = contextView(l.contextUsage);
-  const reason = l.reason && (l.state === 'waiting' || l.state === 'failed') ? l.reason : null;
+  const reason = l.reason && (l.state === 'waiting' || l.state === 'failed' || l.state === 'background') ? l.reason : null;
   const title = `${AGENT_LABEL[l.agent]} · ${l.title} · ${MARK_LABEL[l.state]}${ctx.known ? ` · context ${ctx.label}` : ''}${reason ? `\n${reason}` : ''}`;
   return (
     <a
@@ -425,7 +425,7 @@ function SessionLeaf(props: { line: SessionBreakdownLine; phone: boolean; online
         <span className="min-w-0 flex-1 truncate">{l.title}</span>
         {ctx.known ? <ContextBar view={ctx} /> : null}
       </span>
-      {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
+      {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
     </a>
   );
 }

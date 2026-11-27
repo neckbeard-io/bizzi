@@ -6,6 +6,8 @@ import {
   AGENT_KINDS,
   BizziError,
   GLOBAL_CHANNEL,
+  MAX_BACKGROUND_DESCRIPTION,
+  MAX_BACKGROUND_TASKS,
   NO_CAPABILITIES,
   contextFraction,
   newId,
@@ -18,6 +20,7 @@ import {
   type ApprovalDecision,
   type ApprovalDecisionKind,
   type ApprovalRequest,
+  type BackgroundTask,
   type BillingClass,
   type InputBlock,
   type Logger,
@@ -350,6 +353,11 @@ export class Sessions {
       if (ran) {
         delete rt.info.agentVersion;
         rt.state.agentPath = undefined;
+        this.#persist(rt);
+      }
+      // Background work never outlives its agent process.
+      if (rt.info.background) {
+        delete rt.info.background;
         this.#persist(rt);
       }
       if (TERMINAL_STATUSES.includes(rt.info.status) && !reopen) {
@@ -1968,6 +1976,16 @@ export class Sessions {
       case 'context.compacted':
         this.#noteContext(rt, body);
         break;
+      case 'background.updated':
+        this.#noteBackground(rt, body.data.tasks);
+        break;
+      case 'session.restarting':
+        // Background work dies with the agent process being replaced.
+        if (info.background) {
+          delete info.background;
+          changed = true;
+        }
+        break;
       case 'account.usage':
         // The login's billing class, as the agent reports it (spec §12.3).
         if (body.data.billing && info.billing !== body.data.billing) {
@@ -1975,6 +1993,11 @@ export class Sessions {
           changed = true;
         }
         break;
+    }
+    // A failed or closed session has no agent process left, so no background work either.
+    if (info.background && (info.status === 'failed' || info.status === 'ended')) {
+      delete info.background;
+      changed = true;
     }
     if (!terminal && TERMINAL_STATUSES.includes(info.status) && rt.state.queued) {
       rt.state.queued = undefined;
@@ -2233,6 +2256,20 @@ export class Sessions {
     const same = (a: SessionContext, b: SessionContext): boolean =>
       Math.round(contextFraction(a) * 100) === Math.round(contextFraction(b) * 100) && a.window === b.window && a.usable === b.usable && a.compactAt === b.compactAt;
     if (prev && same(prev, next)) return;
+    this.#persist(rt);
+    this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
+  }
+
+  /**
+   * Keep the agent's background work on the session info for lists (absent when none). Like context, it's
+   * broadcast without bumping `updatedAt`: a task starting or finishing isn't the session's activity.
+   */
+  #noteBackground(rt: Runtime, tasks: BackgroundTask[]): void {
+    const next = tasks.slice(0, MAX_BACKGROUND_TASKS).map((t) => ({ id: t.id, kind: t.kind, description: t.description.slice(0, MAX_BACKGROUND_DESCRIPTION) }));
+    const prev = rt.info.background ?? [];
+    if (JSON.stringify(prev) === JSON.stringify(next)) return;
+    if (next.length > 0) rt.info.background = next;
+    else delete rt.info.background;
     this.#persist(rt);
     this.#d.bus.append(GLOBAL_CHANNEL, { type: 'session.updated', data: { session: { ...rt.info } } });
   }
