@@ -6,6 +6,8 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ## Unreleased
 
+## v0.1.0 — 2026-11-26
+
 ### Added
 - Desktop builds for macOS (Apple Silicon and Intel), Linux (AppImage and .deb, x86_64 and arm64) and Windows (experimental), published on the releases page.
 - The desktop app updates itself: Settings › Updates picks the Stable or Dev channel, checks GitHub every few hours, and restarts into the new version.
