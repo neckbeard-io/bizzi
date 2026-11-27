@@ -96,12 +96,14 @@ test('helpers: spawnedBy/scope/depth, sessions.list filter, child cascade on sto
   await node.call('session.delete', { sessionId: p2.id });
   await waitFor(() => node.sessions.get(c2.session.id).session.status === 'ended', 5000, 'child of deleted parent ended');
 
-  // Parent that crashes: child stops too.
+  // Parent whose agent crashes: the parent resumes on its next message, so its child keeps going.
   const { session: p3 } = await node.call('session.create', { workspaceId: workspace.id, agent: 'claude' });
   await idle(node, p3.id);
-  const c3 = await orch.startHelper(p3.id, { agent: 'claude', prompt: '/slow 3000' });
+  const c3 = await orch.startHelper(p3.id, { agent: 'claude', prompt: '/slow 300' });
   await node.call('session.send', { sessionId: p3.id, input: [{ type: 'text', text: '/crash' }] });
-  await waitFor(() => node.sessions.get(c3.session.id).session.status === 'ended', 5000, 'child of crashed parent ended');
+  await waitFor(() => node.sessions.get(p3.id).session.status === 'failed', 5000, 'parent failed');
+  await idle(node, c3.session.id);
+  assert.equal(node.sessions.get(c3.session.id).session.status, 'idle');
 });
 
 test('helpers: only the parent may drive them; wait / read summary', async (t) => {

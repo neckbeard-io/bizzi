@@ -565,7 +565,9 @@ function applyEvent(d: Draft, ev: SessionEvent): void {
       return;
     }
     case 'term.output':
-      // Terminal bytes never enter the store (see TerminalStreams).
+      // Terminal bytes never enter the store (see TerminalStreams). Output after an exit means the
+      // process was started again.
+      if (tl.terminalExit) tl.terminalExit = null;
       return;
     case 'term.exited': {
       tl.terminalExit = ev.data.signal === undefined ? { exitCode: ev.data.exitCode } : { exitCode: ev.data.exitCode, signal: ev.data.signal };

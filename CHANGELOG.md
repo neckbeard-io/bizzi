@@ -12,8 +12,11 @@ Entries are added with the change, not reconstructed at release time; the rules 
 ### Changed
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
 - Quitting, updating or reinstalling the desktop app no longer stops running sessions: the core keeps running and the relaunched app reconnects to it. The core restarts only when an update actually changes it. To stop everything, use **Quit and Stop Sessions** in the menu bar.
+- Sessions only end when you close them. If an agent exits or crashes, the session stays open and your next message picks the conversation back up. A terminal session restarts its process when you press a key.
+- A helper keeps running when its parent's agent crashes; helpers stop only when their parent is closed.
 
 ### Fixed
+- Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
 - Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
 - Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
 

@@ -138,7 +138,7 @@ export function SessionView(props: { sessionId: string; tab: SessionTab }): Reac
     </Suspense>
   );
 
-  const ended = status === 'ended' || status === 'failed';
+  const ended = status === 'ended';
   return (
     <div className="flex h-full flex-col">
       <PageHeader

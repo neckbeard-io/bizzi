@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { rmSync } from 'node:fs';
 import { test } from 'node:test';
-import { BizziError, GLOBAL_CHANNEL, sessionChannel, type SessionInfo } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, sessionChannel, type ChannelEvent, type SessionInfo } from '@bizzi/protocol';
 import type { BizziNode } from '../src/index.ts';
 import { FakeAdapter } from '../src/testing/index.ts';
 import { makeNode, record, tempDir, waitFor } from './helpers.ts';
@@ -22,6 +22,10 @@ async function idleSession(node: BizziNode, workspaceId: string, extra: Partial<
   await waitFor(() => node.sessions.get(session.id).session.status === 'idle', 5000, 'idle');
   return session;
 }
+
+const text = (t: string) => [{ type: 'text' as const, text: t }];
+const turnCompletions = (events: ChannelEvent[], turnId: string) =>
+  events.filter((e) => e.type === 'turn.completed' && e.data.turnId === turnId);
 
 const rejectsWith = (code: string) => (err: unknown) => err instanceof BizziError && err.code === code;
 
@@ -315,4 +319,55 @@ test('unknown methods and channels', async (t) => {
   await assert.rejects(node.dispatch('session.get', 'bad'), rejectsWith('bad_request'));
   assert.throws(() => node.subscribe('bogus', 0, () => {}), rejectsWith('bad_request'));
   assert.throws(() => node.subscribe('session:s_missing', 0, () => {}), rejectsWith('not_found'));
+});
+
+// --- the agent process goes away on its own (spec §4.1) -----------------------------------------
+
+test('an agent that exits or crashes leaves the session open; the next message resumes it', async (t) => {
+  const fake = new FakeAdapter();
+  const { node, workspace } = await setup(t, [fake]);
+  const s = await idleSession(node, workspace.id);
+  const ch = record(node, sessionChannel(s.id));
+  await node.call('session.send', { sessionId: s.id, input: text('hello') });
+  await ch.waitFor('turn.completed');
+  const ref = node.sessions.get(s.id).session.agentSessionRef;
+  assert.ok(ref);
+
+  // A clean exit: idle, with a notice.
+  const exit = await node.call('session.send', { sessionId: s.id, input: text('/exit') });
+  await waitFor(() => turnCompletions(ch.events, exit.turnId).length === 1, 5000, 'exit turn closed');
+  assert.equal(node.sessions.get(s.id).session.status, 'idle');
+  assert.ok(ch.events.some((e) => e.type === 'error' && e.data.code === 'agent_exited' && !e.data.fatal));
+  await node.call('session.send', { sessionId: s.id, input: text('still there?') });
+  await waitFor(() => fake.starts.length === 2, 5000, 'second start');
+  assert.equal(fake.starts[1]?.resumeRef, ref);
+  await waitFor(() => node.sessions.get(s.id).session.status === 'idle', 5000, 'idle again');
+
+  // A crash: failed until the next message, which resumes the same conversation.
+  await node.call('session.send', { sessionId: s.id, input: text('/crash') });
+  await waitFor(() => node.sessions.get(s.id).session.status === 'failed', 5000, 'failed');
+  await node.call('session.send', { sessionId: s.id, input: text('and now?') });
+  await waitFor(() => fake.starts.length === 3, 5000, 'third start');
+  assert.equal(fake.starts[2]?.resumeRef, ref);
+  await waitFor(() => node.sessions.get(s.id).session.status === 'idle', 5000, 'idle after the crash');
+  assert.equal(ch.events.filter((e) => e.type === 'session.status' && e.data.status === 'ended').length, 0);
+});
+
+test('a terminal whose process exited starts again on the next keystroke', async (t) => {
+  const term = new FakeAdapter({ agent: 'shell', modes: ['terminal'] });
+  const { node, workspace } = await setup(t, [term]);
+  const s = await idleSession(node, workspace.id, { agent: 'shell' });
+  // The process exits on its own (the user typed `exit`).
+  node.sessions.emit(s.id, { type: 'term.exited', data: { exitCode: 0 } });
+  node.sessions.emit(s.id, { type: 'session.status', data: { status: 'ended', reason: 'exit code 0' } });
+  assert.equal(node.sessions.get(s.id).session.status, 'idle');
+  // Resizing with no process keeps the size for the next start.
+  node.sessions.termResize(s.id, 100, 30);
+  node.sessions.termInput(s.id, new TextEncoder().encode('x'));
+  await waitFor(() => term.starts.length === 2, 5000, 'terminal restarted');
+  assert.deepEqual([term.starts[1]?.cols, term.starts[1]?.rows], [100, 30]);
+  // The keystroke that restarted it isn't sent to the new process; later ones are.
+  await waitFor(() => term.sessions[1] && node.sessions.get(s.id).session.status !== 'starting', 5000, 'started');
+  node.sessions.termInput(s.id, new TextEncoder().encode('y'));
+  assert.deepEqual(term.sessions[1]?.terminalInput.map((d) => Buffer.from(d).toString()), ['y']);
 });

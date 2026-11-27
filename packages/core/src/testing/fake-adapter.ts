@@ -319,6 +319,8 @@ export class FakeSession implements AdapterSession {
       this.#complete(turn, 'interrupted');
     }
     if (this.opts.mode === 'terminal') this.#emit({ type: 'term.exited', data: { exitCode: 0 } });
+    // Like the real adapters (Claude, Codex, PTY): stopping reports the process as ended.
+    this.#emit({ type: 'session.status', data: { status: 'ended' } });
   }
 
   #complete(turn: { id: string; done: boolean }, stopReason: StopReason, error?: string): void {

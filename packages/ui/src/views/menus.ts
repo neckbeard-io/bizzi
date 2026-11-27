@@ -100,7 +100,7 @@ function resumeCommand(s: SessionInfo): string | null {
 export function sessionMenu(store: BizziStore, s: SessionInfo, online: boolean): MenuItem[] {
   const st = store.getState();
   const offline = online ? {} : { hint: OFFLINE };
-  const ended = s.status === 'ended' || s.status === 'failed';
+  const ended = s.status === 'ended';
   const canFork = (st.capabilities[s.id] ?? st.agents[s.machineId]?.find((a) => a.agent === s.agent)?.capabilities)?.fork ?? false;
   const unread = s.lastSeq > (s.seenThrough ?? 0);
   const label = s.title ? `"${s.title}"` : 'this session';

@@ -148,7 +148,7 @@ A session belongs to the node that started it, for its whole life.
 | Node loses the hub (network drop) | the session keeps running; events queue in the outbox and upload on reconnect. Remote clients see "machine offline, last seen 14:02" |
 | Laptop sleeps | agent processes freeze; the session shows "paused, laptop asleep". On wake they continue. If the agent's model stream broke during sleep, the adapter reports it and offers **retry turn** (most agents retry themselves) |
 | Node restarts / upgrades | structured sessions reattach via native resume (Claude `--resume`, Codex `thread/resume`, OpenCode session id). PTY sessions survive a desktop/launchd node restart under their detached supervisor, but not a Linux container restart (the node drains running turns first, §2.2) |
-| Machine dies | its sessions end; their timelines remain readable from the hub replica |
+| Machine dies | its sessions wait: their timelines stay readable from the hub replica, and they resume when the machine is back (spec §4.1) |
 
 Because a session never changes hands, each event log has exactly one writer: no leases, epochs or fencing.
 
