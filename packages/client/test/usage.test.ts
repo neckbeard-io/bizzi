@@ -94,15 +94,15 @@ test('meterStacks: short window over long, in report order per pool', () => {
     windows: [
       { id: 'gemini-weekly', label: 'Gemini · weekly', usedPercent: 17, windowMins: 10080, group: 'Gemini' },
       { id: 'gemini-5h', label: 'Gemini · 5h', usedPercent: 70, windowMins: 300, group: 'Gemini' },
-      { id: '3p-weekly', label: 'Claude and GPT · weekly', usedPercent: 50, windowMins: 10080, group: 'Claude and GPT' },
-      { id: '3p-5h', label: 'Claude and GPT · 5h', usedPercent: 100, windowMins: 300, group: 'Claude and GPT' },
+      { id: '3p-weekly', label: 'Claude/GPT · weekly', usedPercent: 50, windowMins: 10080, group: 'Claude/GPT' },
+      { id: '3p-5h', label: 'Claude/GPT · 5h', usedPercent: 100, windowMins: 300, group: 'Claude/GPT' },
     ],
   });
   assert.deepEqual(
     meterStacks(agy).map((s) => [s.group, s.rows.map((w) => w.id)]),
     [
       ['Gemini', ['gemini-5h', 'gemini-weekly']],
-      ['Claude and GPT', ['3p-5h', '3p-weekly']],
+      ['Claude/GPT', ['3p-5h', '3p-weekly']],
     ],
   );
   const one = account('codex', { windows: [{ id: 'primary', label: 'primary', usedPercent: 5, windowMins: 300 }] });

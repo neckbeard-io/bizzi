@@ -38,7 +38,7 @@ test('parseAgyUsage turns remaining fractions into grouped used-percent windows'
   const w = parseAgyUsage(OUTPUT);
   assert.deepEqual(w[0], { id: 'gemini-weekly', label: 'Gemini · weekly', usedPercent: 17.4, resetsAt: '2026-12-04T02:35:09Z', windowMins: 10080, group: 'Gemini' });
   assert.deepEqual(w[1], { id: 'gemini-5h', label: 'Gemini · 5h', usedPercent: 69.7, resetsAt: '2026-11-27T07:35:09Z', windowMins: 300, group: 'Gemini' });
-  assert.equal(w[3]!.group, 'Claude and GPT');
+  assert.equal(w[3]!.group, 'Claude/GPT');
   assert.equal(w[3]!.usedPercent, 100);
   assert.deepEqual(parseAgyUsage('not json'), []);
   assert.deepEqual(parseAgyUsage('{"command":{"name":"usage"}}'), []);
@@ -46,7 +46,7 @@ test('parseAgyUsage turns remaining fractions into grouped used-percent windows'
 
 test('agyGroupName drops the trailing "models"', () => {
   assert.equal(agyGroupName('Gemini Models'), 'Gemini');
-  assert.equal(agyGroupName('Claude and GPT models'), 'Claude and GPT');
+  assert.equal(agyGroupName('Claude and GPT models'), 'Claude/GPT');
   assert.equal(agyGroupName('Models'), 'Models');
 });
 

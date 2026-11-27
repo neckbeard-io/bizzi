@@ -49,9 +49,9 @@ interface Bucket {
   reset_time?: unknown;
 }
 
-/** "Gemini Models" → "Gemini", "Claude and GPT models" → "Claude and GPT". */
+/** "Gemini Models" → "Gemini", "Claude and GPT models" → "Claude/GPT". */
 export function agyGroupName(name: string): string {
-  return name.replace(/\s+models?$/i, '').trim() || name;
+  return name.replace(/\s+models?$/i, '').replace(/\s+and\s+/gi, '/').trim() || name;
 }
 
 /** The `/usage` print-mode JSON → usage windows (used = 1 − remaining). Unknown shapes give []. */

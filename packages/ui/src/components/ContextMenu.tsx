@@ -3,7 +3,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { closeDialog, closeMenu, dismissToast, showToast, useDialogRequest, useOpenMenu, useToast } from '../app/contextMenu.ts';
-import type { MenuItem } from '../app/contextMenu.ts';
+import type { MenuItem, Toast } from '../app/contextMenu.ts';
 import { useBizzi, useStore } from '../app/context.tsx';
 import { useAction } from '../app/hooks.ts';
 import { WorkspaceIdentityDialog, WorktreeDialog } from '../views/workspaces/WorkspaceDialogs.tsx';
@@ -159,46 +159,55 @@ function RenameSessionDialog(props: { sessionId: string }): ReactNode {
   );
 }
 
+/** Phone and narrow layouts: the toast floats above the bottom nav. */
 export function ToastHost(): ReactNode {
   const t = useToast();
   if (!t) return null;
   return (
     <div className="pointer-events-none fixed inset-x-0 bottom-16 z-50 flex justify-center px-4" role="status" aria-live="polite">
-      {t.action ? (
-        <div
-          className={cx(
-            'pointer-events-auto flex max-w-lg items-center gap-3 rounded-md border py-1 pr-1 pl-3 text-sm shadow-lg',
-            t.tone === 'err' ? 'border-err/40 bg-panel text-err' : 'border-border bg-panel text-fg',
-          )}
-        >
-          <span className="min-w-0 truncate">{t.message}</span>
-          <button
-            type="button"
-            className="shrink-0 rounded px-2 py-1 font-medium text-accent-text hover:bg-panel-2"
-            onClick={() => {
-              const run = t.action?.run;
-              dismissToast();
-              run?.();
-            }}
-          >
-            {t.action.label}
-          </button>
-          <button type="button" onClick={dismissToast} className="shrink-0 rounded p-1 text-muted hover:bg-panel-2 hover:text-fg" aria-label="Dismiss">
-            <Icon name="x" size={14} />
-          </button>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={dismissToast}
-          className={cx(
-            'pointer-events-auto max-w-lg rounded-md border px-3 py-2 text-sm shadow-lg',
-            t.tone === 'err' ? 'border-err/40 bg-panel text-err' : 'border-border bg-panel text-fg',
-          )}
-        >
-          {t.message}
-        </button>
-      )}
+      <ToastBody toast={t} />
+    </div>
+  );
+}
+
+/** Desktop: the toast sits at the right end of the bottom bar, clear of the composer, above any open dialog. */
+export function BarToast(): ReactNode {
+  const t = useToast();
+  if (!t) return null;
+  return (
+    <div className="relative z-[60] flex min-w-0 shrink items-center pr-2" role="status" aria-live="polite">
+      <ToastBody toast={t} />
+    </div>
+  );
+}
+
+function ToastBody(props: { toast: Toast }): ReactNode {
+  const t = props.toast;
+  const tone = t.tone === 'err' ? 'border-err/60 bg-panel text-err' : 'border-accent/60 bg-panel text-fg';
+  if (!t.action) {
+    return (
+      <button type="button" onClick={dismissToast} className={cx('pointer-events-auto max-w-lg truncate rounded-md border px-3 py-1.5 text-sm shadow-lg', tone)}>
+        {t.message}
+      </button>
+    );
+  }
+  return (
+    <div className={cx('pointer-events-auto flex max-w-lg min-w-0 items-center gap-3 rounded-md border py-1 pr-1 pl-3 text-sm shadow-lg', tone)}>
+      <span className="min-w-0 truncate">{t.message}</span>
+      <button
+        type="button"
+        className="shrink-0 rounded bg-accent px-2.5 py-1 font-semibold text-accent-fg hover:opacity-90"
+        onClick={() => {
+          const run = t.action?.run;
+          dismissToast();
+          run?.();
+        }}
+      >
+        {t.action.label}
+      </button>
+      <button type="button" onClick={dismissToast} className="shrink-0 rounded p-1 text-muted hover:bg-panel-2 hover:text-fg" aria-label="Dismiss">
+        <Icon name="x" size={14} />
+      </button>
     </div>
   );
 }

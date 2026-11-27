@@ -109,14 +109,14 @@ interface AccountUsage {
 
 ### 3.4 UI
 
-- **Desktop: bottom bar.** One compact meter per login, most constrained first. Each quota pool is a two-row stack, the shortest window on top and the longest below, always in that order (never "whichever is fuller"), so the rows don't swap as usage moves. A login with several pools (agy: Gemini, Claude and GPT) shows one named stack per pool:
+- **Desktop: bottom bar.** One compact meter per login, most constrained first. Each quota pool is a two-row stack, the shortest window on top and the longest below, always in that order (never "whichever is fuller"), so the rows don't swap as usage moves. A login with several pools (agy: Gemini, Claude/GPT) shows one named stack per pool:
 
   ```
-  [C] max  5h ▓▓▓▓▓░░░ 62% ↻1h20    [A] google  Gemini 5h ▓▓▓▓▓░ 70% ↻2h19   Claude and GPT 5h ▓▓▓▓▓▓ 100% ↻3h11    [L] billed $554 / $2,474 (22%)
+  [C] max  5h ▓▓▓▓▓░░░ 62% ↻1h20    [A] google  Gemini 5h ▓▓▓▓▓░ 70% ↻2h19   Claude/GPT 5h ▓▓▓▓▓▓ 100% ↻3h11    [L] billed $554 / $2,474 (22%)
            7d ▓▓░░░░░░ 31% ↻3d3h                       7d ▓░░░░░ 17% ↻6d21h                  7d ▓▓▓░░░  50% ↻6d21h
   ```
 
-  Color carries state only (neutral, amber from 80%, red when limited). Click opens the usage panel: every window with reset time, which sessions consumed it, a 7-day sparkline, machines using the login. When the bar is narrow it shows the most constrained login plus `+n`.
+  Logins are split by a divider. Color carries state (green, amber with ⚠ from 80%, red with ✕ when limited), always with a symbol too so it never rests on hue alone. Toasts (Undo after ⌘W, errors) show at the right end of the bar, clear of the composer. Click opens the usage panel: every window with reset time, which sessions consumed it, a 7-day sparkline, machines using the login. When the bar is narrow it shows the most constrained login plus `+n`.
 - **Phone:** no persistent bottom bar (the tab bar is there). A usage chip in the Machines and Inbox headers shows the most constrained login; tapping it opens the same panel as a sheet. Push notifications at 80% and 95% of a plan window and when a login is limited, so you can switch before a helper tree stalls.
 - **Where they also appear:** the fan-out preflight (§2) and the session header's model picker ("Opus · plan 5h 62%").
 

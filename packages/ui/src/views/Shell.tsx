@@ -115,7 +115,6 @@ export function Shell(props: { onFatal: (message: string) => void }): ReactNode 
         <AddWorkspaceDialog />
         <ContextMenuHost />
         <GlobalDialogs />
-        <ToastHost />
       </div>
     );
   }
