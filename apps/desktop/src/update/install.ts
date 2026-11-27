@@ -1,6 +1,7 @@
 // How this copy of bizzi replaces itself, per install method. Detection is pure (inputs injected);
 // the installers spawn a detached helper that outlives the app, because a running app can't swap its
-// own files on macOS or Windows. Quitting first lets the core drain (main's before-quit stops it).
+// own files on macOS or Windows. The core runs from its own copy (core/copy.ts) and keeps running
+// through the swap; the relaunched app restarts it only if the update changed the core.
 //
 //   mac-app   unzip the new .app, then after exit: move the old bundle aside, move the new one in
 //             (restoring the old on failure), relaunch

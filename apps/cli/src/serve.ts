@@ -151,6 +151,9 @@ export async function serve(argv: string[], version: string): Promise<void> {
   writeFileSync(serveJson, JSON.stringify(ready) + '\n', { mode: 0o600 });
   process.on('exit', removeServeJson);
   process.stdout.write(JSON.stringify(ready) + '\n');
+  // The desktop app reads the ready line and may then quit, leaving this core running: its end of
+  // the pipe closes, and a later stdout write must not take the node down with EPIPE.
+  process.stdout.on('error', () => {});
   logger.log('info', 'node ready', { url: server.url, machineId: node.machine.id, dataDir, adapters: adapters.length });
   const hubUrl = values.connect || process.env.BIZZI_HUB_URL || undefined;
   const hubLink = startHubLink(node, { dataDir, url: hubUrl, pairCode: process.env.BIZZI_PAIR_CODE || undefined, logger });

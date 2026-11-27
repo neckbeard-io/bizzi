@@ -7,7 +7,11 @@
 //   crash, read the ready line from stdout, and restart it with backoff if it dies.
 // - stop: only a core this app spawned is stopped (SIGTERM, which drains), never an attached one.
 //   Ownership is recorded in `<dataDir>/desktop-core.json` so a relaunched app re-adopts a core
-//   that a crashed instance had spawned.
+//   that an earlier instance had spawned.
+// - detach: what quitting does when the core runs from its own copy (copy.ts): the core and its
+//   sessions keep running, and the next launch re-adopts it. The owner file records the core's id;
+//   a relaunched app whose bundle carries a different id restarts that core (the core changed), and
+//   one with the same id just attaches (only the UI or the version changed).
 //
 // Electron-free, so it is testable under plain Node.
 
@@ -53,6 +57,16 @@ export interface CoreManagerOptions {
   backoff?: BackoffOptions;
   health?: HealthCheck;
   onStatus?: (status: CoreStatus) => void;
+  /**
+   * The id of the core this app would spawn (copy.ts). When set, an owned core with another id is
+   * restarted on attach. Null/undefined: never restart on attach (dev runs, older builds).
+   */
+  coreId?: string | null;
+}
+
+interface OwnerRecord {
+  pid: number;
+  coreId?: string;
 }
 
 const OWNER_FILE = 'desktop-core.json';
@@ -72,6 +86,7 @@ export class CoreManager {
   #healthTimer: NodeJS.Timeout | null = null;
   #healthFailures = 0;
   #ensuring: Promise<void> | null = null;
+  #runningCoreId: string | null = null;
 
   constructor(opts: CoreManagerOptions) {
     this.#o = opts;
@@ -87,6 +102,11 @@ export class CoreManager {
       lastError: this.#lastError,
       restarts: this.#restarts,
     };
+  }
+
+  /** The id of the core in use when this app owns it (from the owner file or this spawn). */
+  get runningCoreId(): string | null {
+    return this.#runningCoreId;
   }
 
   get logFile(): string {
@@ -117,6 +137,22 @@ export class CoreManager {
     }
     this.#conn = null;
     this.#owned = false;
+    this.#child = null;
+    this.#setState('stopped');
+  }
+
+  /** Lets go of the core without stopping it: it keeps serving, and the next launch re-adopts it. */
+  async detach(): Promise<void> {
+    if (this.#state === 'stopped') return;
+    this.#setState('stopping');
+    this.#clearTimers();
+    await this.#ensuring?.catch(() => {});
+    const conn = this.#conn;
+    if (conn) this.#log.log('info', 'leaving the core running', { pid: conn.pid, owned: this.#owned });
+    // Our end of its stdout pipe goes away with us; the core ignores EPIPE after its ready line.
+    this.#child?.stdout?.destroy();
+    this.#child?.unref();
+    this.#conn = null;
     this.#child = null;
     this.#setState('stopped');
   }
@@ -155,7 +191,19 @@ export class CoreManager {
 
   async #attach(ready: ServeReady): Promise<void> {
     const owner = await this.#readOwner();
-    this.#owned = owner === ready.pid;
+    const mine = owner && owner.pid === ready.pid ? owner : null;
+    const want = this.#o.coreId;
+    if (mine && want && mine.coreId !== want) {
+      // The bundle carries a different core than the one running: restart it on the new code.
+      this.#log.log('info', 'running core is out of date; restarting it', { pid: ready.pid, running: mine.coreId ?? null, bundled: want });
+      await this.#terminate(ready.pid, null);
+      await rm(join(this.#o.dataDir, OWNER_FILE), { force: true });
+      if (this.#isStopping()) return;
+      await this.#spawn();
+      return;
+    }
+    this.#owned = mine !== null;
+    this.#runningCoreId = mine?.coreId ?? null;
     this.#child = null;
     this.#conn = ready;
     this.#since = Date.now();
@@ -217,7 +265,10 @@ export class CoreManager {
     this.#owned = true;
     this.#since = Date.now();
     this.#lastError = undefined;
-    await writeFile(join(this.#o.dataDir, OWNER_FILE), JSON.stringify({ pid: ready.pid, startedAt: new Date().toISOString() }) + '\n');
+    this.#runningCoreId = this.#o.coreId ?? null;
+    const record: OwnerRecord & { startedAt: string } = { pid: ready.pid, startedAt: new Date().toISOString() };
+    if (this.#o.coreId) record.coreId = this.#o.coreId;
+    await writeFile(join(this.#o.dataDir, OWNER_FILE), JSON.stringify(record) + '\n');
     child.once('exit', (code, signal) => this.#onChildExit(child, code, signal));
     this.#log.log('info', 'core ready', { pid: ready.pid, url: ready.url, machineId: ready.machineId });
     this.#setState('running');
@@ -301,10 +352,11 @@ export class CoreManager {
     }
   }
 
-  async #readOwner(): Promise<number | null> {
+  async #readOwner(): Promise<OwnerRecord | null> {
     try {
-      const v = JSON.parse(await readFile(join(this.#o.dataDir, OWNER_FILE), 'utf8')) as { pid?: unknown };
-      return typeof v.pid === 'number' ? v.pid : null;
+      const v = JSON.parse(await readFile(join(this.#o.dataDir, OWNER_FILE), 'utf8')) as { pid?: unknown; coreId?: unknown };
+      if (typeof v.pid !== 'number') return null;
+      return typeof v.coreId === 'string' ? { pid: v.pid, coreId: v.coreId } : { pid: v.pid };
     } catch {
       return null;
     }

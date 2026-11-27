@@ -149,9 +149,15 @@ sidebar header:
 | .deb | running from `/opt/` | open the package in the system installer (needs root); nothing restarts |
 | unsupported | source checkout, App Translocation, read-only location | explains why; the release page link stays |
 
-Quitting stops the core this app spawned (it drains for up to 30 s), so the swap waits for that. A
-core started separately (launchd `bizzi serve`, Docker) keeps running its own version. The swap is
-logged to `~/.bizzi/logs/update.log`.
+The core keeps running through the swap: a packaged app runs it from its own copy,
+`~/.bizzi/core/<core id>/`, not from inside the bundle, and quitting leaves it running. The core id is
+a content hash of the core and its Node runtime, stamped at build time (`apps/desktop/scripts/stage.ts`)
+and ignoring the version number. When the relaunched app comes up, it compares ids. The same id (a UI-only change,
+or a release that only bumps the version) means it re-adopts the running core and no session notices.
+A different id means the core changed: it is stopped (draining for up to 30 s) and started again from
+a fresh copy, and old copies are removed. **Quit and Stop Sessions** in the tray menu stops the core
+too. A core started separately (launchd `bizzi serve`, Docker) keeps running its own version. The swap
+is logged to `~/.bizzi/logs/update.log`.
 
 ## Signing, and what installers have to do about it
 
