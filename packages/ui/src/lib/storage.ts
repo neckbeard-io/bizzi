@@ -48,3 +48,19 @@ export function remove(key: string): void {
     // ignore
   }
 }
+
+/** Every key in storage (empty when storage is unavailable). */
+export function keys(): string[] {
+  try {
+    const s = ls();
+    if (!s) return [];
+    const out: string[] = [];
+    for (let i = 0; i < s.length; i++) {
+      const k = s.key(i);
+      if (k !== null) out.push(k);
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}

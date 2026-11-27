@@ -2,9 +2,9 @@ import { createContext, useContext, useEffect, useRef, useState, useSyncExternal
 import type { ReactNode } from 'react';
 import { BizziClient, BizziStore, hubTokenProvider } from '@bizzi/client';
 import type { BizziState, FetchLike, SocketFactory, StoreCache, StoreSnapshot, TokenProvider } from '@bizzi/client';
-import type { ConnectionTarget } from '../lib/connection.ts';
+import { connectionKey, staleDesktopKeys, type ConnectionTarget } from '../lib/connection.ts';
 import { restorableHash } from '../lib/router.ts';
-import { loadJson, loadString, saveJson, saveString } from '../lib/storage.ts';
+import { keys, loadJson, loadString, remove, saveJson, saveString } from '../lib/storage.ts';
 
 export interface BizziContextValue {
   client: BizziClient;
@@ -17,11 +17,6 @@ export interface BizziContextValue {
 }
 
 const Ctx = createContext<BizziContextValue | null>(null);
-
-/** Storage key prefix for per-connection state (cache, last machine). */
-function connectionKey(t: ConnectionTarget): string {
-  return t.hub ? `hub:${t.hub.hubUrl}` : `node:${t.url}`;
-}
 
 function localStorageCache(key: string): StoreCache {
   return {
@@ -64,6 +59,7 @@ export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: (
       }
       if (disposed) return;
       const key = connectionKey(target);
+      if (target.source === 'electron') for (const k of staleDesktopKeys(keys())) remove(k);
       const machineKey = `bizzi.machine.${key}`;
       const client = new BizziClient({ clientName: '@bizzi/ui', clientVersion: '0.0.1', ...(createSocket ? { createSocket } : {}) });
       const store = new BizziStore(client, {

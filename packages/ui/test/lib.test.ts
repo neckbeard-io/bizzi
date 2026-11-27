@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultUrl, isMockQuery, normalizeUrl, resolveInitialTarget } from '../src/lib/connection.ts';
+import { connectionKey, defaultUrl, isMockQuery, normalizeUrl, resolveInitialTarget, staleDesktopKeys } from '../src/lib/connection.ts';
 import { contextUse, formatCost, formatDuration, formatRelative, formatTokens, joinPath, parentPath, tail, usageSummary } from '../src/lib/format.ts';
 import { escapeHtml, renderMarkdown, safeUrl } from '../src/lib/markdown.ts';
 import { parseHash, restorableHash, routeHref } from '../src/lib/router.ts';
@@ -83,4 +83,21 @@ test('restorableHash keeps pages worth reopening after a restart', () => {
   assert.equal(restorableHash('#/machine/m_1'), '#/machine/m_1');
   assert.equal(restorableHash('#/settings/hotkeys'), '#/settings/hotkeys');
   for (const h of ['', '#', '#/', '#/pair?code=x', '#/login/s_2', '#/machines', '#/workspaces', '#/workspaces?add=1', '#/ask?q=hi']) assert.equal(restorableHash(h), null, h);
+});
+
+test('the desktop core keeps one storage key across restarts, whatever port it gets', () => {
+  assert.equal(connectionKey({ url: 'ws://127.0.0.1:56674/ws', token: 't', source: 'electron' }), 'node:desktop');
+  assert.equal(connectionKey({ url: 'ws://127.0.0.1:56917/ws', token: 't', source: 'electron' }), 'node:desktop');
+  assert.equal(connectionKey({ url: 'ws://box:7777/ws', source: 'saved' }), 'node:ws://box:7777/ws');
+  assert.deepEqual(
+    staleDesktopKeys([
+      'bizzi.cache.node:ws://127.0.0.1:56674/ws',
+      'bizzi.route.node:ws://127.0.0.1:56917/ws',
+      'bizzi.machine.node:ws://localhost:7777/ws',
+      'bizzi.cache.node:desktop',
+      'bizzi.cache.node:ws://box:7777/ws',
+      'bizzi.theme',
+    ]),
+    ['bizzi.cache.node:ws://127.0.0.1:56674/ws', 'bizzi.route.node:ws://127.0.0.1:56917/ws', 'bizzi.machine.node:ws://localhost:7777/ws'],
+  );
 });
