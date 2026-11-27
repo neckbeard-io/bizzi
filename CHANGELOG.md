@@ -28,6 +28,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Fixed
 - Sessions are no longer named "[bizzi] bizzi restarted while you were…": bizzi's own continue message never names a session, and sessions it already renamed, or that were left "Untitled session", take their name from your first message again.
+- A Claude session's context bar now keeps up during a long turn, updating after each response and tool result instead of only when the turn ends.
 - The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
 - Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
 - Text you've typed but not sent stays in the composer, per session, when bizzi reloads, restarts or updates.
