@@ -17,7 +17,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - ⌘W (Ctrl+W on Windows and Linux) deletes the open session after asking; on other pages of the desktop app it closes the window, and Close Window moved to ⌘⇧W / Ctrl+Shift+W.
 - agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
 - Your prompt stays pinned at the top of the conversation once it scrolls out of view, so you can see what the agent is working on while it runs. Click it to read the whole prompt, or use the arrow to jump back to it.
-- Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
+- Sessions you don't name get a short title from the gist of your first message ("I'd like shorter titles for sessions instead of…" becomes "shorter titles for sessions") instead of staying "Untitled session". This includes sessions started from the one-pane composer, which used to take the whole first line. Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
 ### Changed
 - Sessions you didn't name keep up with the conversation: after `/clear`, your next message renames the session, and with a title model the title is refreshed now and then from your original request plus your latest messages.

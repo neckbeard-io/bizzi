@@ -13,7 +13,6 @@ import {
   parseTokens,
   planRoute,
   routeReason,
-  titleFor,
   tokenAt,
 } from '../src/lib/onePane.ts';
 import type { CompletionInput } from '../src/lib/onePane.ts';
@@ -170,9 +169,7 @@ test('decisionFor records what was offered, where it went and whether that was a
   assert.deepEqual([nothing.via, nothing.overridden], ['other', false]);
 });
 
-test('titles, rule words and the ask route', () => {
-  assert.equal(titleFor('  why are checkout 502s up?\nmore'), 'why are checkout 502s up?');
-  assert.equal(titleFor('x'.repeat(80)).length, 60);
+test('rule words and the ask route', () => {
   assert.deepEqual(parseRuleWords('Prod, production,, prod  logs '), ['prod', 'production', 'prod logs']);
   assert.deepEqual(parseHash('#/ask'), { name: 'ask' });
   assert.deepEqual(parseHash('#/ask/s_1'), { name: 'ask', sessionId: 's_1' });

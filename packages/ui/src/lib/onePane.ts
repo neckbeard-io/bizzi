@@ -307,12 +307,6 @@ export function decisionFor(
   return d;
 }
 
-/** A session title from the prompt: its first line, at most 60 characters. */
-export function titleFor(text: string): string {
-  const line = text.trim().split('\n')[0]!.replace(/\s+/g, ' ');
-  return line.length > 60 ? `${line.slice(0, 59)}…` : line;
-}
-
 /** Comma-separated words of a rule form → its `match` list. */
 export function parseRuleWords(s: string): string[] {
   return [...new Set(s.split(',').map((w) => w.replace(/\s+/g, ' ').trim().toLowerCase()).filter(Boolean))];

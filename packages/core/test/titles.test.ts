@@ -9,14 +9,15 @@ import { tempDir, waitFor } from './helpers.ts';
 
 const text = (t: string): InputBlock[] => [{ type: 'text', text: t }];
 
-test('autoTitle: first line with words, markdown stripped, cut at a word', () => {
+test('autoTitle: the gist of the first line, markdown stripped, cut at a word', () => {
   assert.equal(autoTitle(text('  fix the   login redirect loop  ')), 'fix the login redirect loop');
   assert.equal(autoTitle(text('\n\n## Add dark mode\nmore detail here')), 'Add dark mode');
   assert.equal(autoTitle(text('- [ ] item one')), '[ ] item one');
   assert.equal(autoTitle(text('```ts\nconst x = 1\n```')), 'const x = 1');
   assert.equal(autoTitle(text('---\n> quoted ask')), 'quoted ask');
-  const long = autoTitle(text('please refactor the session manager so that every turn goes through a single queue and nothing races'))!;
-  assert.ok(long.length <= 60, long);
+  assert.equal(autoTitle(text('please refactor the session manager so that every turn goes through a single queue')), 'refactor the session manager');
+  const long = autoTitle(text('rewrite every adapter around one shared queue with retries backoff and metrics for each provider'))!;
+  assert.ok(long.length <= 50, long);
   assert.ok(long.endsWith('…'), long);
   assert.ok(!/\s…$/.test(long), long);
   assert.equal(autoTitle([{ type: 'file', path: '/tmp/dir/spec.md' }]), 'Attached spec.md');
@@ -138,9 +139,9 @@ test('after /clear the next message titles the session again, unless the user na
   await waitFor(() => node.sessions.get(session.id).session.status === 'idle');
   assert.equal(title(), 'Fix the flaky upload test', 'kept until the next message says what is next');
   await send('Now add dark mode to the settings page');
-  assert.equal(title(), 'Now add dark mode to the settings page');
+  assert.equal(title(), 'add dark mode to the settings page');
   await send('and the sidebar too');
-  assert.equal(title(), 'Now add dark mode to the settings page');
+  assert.equal(title(), 'add dark mode to the settings page');
 
   const named = (await node.call('session.create', { workspaceId: workspace.id, agent: 'claude', title: 'Mine' })).session;
   await waitFor(() => node.sessions.get(named.id).session.status === 'idle');

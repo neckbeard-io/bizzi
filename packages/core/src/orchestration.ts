@@ -38,6 +38,7 @@ import {
   type SessionMode,
   type SessionStatus,
   type WorkspaceInfo,
+  titleFromText,
 } from '@bizzi/protocol';
 import type { AdapterRegistry } from './agents.ts';
 import { parseBudget, type Spent } from './budget.ts';
@@ -678,7 +679,7 @@ export class Orchestrator {
     if (req.model) params.model = req.model;
     if (clamp.permissionMode) params.permissionMode = clamp.permissionMode;
     if (req.effort) params.effort = req.effort;
-    params.title = req.title?.trim() || titleFrom(req.prompt);
+    params.title = req.title?.trim() || titleFromText(req.prompt) || titleFrom(req.prompt);
     if (req.budget) params.budget = req.budget;
     if (settings.parentAnswersApprovals) notes.push('you may answer some of its approvals and questions with session_answer; the user can still answer first');
     const session = await sessions.create(params, {
