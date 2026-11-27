@@ -32,6 +32,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three crashes in a row with no message from you it waits for you instead; a run of ordinary restarts (updates, local installs) gets ten.
 
 ### Fixed
+- Finished install and update notices on a machine's agent cards (such as "codex 0.166.0 → 0.172.0 installed") no longer come back every time bizzi restarts or the window reloads. Once dismissed, they stay gone.
 - After an update or a restart that replaces the core, the desktop app reopens the page you were on and shows your sessions right away, instead of starting over on the machine page.
 - When Claude picks its work back up on its own after a background task finishes, the session shows as working and can be stopped, and the timeline marks it "continued on its own". Before, that work ran unseen, and a restart during it left its last command spinning forever.
 - A command still spinning after a restart, from work that ended without being recorded, now shows as cancelled.
