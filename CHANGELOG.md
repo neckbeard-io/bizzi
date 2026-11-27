@@ -8,6 +8,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Added
 - agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
+- Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
 ### Changed
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.

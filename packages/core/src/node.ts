@@ -105,6 +105,11 @@ export interface NodeOptions {
   resumeInterrupted?: boolean;
   /** Delay before that resume, so the caller can finish wiring (default 1 s). */
   resumeDelayMs?: number;
+  /**
+   * Title model for untitled sessions: given the first message, returns a short title to replace the
+   * one taken from the message (titles.ts). `agentEnv` gives an agent's stored secrets (API keys).
+   */
+  suggestTitle?: (text: string, ctx: { agentEnv: AgentEnvProvider }) => Promise<string | undefined>;
 }
 
 /** Protocol methods the core doesn't implement; they answer `unsupported` unless an extension claims them. */
@@ -316,6 +321,7 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       agentEnv,
       treeBudgetUsd: (workspaceId) => settings.effective(workspaceId).treeBudgetUsd,
       probeBilling: async (agent) => (await registry.list()).find((a) => a.agent === agent)?.billing,
+      ...(opts.suggestTitle ? { suggestTitle: (text: string) => opts.suggestTitle!(text, { agentEnv }) } : {}),
     });
     sessions.load();
     const hub = new HubPort();

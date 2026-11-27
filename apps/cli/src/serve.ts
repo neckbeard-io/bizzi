@@ -14,6 +14,7 @@ import { startHubLink } from './link.ts';
 import { loadOrchestration } from './orchestration.ts';
 import { loadServices } from './services.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
+import { loadTitleSuggester } from './titles.ts';
 
 export const SERVE_HELP = `Usage: bizzi serve [options]
 
@@ -128,6 +129,9 @@ export async function serve(argv: string[], version: string): Promise<void> {
   const containers = createContainersExtension({ logger: logger.child({ component: 'containers' }) });
   const extensions: NodeExtension[] = [...(services?.extensions ?? []), ...(orchestration ? [orchestration] : []), routing, containers];
 
+  // Untitled sessions are named from their first message; a configured utility model refines that.
+  const suggestTitle = await loadTitleSuggester(dataDir, logger);
+
   const node = await createNode({
     dataDir,
     machineName: values.name,
@@ -138,6 +142,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
     ...(extensions.length > 0 ? { extensions } : {}),
     // Turns cut off by the last shutdown continue on their own (updates.md §7); 0 turns that off.
     resumeInterrupted: process.env.BIZZI_RESUME_INTERRUPTED !== '0',
+    ...(suggestTitle ? { suggestTitle } : {}),
   });
   knowledge?.bindMachine(() => node.machine);
   let server: BizziServer;
