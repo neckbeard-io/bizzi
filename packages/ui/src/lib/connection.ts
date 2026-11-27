@@ -55,6 +55,22 @@ export type ConnectionMode = 'local' | 'hub' | 'manual';
 export const MOCK_URL = 'mock://local';
 export const MOCK_HUB_URL = 'mock://hub';
 
+/**
+ * The storage key for what the UI keeps per connection (cached state, selected machine, last page).
+ * The desktop app's own core listens on a new port each time it starts, so it is keyed by being the
+ * desktop's core rather than by URL; otherwise every restart or update would start from scratch.
+ */
+export function connectionKey(t: ConnectionTarget): string {
+  if (t.hub) return `hub:${t.hub.hubUrl}`;
+  if (t.source === 'electron') return 'node:desktop';
+  return `node:${t.url}`;
+}
+
+/** Per-connection keys older desktop builds wrote under the core's loopback URL, one set per port. */
+export function staleDesktopKeys(all: string[]): string[] {
+  return all.filter((k) => /^bizzi\.(cache|machine|route)\.node:ws:\/\/(127\.0\.0\.1|localhost|\[::1\]):\d+\//.test(k));
+}
+
 export function isMockQuery(search: string): boolean {
   const q = new URLSearchParams(search);
   const v = q.get('mock');

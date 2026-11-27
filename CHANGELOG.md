@@ -31,6 +31,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three crashes in a row with no message from you it waits for you instead; a run of ordinary restarts (updates, local installs) gets ten.
 
 ### Fixed
+- After an update or a restart that replaces the core, the desktop app reopens the page you were on and shows your sessions right away, instead of starting over on the machine page.
 - Sessions are no longer named "[bizzi] bizzi restarted while you were…": bizzi's own continue message never names a session, and sessions it already renamed, or that were left "Untitled session", take their name from your first message again.
 - A Claude session's context bar now keeps up during a long turn, updating after each response and tool result instead of only when the turn ends.
 - The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
