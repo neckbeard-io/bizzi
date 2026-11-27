@@ -1,8 +1,8 @@
-// User-wide preferences (theme choice, density) synced through the server (theming.md §5). localStorage
+// User-wide preferences (theme choice, density, fonts) synced through the server (theming.md §5). localStorage
 // is only a cache for first paint and offline use; the server's value wins on connect.
 import type { UserPrefs } from '@bizzi/protocol';
 
-const KEYS = ['themeId', 'density'] as const satisfies readonly (keyof UserPrefs)[];
+const KEYS = ['themeId', 'density', 'uiFont', 'codeFont'] as const satisfies readonly (keyof UserPrefs)[];
 
 /** Keys present in `patch` replace those in `base`; undefined values are ignored. */
 export function mergePrefs(base: UserPrefs, patch: Partial<UserPrefs>): UserPrefs {

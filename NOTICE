@@ -90,3 +90,12 @@ flax (https://github.com/neckbeard-io/flax)
   Five-tone palettes Evergreen, Dracula (with a light variant) and
   Synthwave, and the Device theme idea, from the bizzi author's own project.
   The Dracula palette is by Zeno Rocha (MIT).
+
+------------------------------------------------------------------------------
+JetBrains Mono (https://github.com/JetBrains/JetBrainsMono)
+------------------------------------------------------------------------------
+
+  Copyright 2020 The JetBrains Mono Project Authors
+  License: SIL Open Font License 1.1
+  Bundled with the UI as the default code font, via
+  @fontsource-variable/jetbrains-mono (woff2 files, unmodified).
