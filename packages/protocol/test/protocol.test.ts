@@ -32,3 +32,12 @@ test('decode rejects garbage with BizziError', () => {
   assert.throws(() => decode('{'), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
   assert.throws(() => decode('{"x":1}'), (e: unknown) => e instanceof BizziError && e.code === 'bad_request');
 });
+
+test('inheritedImportArgs keeps only --import flags, in order', async () => {
+  const { inheritedImportArgs } = await import('../src/index.ts');
+  assert.deepEqual(inheritedImportArgs([]), []);
+  assert.deepEqual(
+    inheritedImportArgs(['--inspect', '--import', 'file:///a/hook.ts', '--no-warnings', '--import=file:///b.mjs', '--import']),
+    ['--import', 'file:///a/hook.ts', '--import=file:///b.mjs'],
+  );
+});
