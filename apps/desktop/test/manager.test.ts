@@ -54,6 +54,8 @@ async function until(cond: () => boolean, timeoutMs = 8000): Promise<void> {
 test('spawns the core when nothing runs, then stops it on quit (drain, serve.json removed)', async (t) => {
   const dir = await tempDir(t);
   const { m, launches } = manager(dir);
+  // A failed assertion must not leave the spawned core running: it would keep the test process alive.
+  t.after(() => m.stop());
   const conn = await m.start();
   assert.ok(conn, 'got a connection');
   assert.match(conn.url, /^ws:\/\/127\.0\.0\.1:\d+\/ws$/);
@@ -62,7 +64,12 @@ test('spawns the core when nothing runs, then stops it on quit (drain, serve.jso
   assert.equal(launches(), 1);
   assert.ok(existsSync(join(dir, 'serve.json')));
   assert.deepEqual(JSON.parse(await readFile(join(dir, 'desktop-core.json'), 'utf8')).pid, conn.pid);
-  const log = await readFile(join(dir, 'logs', 'core.log'), 'utf8');
+  // The core writes stderr on its own schedule; the ready line can come first.
+  let log = '';
+  for (let i = 0; i < 50 && !/stub-core/.test(log); i++) {
+    log = await readFile(join(dir, 'logs', 'core.log'), 'utf8').catch(() => '');
+    if (!/stub-core/.test(log)) await new Promise((r) => setTimeout(r, 50));
+  }
   assert.match(log, /stub-core/, 'core stderr goes to the log file');
 
   await m.stop();
