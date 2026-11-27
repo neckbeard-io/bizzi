@@ -7,6 +7,19 @@ export {
   type NodeOptions,
   type Subscription,
 } from './node.ts';
+export {
+  DEFAULT_KEEP_AWAKE,
+  KeepAwake,
+  macosPowerBackend,
+  parseKeepAwakeSettings,
+  parsePmsetPs,
+  platformPowerBackend,
+  readKeepAwakeSettings,
+  type KeepAwakeOptions,
+  type KeepAwakeWork,
+  type PowerBackend,
+  type PowerHold,
+} from './power.ts';
 export { startServer, CLOSE_UNAUTHORIZED, type BizziServer, type ServerOptions } from './server.ts';
 export { createJsonLogger, isLogLevel, nullLogger, type JsonLoggerOptions } from './logger.ts';
 export { EventBus, type EventBody, type EventListener } from './bus.ts';

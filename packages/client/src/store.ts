@@ -20,6 +20,7 @@ import type {
   KnowledgePromotePreview,
   KnowledgeScope,
   KnowledgeSettings,
+  KeepAwakeSettings,
   LabelColor,
   Logger,
   MachineInfo,
@@ -1303,8 +1304,11 @@ export class BizziStore {
     return settings;
   }
 
-  /** Set a machine's tags, description and/or identity color (knowledge.md §9, spec §11.1); `machine.updated` follows. */
-  async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string; color?: LabelColor | '' }): Promise<MachineInfo> {
+  /**
+   * Set a machine's tags, description, identity color (knowledge.md §9, spec §11.1) and/or keep-awake
+   * setting (spec §8.1); `machine.updated` follows.
+   */
+  async setMachine(params: { machineId?: string | null; tags?: string[]; description?: string; color?: LabelColor | ''; keepAwake?: Partial<KeepAwakeSettings> }): Promise<MachineInfo> {
     const { machineId, ...rest } = params;
     const { machine } = await this.client.request('machine.set', { ...this.target(machineId), ...rest });
     // Keep the hub's view of presence; only the user fields changed.
@@ -1315,6 +1319,7 @@ export class BizziStore {
       else delete next.description;
       if (machine.color) next.color = machine.color;
       else delete next.color;
+      if (machine.keepAwake) next.keepAwake = machine.keepAwake;
     }
     const p: Partial<BizziState> = { machines: { ...this.state.machines, [machine.id]: next } };
     if (this.state.machine?.id === machine.id) p.machine = next;

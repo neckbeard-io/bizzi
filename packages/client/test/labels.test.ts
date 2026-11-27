@@ -2,7 +2,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { GLOBAL_CHANNEL } from '@bizzi/protocol';
-import type { MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
+import type { KeepAwakeState, MachineInfo, WorkspaceInfo } from '@bizzi/protocol';
 import { BizziClient, BizziStore, createManualScheduler } from '../src/index.ts';
 import { FakeServer, waitFor } from './fake-server.ts';
 
@@ -51,4 +51,30 @@ test('store: workspace.updated replaces the record; setWorkspace and setMachine 
   scheduler.flush();
   assert.equal('color' in cleared, false);
   assert.equal(store.getState().machines[m.id]?.color, undefined);
+});
+
+test('store: setMachine passes keepAwake and keeps the answer on the machine (spec §8.1)', async (t) => {
+  const server = await FakeServer.start();
+  const seen: unknown[] = [];
+  server.handlers.set('machine.set', (p) => {
+    seen.push((p as { keepAwake?: unknown }).keepAwake);
+    const keepAwake: KeepAwakeState = { supported: true, settings: { mode: 'off', onBattery: false }, active: false, turns: 0, background: 0 };
+    return { machine: { ...server.helloMachine, tags: [], keepAwake } as MachineInfo };
+  });
+  const client = new BizziClient({ backoff: { baseMs: 10, maxMs: 20 }, requestTimeoutMs: 1000 });
+  const scheduler = createManualScheduler();
+  const store = new BizziStore(client, { scheduler });
+  t.after(async () => {
+    store.dispose();
+    client.close();
+    await server.stop();
+  });
+  await client.connect(server.url, 'secret');
+  await waitFor(() => server.requests.some((r) => r.method === 'subscribe'));
+  await new Promise((r) => setTimeout(r, 20));
+  scheduler.flush();
+  const m = await store.setMachine({ keepAwake: { mode: 'off' } });
+  scheduler.flush();
+  assert.deepEqual(seen, [{ mode: 'off' }]);
+  assert.equal(store.getState().machines[m.id]?.keepAwake?.settings.mode, 'off');
 });

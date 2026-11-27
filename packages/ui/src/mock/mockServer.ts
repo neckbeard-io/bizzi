@@ -2,7 +2,7 @@
 // It speaks the real wire protocol through a WebSocket-like object, so the client code path is the same.
 // By default it plays a hub with two machines (this laptop online, server-a offline); `role: 'node'`
 // makes it a single node instead.
-import { BizziError, GLOBAL_CHANNEL, LABEL_COLORS, PROTOCOL_VERSION, isLabelColor, isLabelIcon, isMachineTag, normalizePairingCode, parseChannel, sessionChannel, titleFromText } from '@bizzi/protocol';
+import { BizziError, GLOBAL_CHANNEL, KEEP_AWAKE_MODES, LABEL_COLORS, PROTOCOL_VERSION, isLabelColor, isLabelIcon, isMachineTag, normalizePairingCode, parseChannel, sessionChannel, titleFromText } from '@bizzi/protocol';
 import type {
   AgentKind,
   ApprovalDecisionKind,
@@ -12,6 +12,8 @@ import type {
   Ed25519PublicJwk,
   GlobalEventBody,
   InputBlock,
+  KeepAwakeSettings,
+  KeepAwakeState,
   MachineInfo,
   MachineRole,
   MethodName,
@@ -39,6 +41,7 @@ import {
   LEAD_CONTEXT,
   MACHINE,
   MINI,
+  MOCK_KEEP_AWAKE_WORK,
   MOCK_SETUP_CODE,
   NOTES_DIFF,
   REVIEW_REPLY,
@@ -487,6 +490,21 @@ export class MockCore implements MockHost {
           if (p.color === '') delete next.color;
           else if (isLabelColor(p.color)) next.color = p.color;
           else throw new BizziError('bad_request', `color must be one of ${LABEL_COLORS.join(', ')}`);
+        }
+        if (p.keepAwake !== undefined) {
+          const cur = m.keepAwake ?? { supported: true, settings: { mode: 'turns' as const, onBattery: false }, active: false, turns: 0, background: 0 };
+          const kp = p.keepAwake as Partial<KeepAwakeSettings>;
+          const mode = kp.mode ?? cur.settings.mode;
+          if (!KEEP_AWAKE_MODES.includes(mode)) throw new BizziError('bad_request', `keepAwake.mode must be one of ${KEEP_AWAKE_MODES.join(', ')}`);
+          const settings = { mode, onBattery: kp.onBattery ?? cur.settings.onBattery };
+          // The demo's fixed work per machine decides whether the new setting holds it.
+          const work = MOCK_KEEP_AWAKE_WORK[m.id] ?? { turns: 0, background: 0 };
+          const turns = mode === 'off' ? 0 : work.turns;
+          const background = mode === 'turns_and_background' ? work.background : 0;
+          const ka: KeepAwakeState = { ...cur, settings, turns, background, active: cur.supported && turns + background > 0 };
+          if (ka.active) ka.since = cur.since ?? new Date().toISOString();
+          else delete ka.since;
+          next.keepAwake = ka;
         }
         this.machineMap.set(m.id, next);
         this.emit(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...next } } });

@@ -13,11 +13,12 @@ import { PresenceDot } from '../components/MachineSwitcher.tsx';
 import { Page, PageHeader, SectionTitle } from '../components/layout.tsx';
 import { Badge, Button, Card, CopyButton, Empty, ErrorText, Field, Input, Spinner, Textarea, cx } from '../components/ui.tsx';
 import { WidgetRow } from '../components/Widget.tsx';
-import { machinePresence } from '../lib/format.ts';
+import { keepAwakeSummary, machinePresence } from '../lib/format.ts';
 import { parseTags } from '../lib/knowledge.ts';
 import { LABEL_COLOR_NAME } from '../lib/labels.ts';
 import { agentActions, hasUpdate } from '../lib/provision.ts';
 import { AGENT_LABEL, BILLING_HINT, BILLING_LABEL, RESTART_POLICY_LABEL, UPDATE_POLICY_LABEL, pendingUpdatesLabel } from '../lib/states.ts';
+import { KeepAwakePanel } from './settings/KeepAwakePanel.tsx';
 import { OrchestrationPanel } from './settings/OrchestrationPanel.tsx';
 import { JobProgress } from './provision/JobProgress.tsx';
 import { PlanModal } from './provision/PlanModal.tsx';
@@ -110,6 +111,13 @@ export function MachineView(props: { machineId?: string }): ReactNode {
       )}
 
       <SecretsPanel machineId={machineId} online={online} preset={secretFor} onPresetUsed={clearSecretFor} />
+
+      {machine ? (
+        <>
+          <SectionTitle>Machine settings · keep awake</SectionTitle>
+          <KeepAwakePanel machine={machine} online={online} />
+        </>
+      ) : null}
 
       <SectionTitle>Machine settings · agent-to-agent</SectionTitle>
       <OrchestrationPanel machineId={machineId} online={online} />
@@ -212,6 +220,7 @@ function Fact(props: { label: string; children: ReactNode }): ReactNode {
 
 function MachineCard(props: { machine: MachineInfo; online: boolean }): ReactNode {
   const m = props.machine;
+  const awake = m.online && m.keepAwake?.active ? keepAwakeSummary(m.keepAwake) : undefined;
   return (
     <Card className="p-4">
       <div className="mb-3 flex items-center gap-2">
@@ -229,7 +238,18 @@ function MachineCard(props: { machine: MachineInfo; online: boolean }): ReactNod
           {m.os} / {m.arch}
         </Fact>
         <Fact label="Display">{m.headful ? 'headful (GUI)' : 'headless'}</Fact>
-        <Fact label="Power">{m.alwaysOn ? 'always on' : 'may sleep'}</Fact>
+        <Fact label="Power">
+          {awake ? (
+            <span className="inline-flex items-center gap-1" title={`${awake}. Change it under Machine settings · keep awake.`}>
+              <Icon name="sun" size={12} className="text-warn" />
+              kept awake
+            </span>
+          ) : m.alwaysOn ? (
+            'always on'
+          ) : (
+            'may sleep'
+          )}
+        </Fact>
         <Fact label="Roles">{m.roles.join(', ')}</Fact>
         <Fact label="Version">{m.bizziVersion}</Fact>
       </div>

@@ -28,7 +28,7 @@ import { WorkspaceTile } from '../../components/labels.tsx';
 import { PresenceDot } from '../../components/MachineSwitcher.tsx';
 import { AgentMark, MarkCount, MarkDot } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
-import { formatRelative } from '../../lib/format.ts';
+import { formatRelative, keepAwakeSummary } from '../../lib/format.ts';
 import { HOTKEYS, hotkeyLabel } from '../../lib/hotkeys.ts';
 import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
@@ -118,6 +118,8 @@ function MachineSection(props: {
   const totals = machineTotalsLabel(summary);
   const unsupported = summary.unsupported.map((a) => AGENT_LABEL[a]).join(', ');
   const tags = machineTagsLabel(m);
+  // A quiet sun while bizzi holds the machine awake (spec §8.1); the tooltip says why.
+  const awake = summary.online && m.keepAwake?.active ? keepAwakeSummary(m.keepAwake) : undefined;
   return (
     <section className={cx('relative', !summary.online && 'opacity-60')}>
       {m.color ? (
@@ -151,6 +153,11 @@ function MachineSection(props: {
           <PresenceDot online={summary.online} className="h-1.5 w-1.5" />
           <span className="min-w-0 truncate font-semibold">{m.name}</span>
           {summary.online ? null : <span className="shrink-0 font-normal text-muted">(offline)</span>}
+          {awake ? (
+            <span className="shrink-0 text-muted" title={awake} aria-label={awake}>
+              <Icon name="sun" size={11} />
+            </span>
+          ) : null}
           <span className="min-w-1 flex-1" />
           {summary.unsupported.length > 0 ? (
             <span className="shrink-0 text-warn" title={`Not supported here: ${unsupported}. Open the machine for remedies.`}>

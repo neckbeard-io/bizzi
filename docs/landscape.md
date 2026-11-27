@@ -75,7 +75,16 @@ Bootstrap a new machine from an existing client: SSH in, install the node, pair 
 
 For self-hosters without a domain or Caddy: the hub listens on the tailnet (HTTPS certs from Tailscale), and identity comes from the Tailscale login. Rex's built-in Tailscale plus QR pairing for the phone is the reference UX.
 
-### 4.8 Smaller UX ideas
+### 4.8 Keep-awake on Linux and Windows; waking sleeping machines
+
+**Status: macOS built ([spec.md](spec.md) §8.1); Linux and Windows not done yet.** The node holds idle sleep through a child process tied to its pid (`PowerBackend` in `packages/core/src/power.ts`). Still to add, each one a backend in `platformPowerBackend`:
+
+- **Linux:** `systemd-inhibit --what=idle:sleep --who=bizzi --why=… --mode=block tail --pid=<corePid> -f /dev/null` (with `tail --pid`, the inhibitor dies with the core; `sleep infinity` would outlive it). Power source from `/sys/class/power_supply/*/online`. Without `systemd-inhibit` (containers, non-systemd distros) stay unsupported and log it once. GNOME/KDE auto-suspend may also need the desktop's D-Bus inhibit (`org.gnome.SessionManager.Inhibit`, `org.freedesktop.ScreenSaver`). Optional: `--what=handle-lid-switch` as an opt-in "even with the lid closed". Docker deploys: nothing; sleep is the host's business.
+- **Windows:** a hidden PowerShell child that calls `SetThreadExecutionState(ES_CONTINUOUS | ES_SYSTEM_REQUIRED)` through P/Invoke and then `Wait-Process -Id <corePid>`; the OS drops the hold when the thread exits. (`PowerCreateRequest`/`PowerSetRequest` shows up in `powercfg /requests`.) Power source from `Win32_Battery` / `GetSystemPowerStatus`.
+- **Holding during approvals**, capped (e.g. 30 min), so a reply from the phone still reaches the machine.
+- **Waking a machine that's already asleep:** the hub sends Wake-on-LAN to a known offline node and queues the message until it reconnects; `pmset schedule wake` for nightly pipelines on Macs.
+
+### 4.9 Smaller UX ideas
 
 - Command palette that shows each action's shortcut and rebinds in place (Rex).
 - Attention rollup, per-agent marks and `done` as an unseen-result flag: **designed, spec §11.1** (sidebar rows), with a hub-side `seen_through` cursor so devices agree (spec §4).

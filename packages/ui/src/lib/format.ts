@@ -1,4 +1,4 @@
-import type { SessionStatus, Usage } from '@bizzi/protocol';
+import type { KeepAwakeState, SessionStatus, Usage } from '@bizzi/protocol';
 
 export function formatTokens(n: number | undefined): string {
   if (n === undefined || !Number.isFinite(n)) return '–';
@@ -145,6 +145,21 @@ export function errorInfo(e: unknown): { message: string; code: string | null; o
 export function machinePresence(m: { online: boolean; lastSeenAt?: string }, now: number = Date.now()): string {
   if (m.online) return 'online';
   return m.lastSeenAt ? `last seen ${formatRelative(m.lastSeenAt, now)}` : 'offline';
+}
+
+/**
+ * Why bizzi is (or would be) keeping the machine awake (spec §8.1), e.g. "Keeping awake: 2 turns running".
+ * Undefined when it isn't holding anything and nothing is paused.
+ */
+export function keepAwakeSummary(k: KeepAwakeState | undefined): string | undefined {
+  if (!k?.supported) return undefined;
+  const why: string[] = [];
+  if (k.turns) why.push(`${k.turns} ${k.turns === 1 ? 'turn' : 'turns'} running`);
+  if (k.background) why.push(`${k.background} ${k.background === 1 ? 'session' : 'sessions'} with background work`);
+  if (k.pausedOnBattery) return `Not keeping awake on battery (${why.join(', ')})`;
+  if (!k.active) return undefined;
+  if (why.length === 0) return 'Keeping awake a little longer after the last work ended';
+  return `Keeping awake: ${why.join(', ')}`;
 }
 
 /** "m:ss" for countdowns (pairing code expiry). */
