@@ -82,6 +82,9 @@ export function appMenu(platform: NodeJS.Platform, a: MenuActions): MenuItemCons
         { label: 'Inbox', accelerator: 'CmdOrCtrl+2', click: () => a.navigate(MENU_ROUTES.inbox) },
         { label: 'Knowledge', accelerator: 'CmdOrCtrl+3', click: () => a.navigate(MENU_ROUTES.knowledge) },
         sep,
+        // A UI hotkey like ⌘T: shown, not registered, so the page decides (it can be switched off there).
+        { label: 'Toggle Sidebar by State', accelerator: 'CmdOrCtrl+G', registerAccelerator: false, click: () => a.command('group-by-state') },
+        sep,
         { role: 'reload' },
         { role: 'forceReload' },
         { role: 'toggleDevTools' },

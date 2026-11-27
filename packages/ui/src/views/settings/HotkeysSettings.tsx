@@ -35,9 +35,9 @@ export function HotkeysSettings(): ReactNode {
         <p className="min-w-0 flex-1">
           Saved on this device.{' '}
           {desktop
-            ? 'The File menu lists them too; with a hotkey off, its menu item still works.'
-            : 'In a browser tab the browser may keep these keys for itself (new window, new tab, close tab); the desktop app always gets them.'}{' '}
-          {mac ? '' : 'Inside a terminal session Ctrl+N, Ctrl+T and Ctrl+W go to the shell.'}
+            ? 'The File and View menus list them too; with a hotkey off, its menu item still works.'
+            : 'In a browser tab the browser may keep these keys for itself (new window, new tab, close tab, find next); the desktop app always gets them.'}{' '}
+          {mac ? '' : 'Inside a terminal session Ctrl+N, Ctrl+T, Ctrl+W and Ctrl+G go to the shell.'}
         </p>
         {allOn ? null : (
           <Button size="sm" variant="ghost" onClick={() => hotkeyStore.reset()}>

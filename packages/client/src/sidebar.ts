@@ -442,6 +442,91 @@ export function breakdownEqual(a: readonly SessionBreakdownLine[], b: readonly S
   return true;
 }
 
+// ---------------------------------------------------------------- grouped by state
+
+/** Sections of the sidebar's "By state" view, in urgency order. */
+export type StateSectionKey = 'waiting' | 'failed' | 'working' | 'done' | 'idle';
+
+export const STATE_SECTIONS: readonly { key: StateSectionKey; label: string; states: readonly MarkState[] }[] = [
+  { key: 'waiting', label: 'Needs you', states: ['waiting'] },
+  { key: 'failed', label: 'Failed', states: ['failed'] },
+  { key: 'working', label: 'Working', states: ['working', 'background'] },
+  { key: 'done', label: 'Done', states: ['done'] },
+  { key: 'idle', label: 'Idle', states: ['idle'] },
+];
+
+export interface StateSessionLine {
+  /** The session's own line (its own state, not its helpers'), as in the tree. */
+  line: SessionBreakdownLine;
+  /** Where the session itself runs (a helper's worktree, not its parent's workspace). */
+  workspaceId: string;
+  machineId: string;
+  /** Helpers: the title of the session that started them (they're rows of their own here, not nested). */
+  parentTitle?: string;
+}
+
+export interface StateSection {
+  key: StateSectionKey;
+  label: string;
+  lines: StateSessionLine[];
+}
+
+/**
+ * Every live session on every machine, grouped by its own state: Needs you, Failed, Working (working and
+ * background), Done (finished, not yet seen), Idle. Empty sections are left out. Helpers are rows of their own
+ * under their own state, so a helper waiting on you is in Needs you even when its parent is idle; their line
+ * keeps `parentId` and gets `parentTitle`. Waiting sessions are longest-waiting first; everything else most
+ * recent first (working before background in Working).
+ */
+export function selectSessionsByState(s: BizziState): StateSection[] {
+  const per = new Map<MarkState, StateSessionLine[]>();
+  for (const workspaceId of sessionIndex(s).byWorkspace.keys()) {
+    for (const line of selectWorkspaceBreakdown(s, workspaceId)) {
+      const session = s.sessions[line.sessionId];
+      if (!session) continue;
+      const item: StateSessionLine = { line, workspaceId: session.workspaceId, machineId: session.machineId };
+      if (line.parentId) item.parentTitle = s.sessions[line.parentId]?.title || 'Untitled session';
+      push(per, line.state, item);
+    }
+  }
+  const out: StateSection[] = [];
+  for (const sec of STATE_SECTIONS) {
+    const lines: StateSessionLine[] = [];
+    for (const st of sec.states) {
+      const list = per.get(st) ?? [];
+      const dir = st === 'waiting' ? 1 : -1;
+      list.sort((a, b) => dir * cmp(a.line.updatedAt, b.line.updatedAt) || cmp(a.line.sessionId, b.line.sessionId));
+      lines.push(...list);
+    }
+    if (lines.length > 0) out.push({ key: sec.key, label: sec.label, lines });
+  }
+  return out;
+}
+
+function cmp(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Equality for `selectSessionsByState` results, so the view re-renders only when what it shows changes. */
+export function stateSectionsEqual(a: readonly StateSection[], b: readonly StateSection[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (x.key !== y.key || x.lines.length !== y.lines.length) return false;
+    for (let j = 0; j < x.lines.length; j++) {
+      const p = x.lines[j]!;
+      const q = y.lines[j]!;
+      if (p.workspaceId !== q.workspaceId || p.machineId !== q.machineId || p.parentTitle !== q.parentTitle) return false;
+    }
+    const xl = x.lines.map((l) => l.line);
+    const yl = y.lines.map((l) => l.line);
+    if (!breakdownEqual(xl, yl)) return false;
+  }
+  return true;
+}
+
 /**
  * How a worktree shows in the sidebar: `sessions` when it has rows of its own (sessions you started there, or
  * ended ones), `helpers` when only helpers nested under their parents work in it (so its own row would be

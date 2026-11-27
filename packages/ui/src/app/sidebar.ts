@@ -1,6 +1,9 @@
-// Sidebar width preference for this device (spec §11.1): auto (fit content) or a dragged width.
-// Module-level so the shell and Appearance settings share it; persisted to localStorage on commit only.
+// Sidebar preferences for this device (spec §11.1): the width, auto (fit content) or a dragged width, and
+// whether sessions are listed by workspace or by state. Module-level so the shell, the hotkeys and Appearance
+// settings share them; persisted to localStorage on commit only.
 import { useSyncExternalStore } from 'react';
+import { readGroupBy } from '../lib/sidebarTree.ts';
+import type { SidebarGroupBy } from '../lib/sidebarTree.ts';
 import { readSidebarPref } from '../lib/sidebarWidth.ts';
 import type { SidebarPref } from '../lib/sidebarWidth.ts';
 import { loadJson, saveJson } from '../lib/storage.ts';
@@ -35,4 +38,31 @@ export const sidebarStore = {
 
 export function useSidebarPref(): SidebarPref {
   return useSyncExternalStore(sidebarStore.subscribe, sidebarStore.get, sidebarStore.get);
+}
+
+const GROUP_KEY = 'bizzi.sidebar.groupBy';
+
+let groupBy: SidebarGroupBy = readGroupBy(loadJson(GROUP_KEY));
+const groupListeners = new Set<() => void>();
+
+export const sidebarGroupStore = {
+  get: (): SidebarGroupBy => groupBy,
+  subscribe(l: () => void): () => void {
+    groupListeners.add(l);
+    return () => groupListeners.delete(l);
+  },
+  set(next: SidebarGroupBy): void {
+    if (next === groupBy) return;
+    groupBy = next;
+    saveJson(GROUP_KEY, groupBy);
+    for (const l of groupListeners) l();
+  },
+  /** ⌘G and the View menu: by workspace ↔ by state. */
+  toggle(): void {
+    sidebarGroupStore.set(groupBy === 'state' ? 'workspace' : 'state');
+  },
+};
+
+export function useSidebarGroupBy(): SidebarGroupBy {
+  return useSyncExternalStore(sidebarGroupStore.subscribe, sidebarGroupStore.get, sidebarGroupStore.get);
 }

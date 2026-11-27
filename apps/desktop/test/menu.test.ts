@@ -96,7 +96,7 @@ test('⌘N, ⌘T and ⌘W are shown but left to the page (the UI hotkeys); menu 
   const { a, calls } = actions();
   for (const platform of ['darwin', 'linux'] as const) {
     const menu = appMenu(platform, a);
-    for (const [label, accel] of [['New Workspace…', 'CmdOrCtrl+N'], ['New Session', 'CmdOrCtrl+T'], ['Close Session', 'CmdOrCtrl+W']] as const) {
+    for (const [label, accel] of [['New Workspace…', 'CmdOrCtrl+N'], ['New Session', 'CmdOrCtrl+T'], ['Close Session', 'CmdOrCtrl+W'], ['Toggle Sidebar by State', 'CmdOrCtrl+G']] as const) {
       const it = byLabel(menu, label);
       assert.equal(it.accelerator, accel);
       assert.equal(it.registerAccelerator, false, `${label} must not swallow the key`);

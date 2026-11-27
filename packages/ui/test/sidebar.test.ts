@@ -4,6 +4,7 @@ import { BizziClient } from '@bizzi/client';
 import type { ChannelEvent } from '@bizzi/protocol';
 import { isEmptyPrefs, mergePrefs, prefsDiff, reconcilePrefs } from '../src/lib/prefs.ts';
 import { desktopRedirect, parseHash, routeHref } from '../src/lib/router.ts';
+import { IDLE_FOLD_AT, readGroupBy, readSectionFolds, sectionFolded } from '../src/lib/sidebarTree.ts';
 import {
   AUTO_MAX,
   AUTO_MIN,
@@ -145,4 +146,17 @@ test('session tree layout: helpers fold under their parent, the open one unfolds
   assert.deepEqual(shape(layoutSessionTree(lines, { lead: true }, null)), ['lead@0+', 'other@0'], 'folded: no helpers and no ended line');
   assert.deepEqual(shape(layoutSessionTree(lines, { lead: true, h1: true }, 'h1a')), ['lead@0-', 'h1@1-', 'h1a@2-', 'h1a1@3-', 'h1a1x@3', 'ended:lead:2@1', 'other@0'], 'the open session unfolds its parents');
   assert.deepEqual(shape(layoutSessionTree(lines, { h1a: true }, null)), ['lead@0-', 'h1@1-', 'h1a@2+', 'ended:lead:2@1', 'other@0']);
+});
+
+test('by state: the grouping pref reads back safely; a long Idle starts folded, your choice wins, the open session unfolds', () => {
+  assert.equal(readGroupBy('state'), 'state');
+  for (const raw of ['workspace', null, 42, 'nope']) assert.equal(readGroupBy(raw), 'workspace');
+  assert.deepEqual(readSectionFolds({ idle: false, waiting: true, junk: 1 }), { idle: false, waiting: true });
+  assert.deepEqual(readSectionFolds('x'), {});
+  assert.equal(sectionFolded('idle', IDLE_FOLD_AT, {}, false), false);
+  assert.equal(sectionFolded('idle', IDLE_FOLD_AT + 1, {}, false), true);
+  assert.equal(sectionFolded('working', 40, {}, false), false);
+  assert.equal(sectionFolded('idle', 40, { idle: false }, false), false, 'opened by hand');
+  assert.equal(sectionFolded('waiting', 1, { waiting: true }, false), true, 'folded by hand');
+  assert.equal(sectionFolded('waiting', 1, { waiting: true }, true), false, 'holds the open session');
 });

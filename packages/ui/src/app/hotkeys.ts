@@ -14,6 +14,7 @@ import { openAddWorkspace } from './addWorkspace.ts';
 import { showToast } from './contextMenu.ts';
 import { navigate } from './hooks.ts';
 import { closeSessionFlow } from './sessionActions.ts';
+import { sidebarGroupStore } from './sidebar.ts';
 
 const KEY = 'bizzi.hotkeys';
 
@@ -156,12 +157,13 @@ export async function closeSessionHere(store: BizziStore, route: Route): Promise
 function run(id: HotkeyId, store: BizziStore, route: Route): void {
   if (id === 'newWorkspace') newWorkspaceHere(store, route);
   else if (id === 'newSession') newSessionHere(store, route);
+  else if (id === 'groupByState') sidebarGroupStore.toggle();
   else void closeSessionHere(store, route);
 }
 
 /**
  * The shell's listener: hotkeys switched on in Settings › Hotkeys, and desktop menu commands (always).
- * Capture phase, so editors and terminals that handle keys themselves don't swallow ⌘N / ⌘T / ⌘W first.
+ * Capture phase, so editors and terminals that handle keys themselves don't swallow ⌘N / ⌘T / ⌘W / ⌘G first.
  */
 export function useGlobalHotkeys(store: BizziStore, route: Route): void {
   const routeRef = useRef(route);

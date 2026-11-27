@@ -14,6 +14,8 @@ test('hotkeys: ⌘ on macOS, Ctrl elsewhere, exactly that modifier', () => {
   assert.equal(matchHotkey(key('t', { metaKey: true }), { mac: true, prefs: on }), 'newSession');
   assert.equal(matchHotkey(key('w', { metaKey: true }), { mac: true, prefs: on }), 'closeSession');
   assert.equal(matchHotkey(key('w', { ctrlKey: true }), { mac: false, prefs: on }), 'closeSession');
+  assert.equal(matchHotkey(key('g', { metaKey: true }), { mac: true, prefs: on }), 'groupByState');
+  assert.equal(matchHotkey(key('G', { metaKey: true, shiftKey: true }), { mac: true, prefs: on }), null, '⇧⌘G is the browser’s find previous');
   assert.equal(matchHotkey(key('W', { metaKey: true, shiftKey: true }), { mac: true, prefs: on }), null, '⇧⌘W closes the window');
   assert.equal(matchHotkey(key('n', { ctrlKey: true }), { mac: true, prefs: on }), null, 'Ctrl+N on a Mac is the shell’s');
   assert.equal(matchHotkey(key('N', { metaKey: true, shiftKey: true }), { mac: true, prefs: on }), null, '⌘⇧N is New Prompt');
@@ -27,7 +29,7 @@ test('hotkeys: ⌘ on macOS, Ctrl elsewhere, exactly that modifier', () => {
 
 test('hotkeys: switched off per device; Ctrl+letter in a terminal stays with the shell (not ⌘)', () => {
   const prefs = readHotkeyPrefs({ newSession: false, junk: 1 });
-  assert.deepEqual(prefs, { newWorkspace: true, newSession: false, closeSession: true });
+  assert.deepEqual(prefs, { newWorkspace: true, newSession: false, closeSession: true, groupByState: true });
   assert.equal(matchHotkey(key('t', { metaKey: true }), { mac: true, prefs }), null);
   assert.equal(matchHotkey(key('t', { ctrlKey: true }), { mac: false, prefs: on, inTerminal: true }), null);
   assert.equal(matchHotkey(key('w', { ctrlKey: true }), { mac: false, prefs: on, inTerminal: true }), null, 'Ctrl+W deletes a word in the shell');

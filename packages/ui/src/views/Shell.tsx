@@ -4,16 +4,17 @@ import { selectKnowledgeSuggestionCount, selectMachineList, selectWaitingCount }
 import { openAddWorkspace } from '../app/addWorkspace.ts';
 import { ContextMenuHost, GlobalDialogs, ToastHost } from '../components/ContextMenu.tsx';
 import { useBizzi, useBizziContext } from '../app/context.tsx';
-import { useGlobalHotkeys } from '../app/hotkeys.ts';
+import { isMac, useGlobalHotkeys } from '../app/hotkeys.ts';
 import { navigate, useIsWide, useRoute, useTheme } from '../app/hooks.ts';
 import type { ThemePref } from '../app/hooks.ts';
 import { useTargetMachineId } from '../app/machine.ts';
-import { sidebarStore, useSidebarPref } from '../app/sidebar.ts';
+import { sidebarGroupStore, sidebarStore, useSidebarGroupBy, useSidebarPref } from '../app/sidebar.ts';
 import { useServerThemes } from '../app/theme.ts';
 import { Icon } from '../components/icons.tsx';
 import type { IconName } from '../components/icons.tsx';
 import { TitleBarStrip } from '../components/layout.tsx';
-import { Button, Spinner, cx } from '../components/ui.tsx';
+import { Button, Segmented, Spinner, cx } from '../components/ui.tsx';
+import { HOTKEYS, hotkeyLabel } from '../lib/hotkeys.ts';
 import { pickerRequestFromHash } from '../lib/picker.ts';
 import { desktopRedirect, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
@@ -27,6 +28,7 @@ import { MachineView } from './MachineView.tsx';
 import { WorkspaceView } from './WorkspaceView.tsx';
 import { WorkspacesView } from './WorkspacesView.tsx';
 import { MachineTree } from './sidebar/MachineTree.tsx';
+import { StateList } from './sidebar/StateList.tsx';
 import { UsageBar } from './usage/Usage.tsx';
 
 const SessionView = lazy(() => import('./session/SessionView.tsx').then((m) => ({ default: m.SessionView })));
@@ -286,6 +288,8 @@ function Sidebar(props: { route: Route }): ReactNode {
     props.route.name === 'workspace' ? props.route.workspaceId : props.route.name === 'session' ? (s.sessions[props.route.sessionId]?.workspaceId ?? null) : null,
   );
   const activeMachine = props.route.name === 'machine' ? (props.route.machineId ?? selected) : null;
+  const activeSession = props.route.name === 'session' ? props.route.sessionId : null;
+  const groupBy = useSidebarGroupBy();
   const status = conn === 'open' ? (target.source === 'mock' ? `mock ${role ?? ''}` : role === 'hub' ? `hub${hubName ? ` · ${hubName}` : ''}` : 'connected') : conn;
 
   const pref = useSidebarPref();
@@ -315,9 +319,14 @@ function Sidebar(props: { route: Route }): ReactNode {
         <HeaderNav route={props.route} />
       </div>
       <UpdatePill />
-      <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto border-t border-sidebar-border px-1 pt-2 pb-2">
+      <GroupByToggle />
+      <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto px-1 pt-1 pb-2">
         <div ref={treeRef}>
-          <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} activeSessionId={props.route.name === 'session' ? props.route.sessionId : null} />
+          {groupBy === 'state' ? (
+            <StateList activeSessionId={activeSession} />
+          ) : (
+            <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} activeSessionId={activeSession} />
+          )}
         </div>
       </div>
       <div className="flex items-center gap-1 border-t border-sidebar-border px-2 py-2">
@@ -329,6 +338,26 @@ function Sidebar(props: { route: Route }): ReactNode {
       </div>
       <ResizeHandle width={width} windowWidth={windowWidth} auto={pref.mode === 'auto'} />
     </aside>
+  );
+}
+
+/** Sessions by workspace (the machine › workspace tree) or by state (one list under counted headers). */
+function GroupByToggle(): ReactNode {
+  const groupBy = useSidebarGroupBy();
+  const hk = HOTKEYS.find((h) => h.id === 'groupByState')!;
+  return (
+    <div className="flex items-center gap-2 border-t border-sidebar-border px-2 pt-2 pb-1" title={`List sessions by workspace or by state (${hotkeyLabel(hk, isMac())})`}>
+      <Segmented
+        size="sm"
+        className="w-full [&>button]:flex-1"
+        value={groupBy}
+        onChange={(v) => sidebarGroupStore.set(v)}
+        items={[
+          { value: 'workspace', label: 'Workspaces' },
+          { value: 'state', label: 'By state' },
+        ]}
+      />
+    </div>
   );
 }
 
@@ -490,6 +519,7 @@ function ResizeHandle(props: { width: number; windowWidth: number; auto: boolean
 
 function HandleMenu(props: { x: number; y: number; auto: boolean; width: number; onClose: () => void }): ReactNode {
   const { onClose } = props;
+  const groupBy = useSidebarGroupBy();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const onDown = (e: MouseEvent): void => {
@@ -518,6 +548,16 @@ function HandleMenu(props: { x: number; y: number; auto: boolean; width: number;
       <button type="button" role="menuitemcheckbox" aria-checked={props.auto} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-panel-2" onClick={pick(() => sidebarStore.setAuto(!props.auto, props.width))}>
         <span className="flex w-4 justify-center">{props.auto ? <Icon name="check" size={14} /> : null}</span>
         Fit automatically
+      </button>
+      <button
+        type="button"
+        role="menuitemcheckbox"
+        aria-checked={groupBy === 'state'}
+        className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left hover:bg-panel-2"
+        onClick={pick(() => sidebarGroupStore.toggle())}
+      >
+        <span className="flex w-4 justify-center">{groupBy === 'state' ? <Icon name="check" size={14} /> : null}</span>
+        Group sessions by state
       </button>
     </div>
   );

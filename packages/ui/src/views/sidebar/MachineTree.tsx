@@ -509,9 +509,10 @@ interface HelperFolds {
 /**
  * One live session: a caret when it has live helpers (they fold away under it, and their count shows), its
  * state, name, branch chip (a helper working in another worktree) and context bar; why it waits or failed, or
- * what runs in the background, on a second line.
+ * what runs in the background, on a second line. Shared with the "By state" list (StateList.tsx), which puts
+ * where the session lives in `lead`, before its name.
  */
-function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expandable: boolean; folded: boolean; onFold: (id: string) => void; phone: boolean; online: boolean; active: boolean }): ReactNode {
+export function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expandable: boolean; folded: boolean; onFold: (id: string) => void; phone: boolean; online: boolean; active: boolean; lead?: ReactNode }): ReactNode {
   const { line: l, phone } = props;
   const store = useStore();
   const elsewhere = l.elsewhere;
@@ -560,6 +561,7 @@ function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expand
         <span className={cx('flex items-center gap-1.5', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]')}>
           <AgentMark agent={l.agent} state={l.state} size={phone ? 18 : 14} title={`${AGENT_LABEL[l.agent]} · ${MARK_LABEL[l.state]}`} />
           {l.mode === 'terminal' ? <Icon name="terminal" size={12} className="shrink-0 text-muted" /> : null}
+          {props.lead}
           <span className={cx('flex-1 truncate', elsewhere ? 'min-w-[7rem]' : 'min-w-0')}>{l.title}</span>
           {elsewhere ? (
             // Gives way to the title first: the branch truncates down to its icon.
