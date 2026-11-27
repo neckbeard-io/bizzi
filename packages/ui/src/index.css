@@ -388,6 +388,13 @@
   overflow-x: auto;
   font-size: 0.86em;
   line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Settings › Appearance › Wrap code blocks off: long lines scroll sideways instead. */
+.code-nowrap .md pre {
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .md pre code {
   background: none;

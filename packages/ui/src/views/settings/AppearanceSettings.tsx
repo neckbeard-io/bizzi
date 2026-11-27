@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useBizzi, useStore } from '../../app/context.tsx';
+import { codeWrapStore, useCodeWrap } from '../../app/codeWrap.ts';
 import { useAction, useIsWide } from '../../app/hooks.ts';
 import { sidebarStore, useSidebarPref } from '../../app/sidebar.ts';
 import { deleteCustomTheme, saveCustomTheme, themeIdTaken, themeStore, useThemeState } from '../../app/theme.ts';
@@ -37,6 +38,7 @@ export function AppearanceSettings(): ReactNode {
   const s = useThemeState();
   const wide = useIsWide();
   const sidebar = useSidebarPref();
+  const codeWrap = useCodeWrap();
   const [importing, setImporting] = useState<{ result: ImportResult; fileName: string } | null>(null);
   const [creating, setCreating] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -94,6 +96,19 @@ export function AppearanceSettings(): ReactNode {
         </div>
         <FontRow kind="ui" value={s.uiFont} />
         <FontRow kind="code" value={s.codeFont} />
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="flex-1 text-sm">
+            Long lines in code blocks <span className="text-xs text-muted">· this device</span>
+          </span>
+          <Segmented<'wrap' | 'scroll'>
+            value={codeWrap ? 'wrap' : 'scroll'}
+            onChange={(v) => codeWrapStore.set(v === 'wrap')}
+            items={[
+              { value: 'wrap', label: 'Wrap' },
+              { value: 'scroll', label: 'Scroll sideways' },
+            ]}
+          />
+        </div>
         {wide ? (
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex-1 text-sm">
