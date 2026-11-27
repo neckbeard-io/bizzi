@@ -14,7 +14,7 @@ const base: StartSessionOptions = { sessionId: 's_q', mode: 'structured', cwd: '
 
 async function setup(script: Script) {
   const fq = fakeQueryFn(script);
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
   const c = collector();
   const session = (await adapter.start(base, c.emit, { logger: silentLogger })) as ClaudeSession;
   return { adapter, session, c, fq: fq.last() };
@@ -348,7 +348,7 @@ test('usage after resume: the first turn omits cost (cumulative cost is restored
     // The CLI restores the conversation's cumulative cost (0.05 before this process) on resume.
     fq.emit(result([u.uuid!], fq.received.length === 1 ? 0.06 : 0.08));
   });
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
   const c = collector();
   const session = await adapter.start({ ...base, resumeRef: 'abc' }, c.emit, { logger: silentLogger });
   await session.send('t1', [{ type: 'text', text: 'a' }]);
@@ -375,7 +375,7 @@ test('an elicitation between turns returns the session to idle once answered', a
 
 test('dispose stops every live session', async () => {
   const fq = fakeQueryFn(() => {});
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
   const c1 = collector();
   const c2 = collector();
   const s1 = await adapter.start({ ...base, sessionId: 'a' }, c1.emit, { logger: silentLogger });

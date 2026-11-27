@@ -20,6 +20,7 @@ import type { McpServerConfig, ModelInfo, Options, SDKUserMessage, SettingSource
 import { EFFORT_LEVELS, PERMISSION_MODES, isEffort, isPermissionMode } from './mapping.ts';
 import { findClaudeBinary, probeClaude } from './probe.ts';
 import { ClaudeSession } from './session.ts';
+import { hasTranscript } from './transcript.ts';
 import { keyFingerprint } from './usage.ts';
 import type { QueryFn } from './types.ts';
 
@@ -45,6 +46,8 @@ export interface ClaudeAdapterOptions {
   interruptGraceMs?: number;
   /** Extra SDK options merged last (hooks, agents, thinking, sandbox, plugins, …). */
   sdkOptions?: Partial<Options>;
+  /** Whether Claude Code has a transcript to resume (`undefined`: can't tell). Default: looks in its projects dir. */
+  hasTranscript?: (sessionId: string, env: Record<string, string | undefined>) => Promise<boolean | undefined>;
 }
 
 /** @deprecated `fork` is part of StartSessionOptions since protocol v1.1. */
@@ -164,7 +167,8 @@ export class ClaudeAdapter implements AgentAdapter {
       throw new BizziError('unsupported', 'the Claude SDK adapter only runs structured sessions');
     }
     const log = ctx.logger.child({ adapter: 'claude', sessionId: opts.sessionId });
-    const fork = opts.fork === true && !!opts.resumeRef;
+    let resumeRef = opts.resumeRef;
+    let fork = opts.fork === true && !!resumeRef;
     const allowBypass = this.#opts.allowBypassPermissions ?? true;
 
     let permissionMode: Options['permissionMode'];
@@ -181,10 +185,6 @@ export class ClaudeAdapter implements AgentAdapter {
       effort = opts.effort;
     }
 
-    // A fresh session gets its id up front so agentSessionRef is known before the first turn.
-    const sessionUuid = opts.resumeRef && !fork ? undefined : randomUUID();
-    const ref = sessionUuid ?? opts.resumeRef;
-
     let executable: string | undefined = opts.executable;
     // Container workspaces (topology.md §7): the `claude` installed inside the target runs instead.
     if (opts.launcher) executable = 'claude';
@@ -199,6 +199,23 @@ export class ClaudeAdapter implements AgentAdapter {
 
     const env: Record<string, string | undefined> = { ...process.env, ...opts.env, CLAUDE_AGENT_SDK_CLIENT_APP: CLIENT_APP };
     const fingerprint = keyFingerprint({ ...env, ...(this.#opts.sdkOptions?.env ?? {}) });
+
+    // A session that was started but never sent a message has no transcript, so resuming it fails
+    // ("No conversation found"). Start it fresh instead, under the same id so its ref doesn't change.
+    let freshId: string | undefined;
+    if (resumeRef && !opts.launcher) {
+      const check = this.#opts.hasTranscript ?? hasTranscript;
+      const exists = await check(resumeRef, { ...env, ...(this.#opts.sdkOptions?.env ?? {}) }).catch(() => undefined);
+      if (exists === false) {
+        log.log('info', 'no Claude Code transcript to resume; starting the conversation fresh', { ref: resumeRef, fork });
+        if (!fork) freshId = resumeRef;
+        resumeRef = undefined;
+        fork = false;
+      }
+    }
+    // A fresh session gets its id up front so agentSessionRef is known before the first turn.
+    const sessionUuid = resumeRef && !fork ? undefined : (freshId ?? randomUUID());
+    const ref = sessionUuid ?? resumeRef;
     const session = new ClaudeSession(
       emit,
       log,
@@ -206,7 +223,7 @@ export class ClaudeAdapter implements AgentAdapter {
         maxToolOutputChars: this.#opts.maxToolOutputChars ?? 8000,
         interruptGraceMs: this.#opts.interruptGraceMs ?? 10_000,
         allowBypassPermissions: allowBypass,
-        resumed: !!opts.resumeRef,
+        resumed: !!resumeRef,
         injection: {
           ...(opts.systemPromptAppend ? { systemPromptAppend: opts.systemPromptAppend } : {}),
           ...(opts.mcpServers ? { mcpServers: Object.keys(opts.mcpServers) } : {}),
@@ -234,7 +251,7 @@ export class ClaudeAdapter implements AgentAdapter {
       ...(opts.model ? { model: opts.model } : {}),
       ...(permissionMode ? { permissionMode } : {}),
       ...(effort ? { effort } : {}),
-      ...(opts.resumeRef ? { resume: opts.resumeRef } : {}),
+      ...(resumeRef ? { resume: resumeRef } : {}),
       ...(fork ? { forkSession: true } : {}),
       ...(sessionUuid ? { sessionId: sessionUuid } : {}),
       ...(opts.mcpServers && Object.keys(opts.mcpServers).length ? { mcpServers: toSdkMcpServers(opts.mcpServers) } : {}),

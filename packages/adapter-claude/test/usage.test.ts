@@ -41,7 +41,7 @@ function ctxResponse(over: Partial<SDKControlGetContextUsageResponse> = {}): SDK
 
 async function setup(script: Script, extend: (fq: FakeQuery) => void, start: Partial<StartSessionOptions> = {}) {
   const fq = fakeQueryFn(script, extend);
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
   const c = collector();
   const session = (await adapter.start({ ...base, ...start }, c.emit, { logger: silentLogger })) as ClaudeSession;
   return { adapter, session, c, fq: fq.last() };
