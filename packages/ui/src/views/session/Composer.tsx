@@ -18,7 +18,8 @@ export function Composer(props: { sessionId: string }): ReactNode {
   const ref = useRef<HTMLTextAreaElement>(null);
 
   const busy = activeTurn !== null || isBusy(status);
-  const closed = status === 'ended' || status === 'failed' || !online;
+  // Only a closed session is read-only: after a crash ('failed') the next message starts the agent again.
+  const closed = status === 'ended' || !online;
   const canSteer = busy && (caps?.steer ?? false);
   const canInterrupt = busy && (caps?.interrupt ?? false);
 
@@ -55,7 +56,9 @@ export function Composer(props: { sessionId: string }): ReactNode {
       ? canSteer
         ? 'Steer the agent while it works…'
         : 'The agent is working…'
-      : 'Message the agent…';
+      : status === 'failed'
+        ? 'The agent stopped. Send a message to resume it…'
+        : 'Message the agent…';
 
   return (
     <div className="pb-safe shrink-0 border-t border-border bg-panel">

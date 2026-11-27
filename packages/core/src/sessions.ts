@@ -162,6 +162,8 @@ export interface AgentProcessInfo {
 /** Cap for `term.snapshot` output. */
 export const TERMINAL_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
 
+// Statuses with no agent process behind them. Only 'ended' is final: someone closed the session.
+// 'failed' (the agent crashed or didn't start) stays open, and the next message tries again (spec §4.1).
 const TERMINAL_STATUSES: readonly SessionStatus[] = ['ended', 'failed'];
 const DECISIONS: readonly ApprovalDecisionKind[] = ['allow', 'allow_always', 'deny'];
 const STOP_TIMEOUT_MS = 10_000;
@@ -228,6 +230,8 @@ interface Runtime {
   deleting?: Promise<void>;
   /** Set while the agent process is being replaced (updates.md §5); sends wait for it. */
   restarting?: Promise<void>;
+  /** bizzi is stopping the agent process (#stopHandle): the core, not the adapter, decides the status. */
+  stoppingAgent: boolean;
   /** installKey() of the install the last restart failed on; automatic restarts skip it. */
   restartFailedFor?: string;
 }
@@ -248,6 +252,7 @@ function newRuntime(info: SessionInfo, state: SessionState, adapter: AgentAdapte
     resolutions: new Map(),
     settling: false,
     deleted: false,
+    stoppingAgent: false,
   };
 }
 
@@ -269,7 +274,10 @@ export class Sessions {
 
   // --- restart recovery ---------------------------------------------------------------------------
 
-  /** Load persisted sessions. Active ones become idle (resumable) or ended; pending approvals/questions are canceled. */
+  /**
+   * Load persisted sessions. Every session nobody closed comes back idle (the next message resumes
+   * it, or starts over when the agent can't resume); pending approvals/questions are canceled.
+   */
   load(): void {
     this.#loading = true;
     try {
@@ -277,8 +285,8 @@ export class Sessions {
     } finally {
       this.#loading = false;
     }
-    // Child helpers of sessions that ended (now, or before a crash) stop too.
-    for (const rt of [...this.#byId.values()]) if (TERMINAL_STATUSES.includes(rt.info.status)) this.#cascade(rt.info.id);
+    // Child helpers of sessions that were closed (before a crash, say) stop too.
+    for (const rt of [...this.#byId.values()]) if (rt.info.status === 'ended') this.#cascade(rt.info.id);
   }
 
   #loadRows(): void {
@@ -294,13 +302,16 @@ export class Sessions {
       const caps = this.#caps(rt);
       const ref = rt.info.agentSessionRef ?? (caps.fork ? rt.state.forkOf : undefined);
       const resumable = Boolean(rt.adapter && caps.resumeAfterNodeRestart && ref);
+      // Only a session someone closed stays ended. Older versions also ended sessions whose agent
+      // exited, or that bizzi stopped to restart or update; those reopen.
+      const reopen = rt.info.status === 'ended' && !this.#closedByUser(rt);
       // No agent process survives a node restart; the next start records the version it runs. A
       // structured agent that was running resumes through the restart sequence on its next start
       // (updates.md §7). Terminal sessions reattach to their PTY supervisor (or start a new process
       // under a new ref when it's gone), so they keep the plain path.
       const ran = rt.info.agentVersion !== undefined || rt.state.agentPath !== undefined;
       const structured = rt.info.mode === 'structured';
-      if (ran && structured && resumable && rt.info.agentSessionRef && !TERMINAL_STATUSES.includes(rt.info.status)) {
+      if (ran && structured && resumable && rt.info.agentSessionRef && (reopen || !TERMINAL_STATUSES.includes(rt.info.status))) {
         rt.state.nodeRestarted = rt.info.agentVersion ? { fromVersion: rt.info.agentVersion } : {};
       }
       if (ran) {
@@ -308,29 +319,49 @@ export class Sessions {
         rt.state.agentPath = undefined;
         this.#persist(rt);
       }
-      if (TERMINAL_STATUSES.includes(rt.info.status)) {
+      if (TERMINAL_STATUSES.includes(rt.info.status) && !reopen) {
         this.#cancelPending(rt, false);
         continue;
       }
 
       this.#closeOpenTurn(rt, 'interrupted', 'node restarted');
-      const status: SessionStatus = resumable ? 'idle' : 'ended';
+      const status: SessionStatus = 'idle';
+      if (!resumable && rt.info.agentSessionRef && !rt.state.startFresh) {
+        rt.state.startFresh = true;
+        this.#persist(rt);
+      }
       if (rt.state.queued) {
         // Queued helpers were never started; the queue itself doesn't survive a restart.
         rt.state.queued = undefined;
+        rt.state.closed = true;
         this.#append(rt, { type: 'session.status', data: { status: 'ended', reason: 'node restarted while the helper was queued' } });
         continue;
       }
       if (rt.info.status !== status) {
-        this.#append(rt, {
-          type: 'session.status',
-          data: { status, reason: resumable ? 'node restarted' : 'node restarted; session cannot be resumed' },
-        });
+        const reason = reopen
+          ? 'reopened: it ended without being closed'
+          : resumable
+            ? 'node restarted'
+            : "node restarted; the agent can't resume this conversation, so the next message starts a new one";
+        this.#append(rt, { type: 'session.status', data: { status, reason } });
       }
       if (status === 'idle' && rt.state.budgetBlocked) {
         this.#append(rt, { type: 'session.status', data: { status: 'waiting_input', prompt: 'budget', reason: rt.state.budgetBlocked } });
       }
     }
+  }
+
+  /**
+   * Whether an ended session was closed by someone (`closed`). Sessions from before the marker
+   * count as closed when their last status came from session.stop ('stopped'); the answer is kept.
+   */
+  #closedByUser(rt: Runtime): boolean {
+    if (rt.state.closed) return true;
+    const last = this.#d.store.lastData(sessionChannel(rt.info.id), 'session.status') as { status?: string; reason?: string } | undefined;
+    if (last?.status !== 'ended' || last.reason !== 'stopped') return false;
+    rt.state.closed = true;
+    this.#persist(rt);
+    return true;
   }
 
   // --- queries --------------------------------------------------------------------------------------
@@ -775,6 +806,7 @@ export class Sessions {
     try {
       await this.#stopHandle(rt);
       this.#closeOpenTurn(rt, 'interrupted', 'session stopped');
+      rt.state.closed = true;
       this.#append(rt, { type: 'session.status', data: { status: 'ended', reason: 'stopped' } });
     } finally {
       rt.stopping = false;
@@ -957,7 +989,18 @@ export class Sessions {
     this.#onAdapterEvent(rt, rt.generation, body);
   }
 
+  /** Keystrokes. After the process exited, the first one starts it again (resuming when it can) and is dropped. */
   termInput(id: string, data: Uint8Array): void {
+    const rt = this.#get(id);
+    if (rt.info.mode === 'terminal' && !rt.handle) {
+      if (rt.starting) return;
+      this.#assertAccepting();
+      this.#assertOpen(rt);
+      this.#ensureStarted(rt, this.#resumeFor(rt)).catch(() => {
+        // #ensureStarted recorded the failure on the session channel.
+      });
+      return;
+    }
     const h = this.#terminalHandle(id);
     if (!h.writeTerminal) throw new BizziError('unsupported', 'terminal input is not supported');
     h.writeTerminal(data);
@@ -965,9 +1008,12 @@ export class Sessions {
 
   termResize(id: string, cols: number, rows: number): void {
     const rt = this.#get(id);
-    const h = this.#terminalHandle(id);
-    if (!h.resizeTerminal) throw new BizziError('unsupported', 'terminal resize is not supported');
-    h.resizeTerminal(cols, rows);
+    // No process right now: keep the size for the next start.
+    if (rt.info.mode !== 'terminal' || rt.handle) {
+      const h = this.#terminalHandle(id);
+      if (!h.resizeTerminal) throw new BizziError('unsupported', 'terminal resize is not supported');
+      h.resizeTerminal(cols, rows);
+    }
     rt.state.cols = cols;
     rt.state.rows = rows;
     this.#persist(rt);
@@ -1088,6 +1134,7 @@ export class Sessions {
 
   /** How the next (lazy) start continues the conversation: fork (not started yet), resume, or fresh. */
   #resumeFor(rt: Runtime): ResumeOpts {
+    if (rt.state.startFresh) return {};
     if (rt.state.forkOf && !rt.info.agentSessionRef) return { resumeRef: rt.state.forkOf, fork: true };
     return this.#caps(rt).resume && rt.info.agentSessionRef ? { resumeRef: rt.info.agentSessionRef } : {};
   }
@@ -1172,6 +1219,10 @@ export class Sessions {
           throw new BizziError('conflict', 'session was stopped while starting');
         }
         rt.handle = handle;
+        if (rt.state.startFresh) {
+          rt.state.startFresh = undefined;
+          this.#persist(rt);
+        }
         this.#recordAgent(rt, handle, spawned);
         if (afterNode && oldRef) return this.#verifyNodeResume(rt, handle, oldRef, afterNode, spawned);
         const ref = safeRef(handle);
@@ -1525,9 +1576,14 @@ export class Sessions {
     const handle = rt.handle;
     rt.handle = undefined;
     if (handle) {
-      await withTimeout(handle.stop(), STOP_TIMEOUT_MS).catch((err: unknown) => {
-        this.#log.log('warn', 'adapter stop failed', { sessionId: rt.info.id, err });
-      });
+      rt.stoppingAgent = true;
+      try {
+        await withTimeout(handle.stop(), STOP_TIMEOUT_MS).catch((err: unknown) => {
+          this.#log.log('warn', 'adapter stop failed', { sessionId: rt.info.id, err });
+        });
+      } finally {
+        rt.stoppingAgent = false;
+      }
     }
     // Invalidate after stop() so events emitted while stopping (e.g. turn.completed) are kept.
     rt.generation++;
@@ -1575,6 +1631,26 @@ export class Sessions {
     return rt.state.currentTurnId ? 'running' : 'idle';
   }
 
+  /**
+   * The agent process exited or crashed on its own. The session stays open: the turn closes, and the
+   * next message (or keystroke, in a terminal) starts the agent again, resuming its conversation
+   * when it can (spec §4.1). A crash leaves the session 'failed' so it stands out until then.
+   */
+  #agentExited(rt: Runtime, crashed: boolean, reason: string | undefined): void {
+    const why = reason ?? (crashed ? 'it crashed' : 'it exited');
+    this.#closeOpenTurn(rt, 'error', `the agent process ended (${why})`);
+    const handle = rt.handle;
+    rt.handle = undefined;
+    rt.generation++;
+    if (handle) void handle.stop().catch(() => {});
+    const next = rt.info.mode === 'terminal' ? 'Press a key in the terminal to start it again' : 'Your next message resumes the session';
+    this.#append(rt, {
+      type: 'error',
+      data: { message: `${rt.info.agent} ${crashed ? 'stopped unexpectedly' : 'exited'} (${why}). ${next}.`, code: 'agent_exited', fatal: false },
+    });
+    this.#append(rt, { type: 'session.status', data: crashed ? { status: 'failed', reason: why } : { status: 'idle', reason: `agent exited: ${why}` } });
+  }
+
   #onAdapterEvent(rt: Runtime, gen: number, body: SessionEventBody): void {
     if (gen !== rt.generation || !this.#d.store.isOpen || this.#closed || rt.deleted) {
       this.#log.log('debug', 'dropping event from a stale adapter session', { sessionId: rt.info.id, type: body?.type });
@@ -1612,13 +1688,10 @@ export class Sessions {
         break;
       case 'session.status':
         if (body.data.status === 'ended' || body.data.status === 'failed') {
-          // The agent went away: close the turn first so the timeline stays well-formed.
-          this.#closeOpenTurn(rt, 'error', body.data.reason ?? `session ${body.data.status}`);
-          const handle = rt.handle;
-          rt.handle = undefined;
-          rt.generation++;
-          this.#append(rt, body);
-          if (handle) void handle.stop().catch(() => {});
+          // The agent process went away. When bizzi stopped it (session.stop, shutdown, a restart),
+          // the core sets the status itself; the session doesn't end with the process.
+          if (rt.stoppingAgent) return;
+          this.#agentExited(rt, body.data.status === 'failed', body.data.reason);
           return;
         }
         break;
@@ -1750,8 +1823,8 @@ export class Sessions {
     if (changed) this.#changed(rt, ev.ts);
     else if (pendingChanged) this.#persist(rt);
 
-    if (!terminal && TERMINAL_STATUSES.includes(info.status)) {
-      // Child helpers stop when their parent ends or fails (load() cascades once everything is loaded).
+    if (!terminal && info.status === 'ended') {
+      // Child helpers stop when their parent is closed (load() cascades once everything is loaded).
       if (!this.#loading) this.#cascade(info.id);
     } else if (body.type === 'turn.completed' && !terminal) {
       // Budgets are enforced at turn boundaries (usage.md §2).
@@ -1766,7 +1839,7 @@ export class Sessions {
   #cascade(parentId: string): void {
     for (const child of this.#byId.values()) {
       if (child.info.spawnedBy !== parentId || child.info.scope !== 'child') continue;
-      if (child.deleted || TERMINAL_STATUSES.includes(child.info.status)) continue;
+      if (child.deleted || child.info.status === 'ended') continue;
       this.#log.log('debug', 'stopping child helper with its parent', { sessionId: child.info.id, parentId });
       this.stop(child.info.id).catch((err: unknown) => {
         this.#log.log('warn', 'failed to stop child helper', { sessionId: child.info.id, parentId, err });

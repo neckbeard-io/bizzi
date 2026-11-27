@@ -101,7 +101,7 @@ function RunCard(props: { run: FanoutRunModel }): ReactNode {
   const online = useMachineOnline(s.machineId);
   const [tree, setTree] = useState<WorktreeState | null>(null);
   const [treeErr, setTreeErr] = useState<unknown>(null);
-  const live = s.status !== 'ended' && s.status !== 'failed';
+  const live = s.status !== 'ended';
   const wsId = r.workspace?.id;
 
   // The worktree's real state (git.status + git.diff); reloaded when the run settles.

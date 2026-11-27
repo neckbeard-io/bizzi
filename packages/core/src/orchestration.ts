@@ -405,7 +405,8 @@ export class Orchestrator {
       if (ev.type === 'session.removed') this.#reported.delete(ev.data.sessionId);
       else if (ev.type === 'session.updated' && TERMINAL.includes(ev.data.session.status)) this.#reported.delete(ev.data.session.id);
       if (this.#remote.size === 0) return;
-      if (ev.type === 'session.updated' && TERMINAL.includes(ev.data.session.status)) this.#parentGone(ev.data.session.id, false);
+      // Helpers stop when their parent is closed, not when its agent crashed (that session resumes).
+      if (ev.type === 'session.updated' && ev.data.session.status === 'ended') this.#parentGone(ev.data.session.id, false);
       else if (ev.type === 'session.removed') this.#parentGone(ev.data.sessionId, true);
     });
     this.#offHub = deps.hub?.onChange((state) => {
@@ -899,9 +900,9 @@ export class Orchestrator {
     if (!Array.isArray(list)) return;
     for (const r of list) {
       if (!r || typeof r.helperId !== 'string' || typeof r.parentId !== 'string' || typeof r.machineId !== 'string' || !r.info) continue;
-      // A child whose parent ended (or vanished) while this node was down stops on the next link.
+      // A child whose parent was closed (or vanished) while this node was down stops on the next link.
       const parent = this.#d.sessions.has(r.parentId) ? this.#d.sessions.get(r.parentId).session : undefined;
-      if (r.scope === 'child' && !TERMINAL.includes(r.info.status) && (!parent || TERMINAL.includes(parent.status))) r.stopPending = true;
+      if (r.scope === 'child' && !TERMINAL.includes(r.info.status) && (!parent || parent.status === 'ended')) r.stopPending = true;
       if (!parent && !r.stopPending) continue;
       this.#remote.set(r.helperId, r);
     }

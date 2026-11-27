@@ -29,6 +29,7 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const exited = useBizzi((s) => s.timelines[sessionId]?.terminalExit ?? null);
+  const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status);
   const [renderer, setRenderer] = useState<'webgl' | 'dom'>('dom');
 
   useEffect(() => {
@@ -137,6 +138,7 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
           <span className="text-warn">
             Process exited{exited.exitCode !== null ? ` with code ${exited.exitCode}` : ''}
             {exited.signal ? ` (${exited.signal})` : ''}
+            {status !== 'ended' ? ' · press a key to start it again' : ''}
           </span>
         ) : null}
       </div>

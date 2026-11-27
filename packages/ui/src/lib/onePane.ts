@@ -273,11 +273,12 @@ export function chooseAgent(o: {
 
 /**
  * Step 2: a follow-up goes to the open session while it's live, unless the prompt changes the target
- * with a token. "Live" = not ended or failed, structured, and its machine online.
+ * with a token. "Live" = not closed (a failed session resumes on the next message), structured, and
+ * its machine online.
  */
 export function continues(session: SessionInfo | undefined, tokens: ParsedTokens, online: boolean): boolean {
   if (!session || !online || session.mode !== 'structured') return false;
-  if (session.status === 'ended' || session.status === 'failed') return false;
+  if (session.status === 'ended') return false;
   return !tokens.any;
 }
 

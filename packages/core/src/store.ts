@@ -29,6 +29,14 @@ export interface SessionState {
   /** A helper waiting for a concurrency slot (spec §12.2); not started yet. */
   queued?: boolean;
   /**
+   * Someone closed the session (`session.stop`, a parent stopping its helper, removing the
+   * workspace). The only way a session ends: an agent process that exits, crashes or is stopped by
+   * bizzi leaves the session open, and the next message resumes it (spec §4.1).
+   */
+  closed?: boolean;
+  /** The agent can't resume this conversation after a node restart: the next start is a fresh one. */
+  startFresh?: boolean;
+  /**
    * Real path of the executable the running agent process was launched from (updates.md §2), when
    * it existed at spawn. Gone from disk later = the process is stale.
    */
@@ -82,6 +90,7 @@ export class Store {
   readonly #insertEvent: StatementSync;
   readonly #replay: StatementSync;
   readonly #maxSeq: StatementSync;
+  readonly #lastOfType: StatementSync;
   readonly #upsertSession: StatementSync;
   readonly #termTail: StatementSync;
 
@@ -96,6 +105,7 @@ export class Store {
       'SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?',
     );
     this.#maxSeq = this.#db.prepare('SELECT MAX(seq) AS seq FROM events WHERE ch = ?');
+    this.#lastOfType = this.#db.prepare('SELECT data FROM events WHERE ch = ? AND type = ? ORDER BY seq DESC LIMIT 1');
     this.#upsertSession = this.#db.prepare(
       `INSERT INTO sessions (id, workspace_id, info, state) VALUES (?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET workspace_id = excluded.workspace_id, info = excluded.info, state = excluded.state`,
@@ -139,6 +149,12 @@ export class Store {
   maxSeq(ch: string): number {
     const row = this.#maxSeq.get(ch) as { seq: number | null } | undefined;
     return row?.seq ?? 0;
+  }
+
+  /** The data of the newest event of `type` on a channel. */
+  lastData(ch: string, type: string): unknown {
+    const row = this.#lastOfType.get(ch, type) as { data: string } | undefined;
+    return row ? JSON.parse(row.data) : undefined;
   }
 
   /** Events with seq > since, oldest first, at most `limit`. */
