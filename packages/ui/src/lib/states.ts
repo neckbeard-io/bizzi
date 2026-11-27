@@ -4,17 +4,31 @@ import type { AgentKind, BillingClass, RestartPolicy, UpdatePolicy } from '@bizz
 
 export const AGENT_LABEL: Record<AgentKind, string> = { claude: 'Claude', codex: 'Codex', opencode: 'OpenCode', agy: 'agy', shell: 'Shell', api: 'API chat' };
 
-/** One-letter glyph inside a mark (agent-type icon). */
-export const AGENT_GLYPH: Record<AgentKind, string> = { claude: 'C', codex: 'X', opencode: 'O', agy: 'A', shell: '$', api: '@' };
+/** Short glyph in a mark's agent tile (agent-type icon). Codex isn't `X`, which would read as the failed ✗. */
+export const AGENT_GLYPH: Record<AgentKind, string> = { claude: 'C', codex: 'Cx', opencode: 'O', agy: 'A', shell: '$', api: '@' };
+
+/** Agent identity color (theme-resolved `--agent-<kind>`) for a mark's glyph tile: text, tint and edge. */
+export const AGENT_TILE: Record<AgentKind, string> = {
+  claude: 'text-agent-claude bg-agent-claude/20 ring-agent-claude/60',
+  codex: 'text-agent-codex bg-agent-codex/20 ring-agent-codex/60',
+  opencode: 'text-agent-opencode bg-agent-opencode/20 ring-agent-opencode/60',
+  agy: 'text-agent-agy bg-agent-agy/20 ring-agent-agy/60',
+  shell: 'text-agent-shell bg-agent-shell/20 ring-agent-shell/60',
+  api: 'text-agent-api bg-agent-api/20 ring-agent-api/60',
+};
 
 export const MARK_LABEL: Record<MarkState, string> = { waiting: 'waiting', failed: 'failed', working: 'working', background: 'running in the background', done: 'done, not yet seen', idle: 'idle' };
 
-/** Text glyphs for compact counts (`⚠1 ◐2 ●3`). */
-export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', background: '∿', done: '✓', idle: '●' };
+/**
+ * Text form of each state's symbol (the drawn ones are StateSymbol in components/marks.tsx): a spinner for
+ * working, a dotted ring for background work, a warning for waiting, ✓ done, ✗ failed, a hollow dot for idle.
+ * Shapes, not only colors, so states read for colorblind users.
+ */
+export const MARK_SYMBOL: Record<MarkState, string> = { waiting: '⚠', failed: '✗', working: '◐', background: '∿', done: '✓', idle: '○' };
 
 /**
- * Text color per state; color carries state only (theme state tokens, which themes can't camouflage).
- * Background work is still activity, so it shares the working color; its motion (a bob, not a spin) tells them apart.
+ * Text color per state (theme state tokens, which themes can't camouflage); the symbol's shape carries the state too.
+ * Background work is still activity, so it shares the working color; its dotted ring tells them apart.
  */
 export const MARK_TEXT: Record<MarkState, string> = {
   waiting: 'text-state-waiting',
@@ -24,25 +38,6 @@ export const MARK_TEXT: Record<MarkState, string> = {
   done: 'text-state-done',
   idle: 'text-state-idle',
 };
-/** Ring/border color per state. */
-export const MARK_RING: Record<MarkState, string> = {
-  waiting: 'border-state-waiting',
-  failed: 'border-state-failed',
-  working: 'border-state-working',
-  background: 'border-state-working',
-  done: 'border-state-done',
-  idle: 'border-state-idle',
-};
-/** Filled dot per state (idle is hollow). */
-export const MARK_DOT: Record<MarkState, string> = {
-  waiting: 'bg-state-waiting',
-  failed: 'bg-state-failed',
-  working: 'bg-state-working',
-  background: 'bg-state-working',
-  done: 'bg-state-done',
-  idle: 'border border-state-idle bg-transparent',
-};
-
 export const TONE_TEXT: Record<MeterTone, string> = { neutral: 'text-fg', warn: 'text-warn', err: 'text-err' };
 export const TONE_FILL: Record<MeterTone, string> = { neutral: 'bg-muted/70', warn: 'bg-warn', err: 'bg-err' };
 

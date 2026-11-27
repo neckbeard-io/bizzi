@@ -1,16 +1,8 @@
 // bizzi Default (theming.md §4): bizzi's own look, indigo primary on neutral grays. The Device theme
 // (platform accent color) is this with the accent swapped in.
 import { ensureContrast, isColor, mix, textOn } from '../color.ts';
-import { checkStateColors } from '../resolve.ts';
-import { STATE_KEYS } from '../types.ts';
 import { DEFAULT_ANSI, DEFAULT_COLORS, DEFAULT_TERMINAL } from '../defaults.ts';
-import type { ResolvedColors, StateKey, Theme, ThemeMode, ThemeVariant } from '../types.ts';
-
-function pickStates(c: ResolvedColors): Record<StateKey, string> {
-  const out = {} as Record<StateKey, string>;
-  for (const k of STATE_KEYS) out[k] = c[k];
-  return out;
-}
+import type { Theme, ThemeMode, ThemeVariant } from '../types.ts';
 
 export const DEFAULT_THEME_ID = 'bizzi-default';
 export const DEVICE_THEME_ID = 'device';
@@ -58,10 +50,7 @@ export function deviceTheme(accent: string | null): Theme {
         sidebarPrimaryForeground: onPrimary,
         primarySoft: mix(D.card, primary, mode === 'dark' ? 0.2 : 0.1),
       });
-      // "working" takes the accent when the five state colors stay distinct (a blue accent can sit
-      // too close to "done"); otherwise it keeps bizzi's indigo.
-      const states = { ...pickStates(D), stateWorking: primary };
-      if (checkStateColors(states, { sidebar: D.sidebar, card: D.card }).length === 0) v.colors!.stateWorking = primary;
+      // State colors keep bizzi's colorblind-safe set: an accent as "working" can sit too close to another state.
       v.terminal = { ...v.terminal, cursor: primary, selection: mix(DEFAULT_TERMINAL[mode].background, primary, 0.3) };
     }
     base.variants[mode] = v;

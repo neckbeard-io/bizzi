@@ -35,8 +35,8 @@ export function HelperTree(props: { sessionId: string }): ReactNode {
         <span className="font-medium">
           {count} helper{count === 1 ? '' : 's'}
         </span>
-        <span className="flex items-center gap-1">
-          {tree.nodes.slice(1).map((n) => (n.state === 'ended' ? null : <AgentMark key={n.sessionId} agent={n.agent} state={n.state} size={14} />))}
+        <span className="flex items-center gap-2">
+          {tree.nodes.slice(1).map((n) => (n.state === 'ended' ? null : <AgentMark key={n.sessionId} agent={n.agent} state={n.state} size={14} compact backdrop="bg-panel" />))}
         </span>
         <span className="ml-auto text-muted" title="Metered spend of the whole tree (plan and budgetless sessions don't count)">
           metered {formatCost(tree.meteredUsd)}

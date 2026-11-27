@@ -345,7 +345,7 @@ export const SESSIONS: SessionInfo[] = [
     mode: 'structured',
     status: 'idle',
     title: 'Fix flaky checkout test',
-    // Turn over, but a background command is still running: the sidebar shows it as active (bobbing mark).
+    // Turn over, but a background command is still running: the sidebar shows it as active (turning dotted ring).
     background: [
       { id: 'bg_ci', kind: 'shell', description: 'Wait for PR checks to finish' },
       { id: 'bg_logs', kind: 'shell', description: 'Tail the checkout test log' },

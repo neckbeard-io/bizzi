@@ -4,10 +4,10 @@ import { test } from 'node:test';
 import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { BizziError, LABEL_COLORS } from '@bizzi/protocol';
+import { AGENT_KINDS, BizziError, LABEL_COLORS } from '@bizzi/protocol';
 import type { WorkspaceInfo } from '@bizzi/protocol';
 import { BizziClient, BizziStore, createManualScheduler } from '@bizzi/client';
-import { BUILTIN_THEMES, DEFAULT_LABELS, LABEL_MIN_CONTRAST, STATE_KEYS, bizziDefault, contrast, deltaE, resolveTheme, themeCssVars } from '../src/lib/theme/index.ts';
+import { BUILTIN_THEMES, DEFAULT_AGENT_COLORS, DEFAULT_LABELS, LABEL_MIN_CONTRAST, STATE_KEYS, bizziDefault, contrast, deltaE, resolveTheme, themeCssVars } from '../src/lib/theme/index.ts';
 import type { Theme } from '../src/lib/theme/index.ts';
 import { iconInputError, machineTagsLabel, workspaceColor, workspaceMonogram } from '../src/lib/labels.ts';
 import { MockCore, createMockSocketFactory } from '../src/mock/mockServer.ts';
@@ -42,6 +42,31 @@ test('identity colors read on sidebar, cards and page in every built-in theme, l
   }
 });
 
+test('agent identity colors read on every surface of every built-in theme and stay distinct', () => {
+  for (const t of BUILTIN_THEMES) {
+    for (const mode of ['light', 'dark'] as const) {
+      const r = resolveTheme(t, mode);
+      const where = `${t.id} ${mode}`;
+      assert.deepEqual(Object.keys(r.agents), [...AGENT_KINDS], where);
+      for (const a of AGENT_KINDS) {
+        for (const surface of ['sidebar', 'card', 'background'] as const) {
+          const ratio = contrast(r.agents[a], r.colors[surface]);
+          assert.ok(ratio >= LABEL_MIN_CONTRAST, `${where}: ${a} is ${ratio.toFixed(2)}:1 on ${surface}`);
+        }
+      }
+      for (let i = 0; i < AGENT_KINDS.length; i++) {
+        for (let j = i + 1; j < AGENT_KINDS.length; j++) {
+          const a = AGENT_KINDS[i]!;
+          const b = AGENT_KINDS[j]!;
+          assert.ok(deltaE(r.agents[a], r.agents[b]) >= LABEL_MIN_DISTANCE, `${where}: ${a} and ${b} are too similar`);
+        }
+      }
+      const vars = themeCssVars(r);
+      for (const a of AGENT_KINDS) assert.equal(vars[`--agent-${a}`], r.agents[a], where);
+    }
+  }
+});
+
 test('a hostile surface still gets readable identity colors (nudged toward the foreground)', () => {
   const theme: Theme = { id: 'odd-labels', name: 'Odd', variants: { light: { colors: { background: '#ffffff', foreground: '#000000', sidebar: '#9a9a9a', card: '#a0a0a0' } } } };
   const r = resolveTheme(theme, 'light');
@@ -63,6 +88,8 @@ test('index.css paints the default identity colors (defaults.ts, the resolver an
     assert.deepEqual(resolveTheme(bizziDefault, mode).labels, DEFAULT_LABELS[mode], `bizzi Default ${mode} needs no nudging`);
     const b = block(sel);
     for (const c of LABEL_COLORS) assert.ok(b.includes(`--label-${c}: ${DEFAULT_LABELS[mode][c]};`), `${mode} ${c}`);
+    assert.deepEqual(resolveTheme(bizziDefault, mode).agents, DEFAULT_AGENT_COLORS[mode], `bizzi Default ${mode} agent colors need no nudging`);
+    for (const a of AGENT_KINDS) assert.ok(b.includes(`--agent-${a}: ${DEFAULT_AGENT_COLORS[mode][a]};`), `${mode} agent ${a}`);
   }
 });
 

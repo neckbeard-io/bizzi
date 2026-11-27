@@ -1,6 +1,6 @@
 // Theme model (docs/theming.md §2), from Chorus/Terax (Apache-2.0) plus bizzi's own tokens (§3).
 // Plain data, no DOM: everything under lib/theme/ except apply.ts runs under `node --test`.
-import type { LabelColor } from '@bizzi/protocol';
+import type { AgentKind, LabelColor } from '@bizzi/protocol';
 
 export type ThemeMode = 'light' | 'dark';
 /** The user's mode choice; `system` follows `prefers-color-scheme`. Separate from the theme. */
@@ -126,6 +126,8 @@ export type ResolvedTheme = {
   terminal: ResolvedTerminal;
   /** Identity colors for machines and workspaces (spec §11.1), written as `--label-<name>`. Not theme tokens: derived for every theme. */
   labels: Record<LabelColor, string>;
+  /** Agent identity colors for session marks, written as `--agent-<kind>`. Not theme tokens: derived for every theme. */
+  agents: Record<AgentKind, string>;
   layout: LayoutTokens;
   /** What derivation had to fall back on (e.g. state colors replaced by defaults). */
   notes: string[];

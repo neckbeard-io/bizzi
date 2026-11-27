@@ -10,6 +10,7 @@ import {
   DEFAULT_COLORS,
   SAFETY,
   STATE_KEYS,
+  STATE_MIN_CONTRAST,
   base16ToTheme,
   bizziDefault,
   builtinTheme,
@@ -28,11 +29,13 @@ import {
   parseThemeFile,
   resolveTheme,
   serializeTheme,
+  simulateCvd,
+  textOn,
   themeCssVars,
   themeFromCurrent,
   validateTheme,
 } from '../src/lib/theme/index.ts';
-import type { Theme } from '../src/lib/theme/index.ts';
+import type { ColorVision, StateKey, Theme } from '../src/lib/theme/index.ts';
 import { BASE16_SCHEMES } from '../src/lib/theme/builtins/base16-schemes.ts';
 import { FLAX_OVERLAP } from '../src/lib/theme/builtins/flax.ts';
 import { scalar } from '../src/lib/theme/base16.ts';
@@ -186,7 +189,7 @@ test('a theme without the requested variant falls back to the other one', () => 
   assert.equal(r.colors.popover, '#122738', 'popover follows card');
 });
 
-test('status colors derive from the ANSI palette; state colors from status', () => {
+test("status colors derive from the ANSI palette; state colors stay bizzi's", () => {
   const theme: Theme = {
     id: 'ansi-test',
     name: 'ANSI',
@@ -202,20 +205,61 @@ test('status colors derive from the ANSI palette; state colors from status', () 
   assert.equal(r.colors.ok, '#5fd75f');
   assert.equal(r.colors.warn, '#ffd75f');
   assert.equal(r.colors.info, '#5fafff');
-  assert.equal(r.colors.stateWaiting, r.colors.warn);
-  assert.equal(r.colors.stateFailed, r.colors.err);
-  assert.equal(r.colors.stateDone, r.colors.info);
-  assert.equal(r.colors.stateWorking, '#c792ea');
-  assert.equal(r.colors.stateIdle, r.colors.mutedForeground);
+  // State colors aren't derived from the theme's status colors or primary (a pink primary as "working" is what
+  // colorblind users couldn't tell from a blue "done"): a theme that doesn't set them gets bizzi's set.
+  for (const k of STATE_KEYS) assert.equal(r.colors[k], DEFAULT_COLORS.dark[k], k);
+  assert.notEqual(r.colors.stateWorking, r.colors.primary);
   assert.deepEqual(r.notes, []);
 });
 
-test('state colors that collide fall back to bizzi defaults for those tokens', () => {
-  // base16 primary is base0D, the same blue as "done" (info): working keeps it, done falls back.
-  const r = resolveTheme(builtinTheme('tomorrow-night')!, 'dark');
-  assert.equal(r.colors.stateWorking, r.colors.primary);
+test("a theme's own state colors win; ones that collide fall back to bizzi defaults for those tokens", () => {
+  const theme: Theme = {
+    id: 'own-states',
+    name: 'Own',
+    variants: { dark: { colors: { background: '#101014', foreground: '#e8e8ee', card: '#16161c', sidebar: '#16161c', stateWorking: '#ff66cc', stateDone: '#ff66cc', stateWaiting: '#ffaa00' } } },
+  };
+  const r = resolveTheme(theme, 'dark');
+  assert.equal(r.colors.stateWaiting, '#ffaa00');
+  assert.equal(r.colors.stateWorking, '#ff66cc');
   assert.equal(r.colors.stateDone, DEFAULT_COLORS.dark.stateDone);
   assert.match(r.notes.join(' '), /done/);
+});
+
+/** After simulating full protanopia / deuteranopia / tritanopia, state colors must still read as different colors. */
+const CVD_MIN_DISTANCE = 18;
+
+test('bizzi default state colors stay distinct under color blindness, in both modes', () => {
+  for (const mode of ['light', 'dark'] as const) {
+    const D = DEFAULT_COLORS[mode];
+    for (const k of STATE_KEYS) {
+      assert.ok(contrast(D[k], D.sidebar) >= STATE_MIN_CONTRAST, `${mode} ${k} on sidebar`);
+      assert.ok(contrast(D[k], D.card) >= STATE_MIN_CONTRAST, `${mode} ${k} on card`);
+    }
+    for (const vision of ['protanopia', 'deuteranopia', 'tritanopia'] as ColorVision[]) {
+      for (let i = 0; i < STATE_KEYS.length; i++) {
+        for (let j = i + 1; j < STATE_KEYS.length; j++) {
+          const a: StateKey = STATE_KEYS[i]!;
+          const b: StateKey = STATE_KEYS[j]!;
+          const d = deltaE(simulateCvd(D[a], vision), simulateCvd(D[b], vision));
+          assert.ok(d >= CVD_MIN_DISTANCE, `${mode} ${vision}: ${a} and ${b} are ΔE ${d.toFixed(1)} apart`);
+        }
+      }
+    }
+  }
+  // The simulation itself: gray is unchanged, and red and green collapse for deuteranopes.
+  assert.equal(simulateCvd('#808080', 'deuteranopia'), '#808080');
+  assert.ok(deltaE(simulateCvd('#d03030', 'deuteranopia'), simulateCvd('#30a030', 'deuteranopia')) < deltaE('#d03030', '#30a030') / 2);
+});
+
+test('the waiting badge text reads on the waiting color', () => {
+  for (const t of BUILTIN_THEMES) {
+    for (const mode of ['light', 'dark'] as const) {
+      const r = resolveTheme(t, mode);
+      const vars = themeCssVars(r);
+      assert.equal(vars['--state-waiting-foreground'], textOn(r.colors.stateWaiting, '#000000', '#ffffff'));
+      assert.ok(contrast(vars['--state-waiting-foreground']!, r.colors.stateWaiting) >= 4.5, `${t.id} ${mode}`);
+    }
+  }
 });
 
 test('state colors of every built-in are readable and distinct in both modes', () => {
@@ -420,6 +464,8 @@ test('device theme: platform accent as primary, else bizzi Default', () => {
     assert.ok(contrast(r.colors.primary, r.colors.card) >= 3, mode);
     assert.ok(validateTheme(pink).ok);
   }
+  // The accent never becomes a state color (it could sit too close to another state for colorblind users).
+  assert.equal(resolveTheme(pink, 'dark').colors.stateWorking, DEFAULT_COLORS.dark.stateWorking);
   // A pale accent gets darkened for the light variant.
   assert.notEqual(resolveTheme(deviceTheme('#ffe066'), 'light').colors.primary, '#ffe066');
 });

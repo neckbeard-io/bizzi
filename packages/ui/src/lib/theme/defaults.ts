@@ -2,7 +2,7 @@
 // fallbacks for tokens a theme leaves out and the derivation can't fill (§3 step 3), and for state
 // colors that fail the contrast checks. Keep in sync with the :root / [data-theme='dark'] blocks in
 // src/index.css, which paint before any theme is applied.
-import type { LabelColor } from '@bizzi/protocol';
+import type { AgentKind, LabelColor } from '@bizzi/protocol';
 import type { Ansi16, ResolvedColors, ThemeMode } from './types.ts';
 
 export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
@@ -46,11 +46,11 @@ export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
     diffHunkForeground: '#3949ab',
     primarySoft: '#eef0ff',
     primaryText: '#4f46e5',
-    stateWaiting: '#b45309',
-    stateWorking: '#4f46e5',
-    stateDone: '#0369a1',
-    stateFailed: '#dc2626',
-    stateIdle: '#6b6b76',
+    stateWaiting: '#c27c00',
+    stateWorking: '#0a66ff',
+    stateDone: '#0a7d3e',
+    stateFailed: '#ee1144',
+    stateIdle: '#868c9c',
     radius: '0.5rem',
   },
   dark: {
@@ -93,11 +93,11 @@ export const DEFAULT_COLORS: Record<ThemeMode, ResolvedColors> = {
     diffHunkForeground: '#a5b4fc',
     primarySoft: '#23244a',
     primaryText: '#8b93ff',
-    stateWaiting: '#fbbf24',
-    stateWorking: '#8b93ff',
-    stateDone: '#38bdf8',
-    stateFailed: '#f87171',
-    stateIdle: '#9a9aa6',
+    stateWaiting: '#ffcc00',
+    stateWorking: '#3d8bff',
+    stateDone: '#7dffd4',
+    stateFailed: '#ff3333',
+    stateIdle: '#6c7488',
     radius: '0.5rem',
   },
 };
@@ -127,6 +127,31 @@ export const DEFAULT_LABELS: Record<ThemeMode, Record<LabelColor, string>> = {
     blue: '#60a5fa',
     purple: '#c084fc',
     pink: '#f472b6',
+  },
+};
+
+/**
+ * Agent identity colors (the glyph tile of a session mark), by the background's polarity: a Claude session
+ * and a Codex session should look different at a glance. Like the identity labels they're not theme tokens;
+ * resolveTheme nudges them to 3:1 on the theme's surfaces. The glyph carries the identity too, so colorblind
+ * users don't depend on the hue. Keep in sync with `--agent-*` in index.css.
+ */
+export const DEFAULT_AGENT_COLORS: Record<ThemeMode, Record<AgentKind, string>> = {
+  light: {
+    claude: '#d9480f',
+    codex: '#8b3dff',
+    opencode: '#0f8a5f',
+    agy: '#0b5ad0',
+    shell: '#4b505c',
+    api: '#d0287f',
+  },
+  dark: {
+    claude: '#ff8f5a',
+    codex: '#d6b4ff',
+    opencode: '#3ee0a0',
+    agy: '#4a8cff',
+    shell: '#b4b9c4',
+    api: '#ff5fb8',
   },
 };
 

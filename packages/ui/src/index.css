@@ -48,11 +48,12 @@
   --diff-hunk-foreground: #3949ab;
   --primary-soft: #eef0ff;
   --primary-text: #4f46e5;
-  --state-waiting: #b45309;
-  --state-working: #4f46e5;
-  --state-done: #0369a1;
-  --state-failed: #dc2626;
-  --state-idle: #6b6b76;
+  --state-waiting: #c27c00;
+  --state-working: #0a66ff;
+  --state-done: #0a7d3e;
+  --state-failed: #ee1144;
+  --state-idle: #868c9c;
+  --state-waiting-foreground: #000000;
   --radius: 0.5rem;
   /* Identity colors (spec §11.1), DEFAULT_LABELS in defaults.ts; resolveTheme derives them per theme. */
   --label-red: #dc2626;
@@ -63,6 +64,12 @@
   --label-blue: #2563eb;
   --label-purple: #9333ea;
   --label-pink: #db2777;
+  --agent-claude: #d9480f;
+  --agent-codex: #8b3dff;
+  --agent-opencode: #0f8a5f;
+  --agent-agy: #0b5ad0;
+  --agent-shell: #4b505c;
+  --agent-api: #d0287f;
   color-scheme: light;
 }
 
@@ -106,11 +113,12 @@
   --diff-hunk-foreground: #a5b4fc;
   --primary-soft: #23244a;
   --primary-text: #8b93ff;
-  --state-waiting: #fbbf24;
-  --state-working: #8b93ff;
-  --state-done: #38bdf8;
-  --state-failed: #f87171;
-  --state-idle: #9a9aa6;
+  --state-waiting: #ffcc00;
+  --state-working: #3d8bff;
+  --state-done: #7dffd4;
+  --state-failed: #ff3333;
+  --state-idle: #6c7488;
+  --state-waiting-foreground: #000000;
   --radius: 0.5rem;
   --label-red: #f87171;
   --label-orange: #fb923c;
@@ -120,6 +128,12 @@
   --label-blue: #60a5fa;
   --label-purple: #c084fc;
   --label-pink: #f472b6;
+  --agent-claude: #ff8f5a;
+  --agent-codex: #d6b4ff;
+  --agent-opencode: #3ee0a0;
+  --agent-agy: #4a8cff;
+  --agent-shell: #b4b9c4;
+  --agent-api: #ff5fb8;
   color-scheme: dark;
 }
 
@@ -207,6 +221,13 @@
   --color-state-done: var(--state-done);
   --color-state-failed: var(--state-failed);
   --color-state-idle: var(--state-idle);
+  --color-state-waiting-foreground: var(--state-waiting-foreground);
+  --color-agent-claude: var(--agent-claude);
+  --color-agent-codex: var(--agent-codex);
+  --color-agent-opencode: var(--agent-opencode);
+  --color-agent-agy: var(--agent-agy);
+  --color-agent-shell: var(--agent-shell);
+  --color-agent-api: var(--agent-api);
   --color-safety-warn: var(--safety-warn);
   --color-safety-warn-foreground: var(--safety-warn-foreground);
   --color-safety-danger: var(--safety-danger);
@@ -435,22 +456,34 @@
 
 /* ---------------------------------------------------------------- marks */
 
-/* "background" mark (spec §11.1): between turns with background work still running, the glyph bobs up and
-   down inside a still ring, so it reads as active but distinct from a working turn's spinning ring. */
-@keyframes mark-bob {
-  0%,
-  100% {
-    transform: translateY(-22%);
-  }
-  50% {
-    transform: translateY(22%);
+/* Session state symbols (spec §11.1, components/marks.tsx). Shape carries the state, so motion is extra:
+   working spins its arc, background work turns a dotted ring slowly, waiting pulses. Reduced motion keeps
+   the shapes still. */
+@keyframes mark-spin {
+  to {
+    transform: rotate(360deg);
   }
 }
-.animate-mark-bob {
-  animation: mark-bob 1.6s ease-in-out infinite;
+.animate-mark-spin {
+  animation: mark-spin 0.9s linear infinite;
+  transform-origin: center;
+}
+.animate-mark-orbit {
+  animation: mark-spin 3.2s linear infinite;
+  transform-origin: center;
+}
+@keyframes mark-pulse {
+  50% {
+    opacity: 0.6;
+  }
+}
+.animate-mark-pulse {
+  animation: mark-pulse 1.4s ease-in-out infinite;
 }
 @media (prefers-reduced-motion: reduce) {
-  .animate-mark-bob {
+  .animate-mark-spin,
+  .animate-mark-orbit,
+  .animate-mark-pulse {
     animation: none;
   }
 }
