@@ -52,10 +52,10 @@ test('mock 1.2: accounts, widgets, sidebar rows, helpers and worktrees', async (
   const { store, until } = await connect(t);
   await until(() => store.getState().usageState === 'ok' && Object.keys(store.getState().widgets).length > 0);
   const s = store.getState();
-  // Codex at 85% is the most constrained login.
+  // agy with an exhausted 5h pool is the most constrained login, then Codex at 85%.
   assert.deepEqual(
     selectAccounts(s).map((a) => a.agent),
-    ['codex', 'claude', 'opencode'],
+    ['agy', 'codex', 'claude', 'opencode'],
   );
   assert.ok(selectWidgets(s, 'bar').some((w) => w.id === 'litellm-billed' && w.format === 'usd'));
   assert.ok(selectWidgets(s, 'machine', 'm_laptop').some((w) => w.error));

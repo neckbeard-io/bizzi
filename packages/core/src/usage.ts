@@ -87,6 +87,8 @@ export function normalizeAccountUsage(raw: unknown, now: Date = new Date()): Acc
       const windowMins = num(ww.windowMins);
       if (resetsAt) win.resetsAt = resetsAt;
       if (windowMins !== undefined) win.windowMins = windowMins;
+      const group = str(ww.group, 64);
+      if (group) win.group = group;
       windows.push(win);
     }
     out.windows = windows;

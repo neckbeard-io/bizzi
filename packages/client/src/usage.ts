@@ -103,11 +103,56 @@ export function primaryWindow(a: AccountUsage): UsageWindow | null {
   return best;
 }
 
+const KNOWN_MINS: Record<string, number> = { five_hour: 300, seven_day: 10080, seven_day_opus: 10080, seven_day_sonnet: 10080 };
+
+/** A window's length in minutes, from `windowMins` or a known id; undefined when unknown. */
+export function windowMinutes(w: UsageWindow): number | undefined {
+  return w.windowMins ?? KNOWN_MINS[w.id];
+}
+
+/** One pool's rows in the compact meter: shortest window on top, longest below. */
+export interface MeterStack {
+  /** The pool's name when a login has more than one (agy: Gemini, Claude and GPT). */
+  group?: string;
+  rows: UsageWindow[];
+}
+
+/**
+ * The compact meter's stacks, one per pool in report order (so they never swap places as usage
+ * moves): the shortest and the longest window of known length, e.g. 5h over 7d. Same-length
+ * windows (7d vs 7d Opus) keep the first reported. Without any known length: the fullest window.
+ */
+export function meterStacks(a: AccountUsage): MeterStack[] {
+  const pools = new Map<string, UsageWindow[]>();
+  for (const w of a.windows ?? []) {
+    const key = w.group ?? '';
+    pools.set(key, [...(pools.get(key) ?? []), w]);
+  }
+  const named = pools.size > 1;
+  const out: MeterStack[] = [];
+  for (const [key, list] of pools) {
+    const timed = list.filter((w) => windowMinutes(w) !== undefined);
+    let rows: UsageWindow[];
+    if (timed.length === 0) {
+      rows = [list.reduce((best, w) => (w.usedPercent > best.usedPercent ? w : best))];
+    } else {
+      const byLength = [...timed].sort((x, y) => windowMinutes(x)! - windowMinutes(y)!);
+      const first = byLength[0]!;
+      const longest = windowMinutes(byLength[byLength.length - 1]!)!;
+      const last = byLength.find((w) => windowMinutes(w) === longest)!;
+      rows = last === first ? [first] : [first, last];
+    }
+    out.push(named && key ? { group: key, rows } : { rows });
+  }
+  return out;
+}
+
 /** Short label for a usage window id: five_hour → 5h, seven_day → 7d; others keep their label. */
 export function windowShortLabel(w: UsageWindow): string {
-  if (w.windowMins) {
-    if (w.windowMins % 1440 === 0) return `${w.windowMins / 1440}d`;
-    if (w.windowMins % 60 === 0) return `${w.windowMins / 60}h`;
+  const mins = windowMinutes(w);
+  if (mins) {
+    if (mins % 1440 === 0) return `${mins / 1440}d`;
+    if (mins % 60 === 0) return `${mins / 60}h`;
   }
   const known: Record<string, string> = { five_hour: '5h', seven_day: '7d', seven_day_opus: '7d opus', seven_day_sonnet: '7d sonnet' };
   return known[w.id] ?? w.label;

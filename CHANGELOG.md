@@ -6,6 +6,12 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ## Unreleased
 
+### Added
+- agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
+
+### Changed
+- The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
+
 ## v0.1.1 — 2026-11-26
 
 ### Added
