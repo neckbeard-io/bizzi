@@ -7,7 +7,7 @@ import { CompletionMenu } from '../../components/CompletionMenu.tsx';
 import { Button, ErrorText, cx } from '../../components/ui.tsx';
 import { useDraft } from '../../lib/drafts.ts';
 import { formatCost, formatTokens, isBusy } from '../../lib/format.ts';
-import { applyCommand, builtinCommand, matchCommands, sessionCommands, slashQuery } from '../../lib/slash.ts';
+import { applyCommand, builtinCommand, commandDetail, matchCommands, sessionCommands, slashQuery } from '../../lib/slash.ts';
 import type { SlashCommand } from '../../lib/slash.ts';
 import { AttachImageButton, AttachmentTray, useDraftAttachments } from './Attachments.tsx';
 
@@ -38,7 +38,10 @@ export function Composer(props: { sessionId: string }): ReactNode {
   const commands = useMemo(() => sessionCommands(advertised), [advertised]);
   const query = menuClosed ? null : slashQuery(text, caret);
   const menu = useMemo(
-    () => (query === null ? [] : matchCommands(commands, query).map((c) => ({ ...c, key: c.name, label: c.name, prefix: '/', ...(c.description ? { detail: c.description } : {}) }))),
+    () => (query === null ? [] : matchCommands(commands, query).map((c) => {
+            const detail = commandDetail(c);
+            return { ...c, key: c.name, label: c.name, prefix: '/', ...(detail ? { detail } : {}) };
+          })),
     [commands, query],
   );
 

@@ -34,6 +34,8 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
 - Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
 - Text you've typed but not sent stays in the composer, per session, when bizzi reloads, restarts or updates.
+- After a restart or an update, bizzi opens on the page you were on (the session, workspace or settings page) instead of the machine page.
+- The slash-command list shows aliases: typing `/n` offers `/new` (same as `/clear`), and `/clear` lists its other names.
 - Rules and memories an agent saved because you asked no longer look like they wait for approval: the inbox lists them under "Recent knowledge changes" as already live, with Dismiss and Undo, and the Knowledge badge counts only real suggestions.
 - Editing a rule more than once leaves one entry in the inbox for its newest version instead of one per version.
 - A session you renamed keeps its name after bizzi restarts, instead of taking the agent's title again.

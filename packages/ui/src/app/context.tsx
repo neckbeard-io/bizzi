@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { BizziClient, BizziStore, hubTokenProvider } from '@bizzi/client';
 import type { BizziState, FetchLike, SocketFactory, StoreCache, StoreSnapshot, TokenProvider } from '@bizzi/client';
 import type { ConnectionTarget } from '../lib/connection.ts';
+import { restorableHash } from '../lib/router.ts';
 import { loadJson, loadString, saveJson, saveString } from '../lib/storage.ts';
 
 export interface BizziContextValue {
@@ -77,6 +78,21 @@ export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: (
           saveString(machineKey, id);
         }
       });
+      // Opened without a route (the desktop app after a restart or an update, a bookmark of the bare
+      // URL): go back to the page you were on with this connection, then keep that up to date.
+      const routeKey = `bizzi.route.${key}`;
+      const saved = target.mock ? null : loadString(routeKey);
+      if (saved && !window.location.hash.replace(/^#\/?/, '') && restorableHash(saved)) {
+        const url = new URL(window.location.href);
+        url.hash = saved;
+        window.history.replaceState(null, '', url);
+      }
+      const saveRoute = (): void => {
+        const href = restorableHash(window.location.hash);
+        if (href && !target.mock) saveString(routeKey, href);
+      };
+      saveRoute();
+      window.addEventListener('hashchange', saveRoute);
       client.connect(target.url, auth).catch(() => {
         // Fatal errors (bad token, revoked device, protocol mismatch) surface through the connection state.
       });
@@ -88,6 +104,7 @@ export function BizziProvider(props: { target: ConnectionTarget; onDisconnect: (
       document.addEventListener('visibilitychange', onVisible);
       cleanup = () => {
         window.removeEventListener('online', wake);
+        window.removeEventListener('hashchange', saveRoute);
         document.removeEventListener('visibilitychange', onVisible);
         unsubMachine();
         store.dispose();
