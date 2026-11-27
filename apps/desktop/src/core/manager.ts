@@ -12,6 +12,9 @@
 //   sessions keep running, and the next launch re-adopts it. The owner file records the core's id;
 //   a relaunched app whose bundle carries a different id restarts that core (the core changed), and
 //   one with the same id just attaches (only the UI or the version changed).
+// - stopping a core is quick: SIGTERM starts its drain, and a second SIGTERM after a grace period
+//   tells it to stop without waiting for turns. It records the turns it cuts off and continues them
+//   on the next start, so a restart onto new code doesn't wait for running work to finish.
 //
 // Electron-free, so it is testable under plain Node.
 
@@ -53,7 +56,12 @@ export interface CoreManagerOptions {
   readyTimeoutMs?: number;
   healthIntervalMs?: number;
   healthTimeoutMs?: number;
+  /** How long a stopping core may stop after the second SIGTERM before it is killed. Default 15 s. */
   stopTimeoutMs?: number;
+  /** How long `stop()` lets running turns finish before the second SIGTERM. Default 5 s. */
+  drainMs?: number;
+  /** The same when replacing an out-of-date core: the new one continues cut-off turns. Default 0.5 s. */
+  handoffMs?: number;
   backoff?: BackoffOptions;
   health?: HealthCheck;
   onStatus?: (status: CoreStatus) => void;
@@ -130,7 +138,7 @@ export class CoreManager {
     const conn = this.#conn;
     if (this.#owned && conn) {
       this.#log.log('info', 'stopping core', { pid: conn.pid });
-      await this.#terminate(conn.pid, this.#child);
+      await this.#terminate(conn.pid, this.#child, this.#o.drainMs ?? 5000);
       await rm(join(this.#o.dataDir, OWNER_FILE), { force: true });
     } else if (conn) {
       this.#log.log('info', 'detaching from core (not spawned by this app)', { pid: conn.pid });
@@ -196,7 +204,7 @@ export class CoreManager {
     if (mine && want && mine.coreId !== want) {
       // The bundle carries a different core than the one running: restart it on the new code.
       this.#log.log('info', 'running core is out of date; restarting it', { pid: ready.pid, running: mine.coreId ?? null, bundled: want });
-      await this.#terminate(ready.pid, null);
+      await this.#terminate(ready.pid, null, this.#o.handoffMs ?? 500);
       await rm(join(this.#o.dataDir, OWNER_FILE), { force: true });
       if (this.#isStopping()) return;
       await this.#spawn();
@@ -256,7 +264,7 @@ export class CoreManager {
     }
 
     if (this.#isStopping()) {
-      await this.#terminate(ready.pid, child);
+      await this.#terminate(ready.pid, child, 0);
       return;
     }
 
@@ -328,28 +336,26 @@ export class CoreManager {
     }, delay);
   }
 
-  async #terminate(pid: number, child: ChildProcess | null): Promise<void> {
-    const timeoutMs = this.#o.stopTimeoutMs ?? 30_000;
+  /**
+   * SIGTERM (the core drains), then after `drainMs` a second SIGTERM (it stops now, recording the
+   * turns it cuts off), then after `stopTimeoutMs` SIGKILL.
+   */
+  async #terminate(pid: number, child: ChildProcess | null, drainMs: number): Promise<void> {
+    const timeoutMs = this.#o.stopTimeoutMs ?? 15_000;
     const gone = child
       ? new Promise<void>((resolve) => {
           if (child.exitCode !== null || child.signalCode !== null) resolve();
           else child.once('exit', () => resolve());
         })
-      : waitForPidExit(pid, timeoutMs + 1000);
-    try {
-      process.kill(pid, 'SIGTERM');
-    } catch {
-      return; // already gone
-    }
-    const timedOut = await Promise.race([gone.then(() => false), sleep(timeoutMs).then(() => true)]);
-    if (timedOut) {
-      this.#log.log('warn', 'core did not drain in time; killing it', { pid, timeoutMs });
-      try {
-        process.kill(pid, 'SIGKILL');
-      } catch {
-        // gone in the meantime
-      }
-    }
+      : waitForPidExit(pid, drainMs + timeoutMs + 1000);
+    const exitedWithin = (ms: number) => Promise.race([gone.then(() => true), sleep(ms).then(() => false)]);
+    if (!signal(pid, 'SIGTERM')) return; // already gone
+    if (await exitedWithin(drainMs)) return;
+    this.#log.log('info', 'asking the core to stop without waiting for turns', { pid, drainMs });
+    if (!signal(pid, 'SIGTERM')) return;
+    if (await exitedWithin(timeoutMs)) return;
+    this.#log.log('warn', 'core did not stop in time; killing it', { pid, timeoutMs });
+    signal(pid, 'SIGKILL');
   }
 
   async #readOwner(): Promise<OwnerRecord | null> {
@@ -376,6 +382,16 @@ export class CoreManager {
     if (this.#state === 'stopped') return;
     this.#state = state;
     this.#o.onStatus?.(this.status);
+  }
+}
+
+/** False when the process is already gone. */
+function signal(pid: number, sig: NodeJS.Signals): boolean {
+  try {
+    process.kill(pid, sig);
+    return true;
+  } catch {
+    return false;
   }
 }
 

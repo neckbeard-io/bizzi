@@ -5,7 +5,8 @@
 //
 // Knobs (env): STUB_READY_DELAY_MS, STUB_CRASH_AFTER_MS (exit 1 without cleanup, like a crash),
 // STUB_NO_READY=1 (never print the ready line), STUB_NOISE=1 (a junk stdout line first),
-// STUB_DRAIN_MS (delay between SIGTERM and exit).
+// STUB_DRAIN_MS (delay between SIGTERM and exit; a second SIGTERM exits right away, as `bizzi serve`
+// stops without waiting for turns).
 
 import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:http';
@@ -66,12 +67,19 @@ server.listen(Number(values.port), values.host, () => {
   }
 });
 
+let draining = false;
+const stop = () => {
+  rmSync(serveFile, { force: true });
+  server.close();
+  log('stopped');
+  process.exit(0);
+};
 process.on('SIGTERM', () => {
+  if (draining) {
+    log('second SIGTERM: stopping now');
+    stop();
+  }
+  draining = true;
   log('SIGTERM: draining');
-  setTimeout(() => {
-    rmSync(serveFile, { force: true });
-    server.close();
-    log('stopped');
-    process.exit(0);
-  }, env('STUB_DRAIN_MS'));
+  setTimeout(stop, env('STUB_DRAIN_MS'));
 });

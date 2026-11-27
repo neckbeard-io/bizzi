@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { sessionChannel, type AgentAdapter, type ChannelEvent } from '@bizzi/protocol';
 import { createNode } from '../src/node.ts';
-import { CONTINUE_AFTER_RESTART, MAX_AUTO_RESUMES } from '../src/sessions.ts';
+import { CONTINUE_AFTER_RESTART, MAX_AUTO_RESUMES, MAX_PLANNED_RESUMES } from '../src/sessions.ts';
 import { Store } from '../src/store.ts';
 import { FakeAdapter } from '../src/testing/index.ts';
 import { tempDir, waitFor } from './helpers.ts';
@@ -50,13 +50,7 @@ test('a node killed mid-turn (turn still open at load) resumes it too', async (t
   const dir = tempDir();
   t.after(dir.cleanup);
   const { busy } = await interruptedRun(dir.path);
-  // What a SIGKILL leaves: the turn never closed, so no interruptedTurn mark was written.
-  const store = new Store(dir.path);
-  for (const row of store.listSessions()) {
-    if (row.info.id !== busy) continue;
-    store.putSession({ info: { ...row.info, status: 'running' }, state: { ...row.state, interruptedTurn: undefined, currentTurnId: 't_killed' } });
-  }
-  store.close();
+  killMidTurn(dir.path, busy);
 
   const fake2 = new FakeAdapter();
   const n2 = await node(dir.path, [fake2]);
@@ -65,13 +59,27 @@ test('a node killed mid-turn (turn still open at load) resumes it too', async (t
   assert.equal(fake2.starts.length, 1);
 });
 
-test(`after ${MAX_AUTO_RESUMES} automatic resumes in a row, bizzi leaves a notice instead`, async (t) => {
+/** What a SIGKILL leaves: the turn never closed, so no interruptedTurn mark was written. */
+function killMidTurn(dir: string, id: string, extra: Record<string, unknown> = {}): void {
+  const store = new Store(dir);
+  for (const row of store.listSessions()) {
+    if (row.info.id !== id) continue;
+    store.putSession({ info: { ...row.info, status: 'running' }, state: { ...row.state, interruptedTurn: undefined, currentTurnId: 't_killed', ...extra } });
+  }
+  store.close();
+}
+
+function setState(dir: string, id: string, extra: Record<string, unknown>): void {
+  const store = new Store(dir);
+  for (const row of store.listSessions()) if (row.info.id === id) store.putSession({ info: row.info, state: { ...row.state, ...extra } });
+  store.close();
+}
+
+test(`after ${MAX_AUTO_RESUMES} automatic resumes after crashes in a row, bizzi leaves a notice instead`, async (t) => {
   const dir = tempDir();
   t.after(dir.cleanup);
   const { busy } = await interruptedRun(dir.path);
-  const store = new Store(dir.path);
-  for (const row of store.listSessions()) if (row.info.id === busy) store.putSession({ info: row.info, state: { ...row.state, autoResumes: MAX_AUTO_RESUMES } });
-  store.close();
+  killMidTurn(dir.path, busy, { autoResumes: MAX_AUTO_RESUMES });
 
   const fake2 = new FakeAdapter();
   const n2 = await node(dir.path, [fake2]);
@@ -87,6 +95,30 @@ test(`after ${MAX_AUTO_RESUMES} automatic resumes in a row, bizzi leaves a notic
   const after = new Store(dir.path);
   t.after(() => after.close());
   assert.equal(after.listSessions().find((r) => r.info.id === busy)?.state.autoResumes, undefined);
+});
+
+test('clean stops have their own, higher cap: crash resumes do not hold back a planned restart', async (t) => {
+  const dir = tempDir();
+  t.after(dir.cleanup);
+  const { busy } = await interruptedRun(dir.path);
+  setState(dir.path, busy, { autoResumes: MAX_AUTO_RESUMES, plannedResumes: MAX_PLANNED_RESUMES - 1 });
+
+  const fake2 = new FakeAdapter();
+  const n2 = await node(dir.path, [fake2]);
+  await waitFor(() => turnsStarted(n2.bus.replay(sessionChannel(busy))).includes(CONTINUE_AFTER_RESTART));
+  // Cut it off again mid-turn: this time it is at the planned cap.
+  await waitFor(() => n2.sessions.get(busy).session.status === 'idle');
+  await n2.call('session.send', { sessionId: busy, input: [{ type: 'text', text: '/approve deploy' }] });
+  await waitFor(() => n2.sessions.get(busy).session.status === 'waiting_approval');
+  await n2.close();
+  // That send reset the counts; put the session back at the planned cap.
+  setState(dir.path, busy, { plannedResumes: MAX_PLANNED_RESUMES });
+
+  const fake3 = new FakeAdapter();
+  const n3 = await node(dir.path, [fake3]);
+  t.after(() => n3.close());
+  await waitFor(() => n3.bus.replay(sessionChannel(busy)).find((e) => e.type === 'error' && (e.data as { code?: string }).code === 'resume_skipped'));
+  assert.equal(fake3.starts.length, 0, 'nothing was started');
 });
 
 test('resumeInterrupted: false leaves cut-off sessions for the next message', async (t) => {

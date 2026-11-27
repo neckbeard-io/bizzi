@@ -1,5 +1,5 @@
-// Sandboxed preload: exposes exactly `window.bizzi = { connection, platform, versions, accentColor,
-// titleBar, setChrome, updates }`, and applies menu navigation (a hash route) to the page's location.
+// Sandboxed preload: exposes exactly `window.bizzi = { connection, coreStarting, platform, versions,
+// accentColor, titleBar, setChrome, updates }`, and applies menu navigation (a hash route) to the page's location.
 // Nothing else from Electron or Node reaches the page.
 
 import { contextBridge, ipcRenderer } from 'electron';
@@ -10,6 +10,7 @@ const boot = (ipcRenderer.sendSync(IPC_BOOTSTRAP) as Bootstrap | null) ?? { conn
 
 contextBridge.exposeInMainWorld('bizzi', {
   connection: boot.connection ? { url: boot.connection.url, token: boot.connection.token } : undefined,
+  coreStarting: boot.coreStarting === true,
   platform: process.platform,
   accentColor: boot.accentColor ?? undefined,
   titleBar: boot.titleBar && boot.titleBar.style !== 'native' ? { style: boot.titleBar.style, height: boot.titleBar.height } : undefined,

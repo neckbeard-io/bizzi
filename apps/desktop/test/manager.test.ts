@@ -238,6 +238,30 @@ test('a relaunch with a different core id restarts the owned core on the new cod
   assert.equal(JSON.parse(await readFile(join(dir, 'desktop-core.json'), 'utf8')).coreId, 'bbbb2222');
 });
 
+test('an out-of-date core busy with turns is told to stop without waiting for them', async (t) => {
+  const dir = await tempDir(t);
+  // A core whose drain would take a minute (turns in flight).
+  const first = manager(dir, { STUB_DRAIN_MS: '60000' }, { coreId: 'aaaa1111' });
+  const old = await first.m.start();
+  assert.ok(old);
+  await first.m.detach();
+  t.after(() => {
+    try {
+      process.kill(old.pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  });
+
+  const second = manager(dir, {}, { coreId: 'bbbb2222', handoffMs: 100 });
+  t.after(() => second.m.stop());
+  const started = Date.now();
+  const conn = await second.m.start();
+  assert.ok(conn);
+  assert.equal(isPidAlive(old.pid), false, 'the old core stopped');
+  assert.ok(Date.now() - started < 2500, `handed over quickly (${Date.now() - started} ms)`);
+});
+
 test('without a core id (dev runs, older builds) an owned core is adopted whatever recorded it', async (t) => {
   const dir = await tempDir(t);
   const first = manager(dir, {}, { coreId: 'aaaa1111' });

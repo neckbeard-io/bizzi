@@ -27,6 +27,8 @@ export interface ChromeColors {
 /** Exposed by the desktop preload script. */
 export interface BizziBridge {
   connection?: { url: string; token?: string };
+  /** Desktop app: no connection yet, but its core is starting; the app reloads the page once it's up. */
+  coreStarting?: boolean;
   platform?: string;
   /** The desktop hid the native title bar: the UI reserves a themed strip of this height (theming.md §8). */
   titleBar?: { style: 'inset' | 'overlay'; height: number };

@@ -76,8 +76,11 @@ let stopCoreOnQuit = false;
  * app; without (dev runs, BIZZI_CORE_ENTRY, older bundles) quitting stops it as before.
  */
 const bundledCoreId = app.isPackaged && !env['BIZZI_CORE_ENTRY'] ? readCoreId(process.resourcesPath) : null;
-/** The connection the current page was loaded with; a different one triggers a reload. */
-let loadedConn: ServeReady | null = null;
+/**
+ * The connection the current page bootstrapped with; a different one triggers a reload. Undefined
+ * while a load is under way and the page hasn't asked yet: it will pick up the current one.
+ */
+let loadedConn: ServeReady | null | undefined;
 
 const manager = new CoreManager({
   dataDir,
@@ -263,6 +266,10 @@ async function onReady(): Promise<void> {
   if (!isMac) tray.on('click', () => showWindow());
   updateTray(manager.status);
 
+  // The window comes up right away and shows "starting" until the core is there (replacing an
+  // out-of-date core takes a moment); then it reloads onto the connection (onCoreStatus).
+  createWindow();
+  if (updateTarget.method !== 'unsupported') updates.start();
   const conn = await manager.start();
   if (bundledCoreId) {
     try {
@@ -272,15 +279,13 @@ async function onReady(): Promise<void> {
       log.log('warn', 'could not prune old core copies', { error: String(err) });
     }
   }
-  if (!conn) {
+  if (!conn && !quitting) {
     void dialog.showMessageBox({
       type: 'warning',
       message: 'bizzi could not start its core',
       detail: `${manager.status.lastError ?? 'unknown error'}\n\nRetrying in the background. Log: ${logFile}`,
     });
   }
-  createWindow();
-  if (updateTarget.method !== 'unsupported') updates.start();
 }
 
 /** Menu / tray: open Settings › Updates and check now. */
@@ -294,9 +299,17 @@ function trustedSender(e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): 
 }
 
 function bootstrap(): Bootstrap {
-  const c = manager.status.connection;
+  const status = manager.status;
+  const c = status.connection;
   loadedConn = c;
-  return { connection: c ? { url: c.url, token: c.token } : null, appVersion: app.getVersion(), accentColor: accentColor(), titleBar };
+  return {
+    connection: c ? { url: c.url, token: c.token } : null,
+    // No connection yet but one is on its way: the UI waits instead of offering to configure one.
+    coreStarting: !c && status.state !== 'stopping' && status.state !== 'stopped',
+    appVersion: app.getVersion(),
+    accentColor: accentColor(),
+    titleBar,
+  };
 }
 
 function loadChrome(): ChromeColors {
@@ -336,8 +349,10 @@ function onCoreStatus(status: CoreStatus): void {
   updateTray(status);
   const c = status.connection;
   if (!c || !win || quitting) return;
+  if (loadedConn === undefined) return; // still loading; the page bootstraps with this connection
   if (loadedConn && loadedConn.url === c.url && loadedConn.token === c.token) return;
   log.log('info', 'core connection changed; reloading window', { url: c.url });
+  loadedConn = undefined;
   win.webContents.reload();
 }
 
@@ -368,6 +383,12 @@ function saveWindowStateSoon(): void {
 }
 
 function createWindow(): void {
+  // One main window: a second one (say, the Dock clicked while the core starts) would be refused
+  // its bootstrap and show the connect screen.
+  if (win && !win.isDestroyed()) {
+    showWindow();
+    return;
+  }
   const saved = loadWindowState();
   const primary = screen.getPrimaryDisplay();
   const workAreas = [primary, ...screen.getAllDisplays().filter((d) => d.id !== primary.id)].map((d) => d.workArea);
@@ -416,6 +437,7 @@ function createWindow(): void {
     win = null;
   });
   if (env['BIZZI_SMOKE_MS']) smokeTest(win, Number(env['BIZZI_SMOKE_MS']));
+  loadedConn = undefined;
   void win.loadURL(uiEntryUrl(ui));
 }
 
