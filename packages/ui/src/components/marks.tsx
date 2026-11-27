@@ -139,11 +139,12 @@ export function NeedsYouBadge(props: { className?: string }): ReactNode {
 }
 
 /** A thin horizontal meter; color only when the tone says so. */
-export function Meter(props: { value: number; tone: MeterTone; className?: string; marker?: number; title?: string }): ReactNode {
+/** `vivid`: a bright ok fill for the neutral tone, where the meter is the main thing shown (the bottom bar). */
+export function Meter(props: { value: number; tone: MeterTone; className?: string; marker?: number; title?: string; vivid?: boolean }): ReactNode {
   const pct = Math.round(Math.min(1, Math.max(0, props.value)) * 100);
   return (
     <span className={cx('relative inline-block h-1.5 overflow-hidden rounded-full bg-panel-2', props.className)} role="meter" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} title={props.title}>
-      <span className={cx('absolute inset-y-0 left-0 rounded-full', TONE_FILL[props.tone])} style={{ width: `${pct}%` }} />
+      <span className={cx('absolute inset-y-0 left-0 rounded-full', props.vivid && props.tone === 'neutral' ? 'bg-ok' : TONE_FILL[props.tone])} style={{ width: `${pct}%` }} />
       {props.marker !== undefined ? <span className="absolute inset-y-0 w-px bg-fg/50" style={{ left: `${Math.round(Math.min(1, props.marker) * 100)}%` }} /> : null}
     </span>
   );

@@ -664,8 +664,8 @@ export function mockAccounts(): AccountUsage[] {
       windows: [
         { id: 'gemini-weekly', label: 'Gemini · weekly', usedPercent: 17, resetsAt: ahead(60 * 24 * 6 + 1260), windowMins: 10080, group: 'Gemini' },
         { id: 'gemini-5h', label: 'Gemini · 5h', usedPercent: 70, resetsAt: ahead(139), windowMins: 300, group: 'Gemini' },
-        { id: '3p-weekly', label: 'Claude and GPT · weekly', usedPercent: 50, resetsAt: ahead(60 * 24 * 6 + 1300), windowMins: 10080, group: 'Claude and GPT' },
-        { id: '3p-5h', label: 'Claude and GPT · 5h', usedPercent: 100, resetsAt: ahead(191), windowMins: 300, group: 'Claude and GPT' },
+        { id: '3p-weekly', label: 'Claude/GPT · weekly', usedPercent: 50, resetsAt: ahead(60 * 24 * 6 + 1300), windowMins: 10080, group: 'Claude/GPT' },
+        { id: '3p-5h', label: 'Claude/GPT · 5h', usedPercent: 100, resetsAt: ahead(191), windowMins: 300, group: 'Claude/GPT' },
       ],
       status: 'warning',
       observedAt: ago(2),

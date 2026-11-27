@@ -112,7 +112,7 @@ export function windowMinutes(w: UsageWindow): number | undefined {
 
 /** One pool's rows in the compact meter: shortest window on top, longest below. */
 export interface MeterStack {
-  /** The pool's name when a login has more than one (agy: Gemini, Claude and GPT). */
+  /** The pool's name when a login has more than one (agy: Gemini, Claude/GPT). */
   group?: string;
   rows: UsageWindow[];
 }
