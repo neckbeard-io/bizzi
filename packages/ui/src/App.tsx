@@ -5,6 +5,7 @@ import { forgetTarget, loadStartupEnv, resolveInitialTarget } from './lib/connec
 import type { ConnectionTarget } from './lib/connection.ts';
 import { pairCodeFromLocation } from './lib/router.ts';
 import { ConnectScreen } from './views/ConnectScreen.tsx';
+import { StartingScreen } from './views/StartingScreen.tsx';
 import { Shell } from './views/Shell.tsx';
 
 export function App(): ReactNode {
@@ -12,6 +13,9 @@ export function App(): ReactNode {
   const [pairCode] = useState(() => pairCodeFromLocation(window.location));
   const [target, setTarget] = useState<ConnectionTarget | null>(() => (pairCode ? null : resolveInitialTarget(loadStartupEnv())));
   const [lastError, setLastError] = useState<string | null>(null);
+  // Desktop app whose core is still coming up (or being replaced after an update): wait for it. The
+  // app reloads the page with the connection once the core is ready.
+  const [waitForCore, setWaitForCore] = useState(() => !pairCode && window.bizzi?.coreStarting === true);
 
   const disconnect = useCallback(() => {
     forgetTarget();
@@ -33,6 +37,7 @@ export function App(): ReactNode {
     [disconnect],
   );
 
+  if (!target && waitForCore) return <StartingScreen onConfigure={() => setWaitForCore(false)} />;
   if (!target) {
     return (
       <ConnectScreen

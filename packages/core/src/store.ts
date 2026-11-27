@@ -54,9 +54,11 @@ export interface SessionState {
    * still open at load). Once the node is back, `Sessions.resumeInterrupted` sends a continuation so
    * the agent carries on instead of waiting for a message. `at`: when it was cut off.
    */
-  interruptedTurn?: { at: string };
-  /** Automatic resumes since someone last sent a message; capped so a restart loop can't spin. */
+  interruptedTurn?: { at: string; planned?: true };
+  /** Automatic resumes after a crash since someone last sent a message; capped so a crash loop can't spin. */
   autoResumes?: number;
+  /** Automatic resumes after a clean stop (`interruptedTurn.planned`) since the last message; capped higher. */
+  plannedResumes?: number;
   /** Cross-machine helper (spec §12.4): the parent's agent and mode, for the permission cap on `session.set`. */
   remoteParent?: { machineId: string; agent: AgentKind; permissionMode?: string };
   /** Last known spend of this session's helpers on other machines, by helper id (counted in its tree). */

@@ -22,6 +22,8 @@ export interface BizziConnection {
 
 export interface Bootstrap {
   connection: BizziConnection | null;
+  /** No connection yet, but the core is starting (or being replaced): the main process reloads the page once it's up. */
+  coreStarting?: boolean;
   appVersion: string;
   /** System accent color as `rrggbbaa` (macOS, Windows), for the UI's Device theme; null elsewhere. */
   accentColor?: string | null;

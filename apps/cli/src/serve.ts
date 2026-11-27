@@ -16,6 +16,9 @@ import { loadServices } from './services.ts';
 import { defaultDataDir, resolveDir, UsageError } from './util.ts';
 import { loadTitleSuggester } from './titles.ts';
 
+/** How long a stop may take after the second signal before the process exits anyway. */
+const STOP_BACKSTOP_MS = 15_000;
+
 export const SERVE_HELP = `Usage: bizzi serve [options]
 
   --host <host>        listen address (default 127.0.0.1)
@@ -38,7 +41,8 @@ other BIZZI_ROUTER_* variables, as for "bizzi hub serve". The model only has to 
 machine; a hub without a classifier of its own borrows this one (route.score).
 
 Prints one JSON "ready" line on stdout when listening; logs go to stderr.
-SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting.
+SIGTERM/SIGINT drain running turns (up to $BIZZI_DRAIN_SECONDS, default 120) before exiting; a second
+signal stops without waiting.
 Turns still running then are continued automatically on the next start
 (BIZZI_RESUME_INTERRUPTED=0 turns that off).`;
 
@@ -167,17 +171,32 @@ export async function serve(argv: string[], version: string): Promise<void> {
   const hubUrl = values.connect || process.env.BIZZI_HUB_URL || undefined;
   const hubLink = startHubLink(node, { dataDir, url: hubUrl, pairCode: process.env.BIZZI_PAIR_CODE || undefined, logger });
 
-  let shuttingDown = false;
+  // First signal: drain, then stop. Second: stop now (running turns are cut off cleanly and continue
+  // on the next start); the desktop app sends it when it hands over to a new core. Third: exit.
+  let signals = 0;
+  let hurry: () => void = () => {};
+  const hurried = new Promise<false>((resolve) => (hurry = () => resolve(false)));
   const shutdown = async (signal: NodeJS.Signals) => {
-    if (shuttingDown) {
-      logger.log('warn', 'second signal; exiting without waiting for turns', { signal });
+    signals++;
+    if (signals === 2) {
+      logger.log('info', 'second signal; stopping without waiting for turns', { signal, activeTurns: node.sessions.activeTurns() });
+      hurry();
+      // Backstop: a stop that hangs must not keep the next core from starting.
+      setTimeout(() => {
+        logger.log('warn', 'stop took too long; exiting', {});
+        removeServeJson();
+        process.exit(1);
+      }, STOP_BACKSTOP_MS).unref();
+      return;
+    }
+    if (signals > 2) {
+      logger.log('warn', 'third signal; exiting now', { signal });
       removeServeJson();
       process.exit(1);
     }
-    shuttingDown = true;
     logger.log('info', 'draining', { signal, activeTurns: node.sessions.activeTurns(), drainSeconds });
     try {
-      const drained = await node.drain(drainSeconds * 1000);
+      const drained = await Promise.race([node.drain(drainSeconds * 1000), hurried]);
       if (!drained) logger.log('warn', 'drain timed out; stopping running turns', { activeTurns: node.sessions.activeTurns() });
       await hubLink?.close();
       await server.close();
