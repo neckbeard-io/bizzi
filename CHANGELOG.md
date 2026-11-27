@@ -16,3 +16,4 @@ Entries are added with the change, not reconstructed at release time; the rules 
 
 ### Fixed
 - Updating no longer leaves the downloaded installer (about 160 MB) behind in the temp folder.
+- The sidebar header shows the whole connection status ("connected") instead of cutting it off.
