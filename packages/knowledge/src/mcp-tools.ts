@@ -9,6 +9,7 @@ import { AGENT_KINDS, BizziError } from '@bizzi/protocol';
 import type { AgentKind } from '@bizzi/protocol';
 import { addKnowledge, defaultScopeLevel, forgetKnowledge, originFromContext, updateKnowledge } from './pipeline.ts';
 import type { WriteResult } from './pipeline.ts';
+import { registerHistoryTools, type HistorySource } from './history.ts';
 import { registerBrowseTools } from './mcp-browse.ts';
 import { loadSettings } from './policy.ts';
 import { rankMemories } from './resolver.ts';
@@ -44,6 +45,9 @@ export function serverInstructions(ctx: KnowledgeContext): string {
     '- Before proposing something, check knowledge_list for a pending suggestion that already says it. You can amend ' +
       '(knowledge_update) or withdraw (knowledge_forget) suggestions this session made, not other sessions\' ones.',
     '- When a workspace or project item turns out to hold more widely, propose the move with knowledge_promote.',
+    '- For what earlier sessions in this project did (any agent, including ended sessions): history_search finds ' +
+      'where something was asked or answered, and handoff_brief summarises one session (what it was asked, files ' +
+      'changed, PRs, where it ended, open questions) so you can pick up or check its work.',
     'Approving or rejecting suggestions is the user\'s, in their inbox; no tool does it.',
     SCOPE_GUIDE,
     `Scopes available in this session: ${available.join(', ')}. When you omit scope, the user's default applies.`,
@@ -106,6 +110,8 @@ const kindSchema = z.enum(MEMORY_KINDS as [(typeof MEMORY_KINDS)[number], ...(ty
 export interface KnowledgeMcpOptions {
   /** Max results for memory_search. Default 10. */
   searchLimit?: number;
+  /** Session history for history_search / handoff_brief; without it they say they are unavailable. */
+  history?: HistorySource;
 }
 
 /** Build the MCP server for one session context. Connect it to a transport yourself (see mcp-server.ts). */
@@ -324,32 +330,7 @@ export function createKnowledgeMcpServer(store: KnowledgeStore, ctx: KnowledgeCo
 
   registerBrowseTools(server, store, ctx);
 
-  const notYet = (tool: string, what: string): CallToolResult =>
-    text(`${tool} is not available yet in this version of bizzi (${what}). Use memory_search for saved knowledge instead.`, {
-      available: false,
-    });
-
-  server.registerTool(
-    'history_search',
-    {
-      title: 'Search past sessions (not available yet)',
-      description:
-        'Search past sessions across all agents and machines in this project. Not available yet: it returns a ' +
-        '"not available" notice. Use memory_search meanwhile.',
-      inputSchema: { query: z.string().min(1) },
-    },
-    async () => notYet('history_search', 'session history search across agents and machines'),
-  );
-
-  server.registerTool(
-    'handoff_brief',
-    {
-      title: 'Brief on an earlier session (not available yet)',
-      description: 'What an earlier session was doing, for picking up its work. Not available yet: it returns a "not available" notice.',
-      inputSchema: { sessionId: z.string().min(1) },
-    },
-    async () => notYet('handoff_brief', 'session handoff briefs'),
-  );
+  registerHistoryTools(server, opts.history);
 
   return server;
 }

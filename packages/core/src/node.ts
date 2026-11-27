@@ -48,7 +48,7 @@ import { KeepAwake, parseKeepAwakeSettings, readKeepAwakeSettings, type PowerBac
 import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
-import { History } from './history.ts';
+import { History, type HistorySearchParams } from './history.ts';
 import { Store } from './store.ts';
 import { themesExtension } from './themes.ts';
 import { DEFAULT_MAX_BYTES, fsList, fsRead, gitDiff, gitStatus } from './tools.ts';
@@ -190,6 +190,7 @@ const MACHINE_TARGET_METHODS: ReadonlySet<string> = new Set([
   'workspaces.list',
   'workspace.create',
   'sessions.list',
+  'history.search',
   'agent.plan',
   'agent.install',
   'agent.login',
@@ -738,6 +739,22 @@ class Node implements BizziNode {
         return {};
       },
       'session.markSeen': (p) => ({ seenThrough: s.markSeen(reqString(p, 'sessionId'), reqInt(p, 'seq')) }),
+      'history.search': (p) => {
+        const role = optString(p, 'role');
+        if (role !== undefined && role !== 'user' && role !== 'assistant') throw new BizziError('bad_request', "role must be 'user' or 'assistant'");
+        const params: HistorySearchParams = { query: reqString(p, 'query') };
+        for (const k of ['workspaceId', 'projectId', 'sessionId'] as const) {
+          const v = optString(p, k);
+          if (v !== undefined) params[k] = v;
+        }
+        if (role) params.role = role;
+        const limit = optInt(p, 'limit', 1, 1000);
+        const offset = optInt(p, 'offset');
+        if (limit !== undefined) params.limit = limit;
+        if (offset !== undefined) params.offset = offset;
+        return this.history.search(params);
+      },
+      'history.brief': async (p) => ({ brief: await this.history.brief(reqString(p, 'sessionId')) }),
       'session.interrupt': async (p) => {
         await s.interrupt(reqString(p, 'sessionId'));
         return {};

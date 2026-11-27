@@ -159,6 +159,24 @@
         "$ref": "#/$defs/result:session.delete"
       }
     },
+    "history.search": {
+      "description": "Full-text search over past sessions on this node: the user's prompts and the agents' top-level replies (bizzi-memory `history_search`). Words are ANDed; \"quoted phrases\", `word*` prefixes and `OR` work. `workspaceId` includes a repo's worktrees; `projectId` every workspace of the project. Best match first. `limit` default 10, max 50.",
+      "params": {
+        "$ref": "#/$defs/params:history.search"
+      },
+      "result": {
+        "$ref": "#/$defs/result:history.search"
+      }
+    },
+    "history.brief": {
+      "description": "A compact brief of one session for picking up its work (bizzi-memory `handoff_brief`).",
+      "params": {
+        "$ref": "#/$defs/params:history.brief"
+      },
+      "result": {
+        "$ref": "#/$defs/result:history.brief"
+      }
+    },
     "session.send": {
       "params": {
         "$ref": "#/$defs/params:session.send"
@@ -2948,6 +2966,74 @@
         "ended"
       ]
     },
+    "HistoryHit": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "workspaceId": {
+          "type": "string"
+        },
+        "role": {
+          "description": "`user`: a prompt · `assistant`: a top-level reply.",
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant"
+          ]
+        },
+        "seq": {
+          "description": "The event's seq on the session channel.",
+          "type": "number"
+        },
+        "ts": {
+          "type": "string"
+        },
+        "snippet": {
+          "description": "Text around the match, matches in [ ].",
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "workspaceId",
+        "role",
+        "seq",
+        "ts",
+        "snippet"
+      ]
+    },
+    "HistorySearchResult": {
+      "type": "object",
+      "properties": {
+        "hits": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/HistoryHit"
+          }
+        },
+        "nextOffset": {
+          "description": "Pass as `offset` for more.",
+          "type": "number"
+        },
+        "fullText": {
+          "description": "false: this SQLite has no FTS5, so terms matched as substrings, newest first.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "hits",
+        "fullText"
+      ]
+    },
     "InputBlock": {
       "anyOf": [
         {
@@ -3691,6 +3777,8 @@
         "session.create",
         "session.fork",
         "session.delete",
+        "history.search",
+        "history.brief",
         "session.send",
         "session.steer",
         "session.interrupt",
@@ -4637,6 +4725,44 @@
             },
             "params": {
               "$ref": "#/$defs/params:session.delete"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "history.search"
+            },
+            "params": {
+              "$ref": "#/$defs/params:history.search"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "method": {
+              "const": "history.brief"
+            },
+            "params": {
+              "$ref": "#/$defs/params:history.brief"
             }
           }
         },
@@ -6644,6 +6770,201 @@
         {
           "$ref": "#/$defs/EventMsg"
         }
+      ]
+    },
+    "SessionBrief": {
+      "description": "What a session was asked, what it did, where it ended and what is still open; no transcript.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "agent": {
+          "$ref": "#/$defs/AgentKind"
+        },
+        "status": {
+          "$ref": "#/$defs/SessionStatus"
+        },
+        "workspace": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "path": {
+              "type": "string"
+            },
+            "branch": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        },
+        "parentId": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        },
+        "asked": {
+          "type": "object",
+          "properties": {
+            "first": {
+              "type": "string"
+            },
+            "later": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "prompts": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "later",
+            "prompts"
+          ]
+        },
+        "did": {
+          "type": "object",
+          "properties": {
+            "turns": {
+              "type": "number"
+            },
+            "tools": {
+              "type": "object",
+              "properties": {
+                "total": {
+                  "type": "number"
+                },
+                "byKind": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "number"
+                  }
+                },
+                "failed": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "total",
+                "byKind",
+                "failed"
+              ]
+            },
+            "changedFiles": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "change": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "change"
+                ]
+              }
+            },
+            "prs": {
+              "description": "Pull requests mentioned in replies, prompts and tool output (URLs, or \"#n\" when that's all there is).",
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "turns",
+            "tools",
+            "changedFiles",
+            "prs"
+          ]
+        },
+        "ended": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "$ref": "#/$defs/SessionStatus"
+            },
+            "stopReason": {
+              "type": "string"
+            },
+            "error": {
+              "type": "string"
+            },
+            "lastReply": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ]
+        },
+        "open": {
+          "type": "object",
+          "properties": {
+            "approvals": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "questions": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "budget": {
+              "type": "string"
+            },
+            "asks": {
+              "description": "Heuristic: the last reply asks the user this.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "approvals",
+            "questions"
+          ]
+        },
+        "text": {
+          "description": "The same as markdown, ready to hand to another session.",
+          "type": "string"
+        },
+        "truncated": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "sessionId",
+        "agent",
+        "status",
+        "workspace",
+        "createdAt",
+        "updatedAt",
+        "asked",
+        "did",
+        "ended",
+        "open",
+        "text",
+        "truncated"
       ]
     },
     "SessionBudget": {
@@ -8877,6 +9198,57 @@
         }
       ]
     },
+    "params:history.brief": {
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sessionId"
+      ]
+    },
+    "params:history.search": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/MachineTarget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "workspaceId": {
+              "type": "string"
+            },
+            "projectId": {
+              "type": "string"
+            },
+            "sessionId": {
+              "type": "string"
+            },
+            "role": {
+              "type": "string",
+              "enum": [
+                "user",
+                "assistant"
+              ]
+            },
+            "limit": {
+              "type": "number"
+            },
+            "offset": {
+              "type": "number"
+            }
+          },
+          "required": [
+            "query"
+          ]
+        }
+      ]
+    },
     "params:knowledge.accept": {
       "allOf": [
         {
@@ -10531,6 +10903,20 @@
     },
     "result:helper.wait": {
       "$ref": "#/$defs/HelperWaitResult"
+    },
+    "result:history.brief": {
+      "type": "object",
+      "properties": {
+        "brief": {
+          "$ref": "#/$defs/SessionBrief"
+        }
+      },
+      "required": [
+        "brief"
+      ]
+    },
+    "result:history.search": {
+      "$ref": "#/$defs/HistorySearchResult"
     },
     "result:knowledge.accept": {
       "$ref": "#/$defs/Empty"

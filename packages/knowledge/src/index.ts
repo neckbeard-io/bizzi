@@ -78,6 +78,8 @@ export type { AcceptOptions, InboxFilter, InboxGroup } from './inbox.ts';
 export { canRead, canSeeSuggestion, getWithHistory, isOwnSuggestion, listForSession, moveToScope, planScopeMove, readable } from './access.ts';
 export type { HistoryEntry, ItemWithHistory, ListStatus, ScopeMovePlan, SessionListFilter, SessionListPage } from './access.ts';
 export { LIST_BODY_CHARS, registerBrowseTools } from './mcp-browse.ts';
+export { HISTORY_TOKEN_ENV, HISTORY_URL_ENV, historySourceFromEnv, httpHistorySource, registerHistoryTools } from './history.ts';
+export type { HistorySearchArgs, HistorySource } from './history.ts';
 export { MCP_SERVER_VERSION, createKnowledgeMcpServer, parseServerConfig, serverInstructions } from './mcp-tools.ts';
 export type { KnowledgeMcpOptions, McpServerConfig } from './mcp-tools.ts';
 export {

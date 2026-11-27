@@ -7,10 +7,16 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { AddressInfo } from 'node:net';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import type { BizziNode } from '@bizzi/core';
-import type { Logger } from '@bizzi/protocol';
+import { BizziError, type Logger } from '@bizzi/protocol';
 import { createAgentsMcpServer } from './tools.ts';
 
 export const MCP_PATH = '/mcp';
+/**
+ * Session history for the bizzi-memory MCP server (a stdio process per session that has no node
+ * connection of its own): POST `{ method: 'search' | 'brief', params }` with that session's history token.
+ * Scoped to the caller's project by core `History.searchFor` / `briefFor`; read-only.
+ */
+export const HISTORY_PATH = '/history';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 export interface AgentsServerOptions {
@@ -28,6 +34,9 @@ export class AgentsServer {
   /** sha256(token) → session id, and session id → its current token hash. */
   readonly #tokens = new Map<string, string>();
   readonly #bySession = new Map<string, string>();
+  /** History tokens: separate from the MCP ones, so a session at the depth limit (no bizzi-agents) still has history. */
+  readonly #historyTokens = new Map<string, string>();
+  readonly #historyBySession = new Map<string, string>();
   #url?: string;
   #hosts = new Set<string>();
 
@@ -70,9 +79,27 @@ export class AgentsServer {
 
   revoke(sessionId: string): void {
     const h = this.#bySession.get(sessionId);
-    if (h === undefined) return;
-    this.#tokens.delete(h);
-    this.#bySession.delete(sessionId);
+    if (h !== undefined) {
+      this.#tokens.delete(h);
+      this.#bySession.delete(sessionId);
+    }
+    const hh = this.#historyBySession.get(sessionId);
+    if (hh !== undefined) {
+      this.#historyTokens.delete(hh);
+      this.#historyBySession.delete(sessionId);
+    }
+  }
+
+  /** A new history token for `sessionId` (replacing its earlier one), and where to use it. */
+  mintHistory(sessionId: string): { url: string; token: string } | undefined {
+    if (!this.#url) return undefined;
+    const old = this.#historyBySession.get(sessionId);
+    if (old !== undefined) this.#historyTokens.delete(old);
+    const token = randomBytes(32).toString('base64url');
+    const h = hash(token);
+    this.#historyTokens.set(h, sessionId);
+    this.#historyBySession.set(sessionId, h);
+    return { url: this.#url.replace(/\/mcp$/, HISTORY_PATH), token };
   }
 
   /** Session id behind a bearer token, if it is live. */
@@ -83,6 +110,8 @@ export class AgentsServer {
   close(): Promise<void> {
     this.#tokens.clear();
     this.#bySession.clear();
+    this.#historyTokens.clear();
+    this.#historyBySession.clear();
     return new Promise((resolve) => {
       if (!this.#http.listening) return resolve();
       this.#http.close(() => resolve());
@@ -93,9 +122,10 @@ export class AgentsServer {
   async #handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     try {
       const url = new URL(req.url ?? '/', 'http://x');
-      if (url.pathname !== MCP_PATH) return reply(res, 404, 'not found');
+      if (url.pathname !== MCP_PATH && url.pathname !== HISTORY_PATH) return reply(res, 404, 'not found');
       // DNS-rebinding guard: only loopback host names.
       if (!this.#hosts.has(String(req.headers.host ?? ''))) return reply(res, 403, 'forbidden host');
+      if (url.pathname === HISTORY_PATH) return await this.#history(req, res);
       const auth = String(req.headers.authorization ?? '');
       const m = /^Bearer\s+(\S+)$/i.exec(auth);
       const callerId = m ? this.sessionFor(m[1]!) : undefined;
@@ -125,6 +155,53 @@ export class AgentsServer {
       else res.end();
     }
   }
+
+  async #history(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const m = /^Bearer\s+(\S+)$/i.exec(String(req.headers.authorization ?? ''));
+    const callerId = m ? this.#historyTokens.get(hash(m[1]!)) : undefined;
+    if (!callerId || !this.#node.sessions.has(callerId)) {
+      res.setHeader('www-authenticate', 'Bearer');
+      return replyJson(res, 401, { error: { code: 'unauthorized', message: 'unauthorized' } });
+    }
+    if (req.method !== 'POST') {
+      res.setHeader('allow', 'POST');
+      return replyJson(res, 405, { error: { code: 'bad_request', message: 'method not allowed' } });
+    }
+    const body = (await readJson(req)) as { method?: unknown; params?: unknown } | undefined;
+    const params = (body?.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>;
+    try {
+      const h = this.#node.history;
+      if (body?.method === 'search') {
+        const scope = params.scope;
+        if (scope !== undefined && scope !== 'workspace' && scope !== 'project') throw new BizziError('bad_request', "scope must be 'workspace' or 'project'");
+        const role = params.role;
+        if (role !== undefined && role !== 'user' && role !== 'assistant') throw new BizziError('bad_request', "role must be 'user' or 'assistant'");
+        const result = h.searchFor(callerId, {
+          query: typeof params.query === 'string' ? params.query : '',
+          ...(scope ? { scope } : {}),
+          ...(role ? { role } : {}),
+          ...(typeof params.sessionId === 'string' ? { sessionId: params.sessionId } : {}),
+          ...(typeof params.limit === 'number' ? { limit: params.limit } : {}),
+          ...(typeof params.offset === 'number' ? { offset: params.offset } : {}),
+        });
+        return replyJson(res, 200, { result });
+      }
+      if (body?.method === 'brief') {
+        if (typeof params.sessionId !== 'string' || !params.sessionId) throw new BizziError('bad_request', 'sessionId is required');
+        return replyJson(res, 200, { result: { brief: await h.briefFor(callerId, params.sessionId) } });
+      }
+      throw new BizziError('bad_request', "method must be 'search' or 'brief'");
+    } catch (err) {
+      const e = err instanceof BizziError ? err : new BizziError('internal', err instanceof Error ? err.message : String(err));
+      if (e.code === 'internal') this.#log.log('warn', 'history request failed', { err });
+      return replyJson(res, 200, { error: { code: e.code, message: e.message } });
+    }
+  }
+}
+
+function replyJson(res: ServerResponse, status: number, body: unknown): void {
+  res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(body));
 }
 
 function hash(token: string): string {

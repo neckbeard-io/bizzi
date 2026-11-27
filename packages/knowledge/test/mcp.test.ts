@@ -123,12 +123,12 @@ test('bizzi-memory MCP server over stdio, end to end', async () => {
     const badScope = await call(client, 'memory_add', { title: 'x', body: 'y', kind: 'fact', scope: 'team' });
     assert.equal(badScope.isError, true);
 
-    // Not-yet-available tools say so clearly.
+    // Without bizzi's history endpoint the history tools say so clearly.
     const hist = await call(client, 'history_search', { query: 'anything' });
     assert.equal((hist.structuredContent as { available: boolean }).available, false);
-    assert.match(textOf(hist), /not available yet/);
+    assert.match(textOf(hist), /not available in this session/);
     const brief = await call(client, 'handoff_brief', { sessionId: 's_X' });
-    assert.match(textOf(brief), /not available yet/);
+    assert.match(textOf(brief), /not available in this session/);
   } finally {
     await client.close();
   }

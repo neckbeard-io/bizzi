@@ -4,9 +4,11 @@
 //        [--project-id p_…] [--workspace-id w_…] [--session-id s_…]
 // The same values can come from BIZZI_KNOWLEDGE_DB, BIZZI_AGENT, BIZZI_MACHINE_ID, BIZZI_MACHINE_TAGS
 // (comma-separated), BIZZI_PROJECT_ID, BIZZI_WORKSPACE_ID and BIZZI_SESSION_ID. stdout carries the MCP protocol; logs go to stderr.
+// BIZZI_HISTORY_URL and BIZZI_HISTORY_TOKEN (env only, never argv) reach the node's session history.
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import type { LogLevel, Logger } from '@bizzi/protocol';
+import { historySourceFromEnv } from './history.ts';
 import { createKnowledgeMcpServer, parseServerConfig } from './mcp-tools.ts';
 import { KnowledgeStore } from './store.ts';
 
@@ -32,7 +34,8 @@ async function main(): Promise<void> {
     process.exit(2);
   }
   const store = new KnowledgeStore({ path: config.dbPath, machineId: config.context.machineId, logger });
-  const server = createKnowledgeMcpServer(store, config.context);
+  const history = historySourceFromEnv(process.env);
+  const server = createKnowledgeMcpServer(store, config.context, history ? { history } : {});
   const transport = new StdioServerTransport();
   let closed = false;
   const shutdown = async () => {

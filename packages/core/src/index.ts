@@ -107,6 +107,11 @@ export {
 } from './pipelines.ts';
 export {
   History,
+  HISTORY_DEFAULT_LIMIT,
+  HISTORY_MAX_LIMIT,
+  briefText,
+  type HistoryScope,
+  type HistorySearchParams,
   OVERVIEW_DEFAULT_LIMIT,
   OVERVIEW_MAX_LIMIT,
   inputText,

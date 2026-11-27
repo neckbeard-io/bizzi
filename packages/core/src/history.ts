@@ -1,10 +1,11 @@
 // Read-only views over every session on this node, for agents (bizzi-agents `sessions_overview` and
 // `session_peek`, spec §12.1): what each session was last asked, what it last said, and whether it is
 // waiting on the user. Unlike the helper tools these are not limited to the caller's own helpers; they
-// never change a session.
+// never change a session. Also the node side of bizzi-memory's `history_search` (full-text search over
+// the Store's history index) and `handoff_brief` (`history.search`, `history.brief`).
 
 import { BizziError, sessionChannel } from '@bizzi/protocol';
-import type { AgentKind, InputBlock, MachineInfo, SessionInfo, SessionStatus, WorkspaceInfo } from '@bizzi/protocol';
+import type { AgentKind, HistoryHit, HistorySearchResult, InputBlock, MachineInfo, SessionBrief, SessionInfo, SessionStatus, WorkspaceInfo } from '@bizzi/protocol';
 import type { HubPort } from './hub-port.ts';
 import type { Orchestrator, ReadOptions, ReadResult } from './orchestration.ts';
 import type { Sessions } from './sessions.ts';
@@ -245,6 +246,163 @@ export class History {
     return out;
   }
 
+  // ---- full-text search and briefs (bizzi-memory history_search / handoff_brief)
+
+  /** Sessions in a workspace family (a repo and its worktrees) or every workspace of a project. */
+  sessionsIn(scope: { workspaceId?: string; projectId?: string }): SessionInfo[] {
+    const all = this.#d.workspaces.list();
+    let ids: Set<string> | undefined;
+    if (scope.workspaceId !== undefined) ids = familyOf(all, scope.workspaceId, 'this machine');
+    if (scope.projectId !== undefined) {
+      const roots = all.filter((w) => w.projectId === scope.projectId);
+      const proj = new Set(roots.flatMap((w) => [...familyOf(all, w.id, 'this machine')]));
+      ids = ids ? new Set([...ids].filter((id) => proj.has(id))) : proj;
+    }
+    const sessions = this.#d.sessions.list();
+    return ids ? sessions.filter((s) => ids.has(s.workspaceId)) : sessions;
+  }
+
+  search(p: HistorySearchParams): HistorySearchResult {
+    const scoped = p.workspaceId !== undefined || p.projectId !== undefined;
+    return this.#searchIn(scoped ? this.sessionsIn(p) : undefined, p);
+  }
+
+  /** Search within `sessions` (every session on the node when undefined). */
+  #searchIn(within: SessionInfo[] | undefined, p: Omit<HistorySearchParams, 'workspaceId' | 'projectId'>): HistorySearchResult {
+    if (typeof p.query !== 'string' || !p.query.trim()) throw new BizziError('bad_request', 'query is required');
+    const limit = clampInt(p.limit ?? HISTORY_DEFAULT_LIMIT, 1, HISTORY_MAX_LIMIT, 'limit');
+    const offset = clampInt(p.offset ?? 0, 0, Number.MAX_SAFE_INTEGER, 'offset');
+    let sessions = within;
+    if (p.sessionId !== undefined) sessions = (sessions ?? this.#d.sessions.list()).filter((s) => s.id === p.sessionId);
+    const scoped = sessions !== undefined;
+    const byCh = new Map((sessions ?? []).map((s) => [sessionChannel(s.id), s]));
+    // One more than asked tells whether there is a next page.
+    const rows = this.#d.store.searchHistory({
+      query: p.query,
+      ...(scoped ? { channels: [...byCh.keys()] } : {}),
+      ...(p.role ? { role: p.role } : {}),
+      limit: limit + 1,
+      offset,
+    });
+    const hits: HistoryHit[] = [];
+    for (const r of rows.slice(0, limit)) {
+      const s = byCh.get(r.ch) ?? (scoped ? undefined : this.#sessionOfChannel(r.ch));
+      if (!s) continue;
+      hits.push({ sessionId: s.id, ...(s.title ? { title: s.title } : {}), agent: s.agent, workspaceId: s.workspaceId, role: r.role, seq: r.seq, ts: r.ts, snippet: r.snippet });
+    }
+    return { hits, ...(rows.length > limit ? { nextOffset: offset + limit } : {}), fullText: this.#d.store.ftsAvailable };
+  }
+
+  /**
+   * Workspaces an agent session's history covers (bizzi-memory). `workspace`: its own workspace and, for a
+   * repo, its worktrees. `project` (default): its repo (the one a worktree was made from) with every
+   * worktree, plus every workspace on this node with the same projectId and their worktrees.
+   */
+  callerScope(callerId: string, scope: HistoryScope = 'project'): { projectId?: string; workspaceIds: Set<string> } {
+    if (!this.#d.sessions.has(callerId)) throw new BizziError('not_found', `no session ${callerId}`);
+    const caller = this.#d.sessions.get(callerId).session;
+    const all = this.#d.workspaces.list();
+    const own = all.find((w) => w.id === caller.workspaceId);
+    if (!own) return { workspaceIds: new Set([caller.workspaceId]) };
+    if (scope === 'workspace') return { workspaceIds: familyOf(all, own.id, 'this machine') };
+    const root = (own.kind === 'worktree' && own.parentWorkspaceId && all.find((w) => w.id === own.parentWorkspaceId)) || own;
+    const projectId = root.projectId ?? own.projectId;
+    const ids = familyOf(all, root.id, 'this machine');
+    ids.add(own.id);
+    if (projectId) for (const w of all) if (w.projectId === projectId) for (const id of familyOf(all, w.id, 'this machine')) ids.add(id);
+    return { ...(projectId ? { projectId } : {}), workspaceIds: ids };
+  }
+
+  /** history_search for an agent session: limited to its project (or workspace). */
+  searchFor(callerId: string, p: Omit<HistorySearchParams, 'workspaceId' | 'projectId'> & { scope?: HistoryScope }): HistorySearchResult {
+    const { workspaceIds } = this.callerScope(callerId, p.scope);
+    return this.#searchIn(this.#d.sessions.list().filter((s) => workspaceIds.has(s.workspaceId)), p);
+  }
+
+  /** handoff_brief for an agent session: any session in its project. */
+  async briefFor(callerId: string, sessionId: string): Promise<SessionBrief> {
+    const { workspaceIds } = this.callerScope(callerId, 'project');
+    const s = this.#d.sessions.has(sessionId) ? this.#d.sessions.get(sessionId).session : undefined;
+    if (!s || !workspaceIds.has(s.workspaceId)) throw new BizziError('not_found', `no session ${sessionId} in this project on this machine`);
+    return this.brief(sessionId);
+  }
+
+  /** What `sessionId` was asked, what it did, where it ended and what is open (fork.ts's brief, as data). */
+  async brief(sessionId: string): Promise<SessionBrief> {
+    if (typeof sessionId !== 'string' || !sessionId) throw new BizziError('bad_request', 'sessionId is required');
+    if (!this.#d.sessions.has(sessionId)) throw new BizziError('not_found', `no session ${sessionId} on this machine`);
+    const info = this.#d.sessions.get(sessionId).session;
+    const r = await this.#d.orchestration.summarize(sessionId, { maxTokens: 2000 });
+    const prompts: string[] = [];
+    const prs = new PrMentions();
+    for (const ev of this.#d.store.replay(sessionChannel(sessionId), 0, Number.MAX_SAFE_INTEGER)) {
+      if (ev.type === 'turn.started' || ev.type === 'turn.steered') {
+        if (ev.type === 'turn.started' && (ev.data.auto || ev.data.agent)) continue;
+        const text = inputText(ev.data.input);
+        if (text && !isBizziPrompt(text)) {
+          prompts.push(text);
+          prs.scan(text);
+        }
+      } else if (ev.type === 'message.completed') {
+        if (ev.data.role === 'assistant' && !ev.data.parentToolId) prs.scan(ev.data.text);
+      } else if (ev.type === 'tool.started') {
+        if (!ev.data.parentToolId) prs.scan(ev.data.title);
+      } else if (ev.type === 'tool.completed') {
+        if (ev.data.output) prs.scan(ev.data.output.slice(0, 20_000));
+      }
+    }
+    const ws = this.#workspace(info.workspaceId);
+    const ex = this.exchange(sessionId);
+    const w = this.waiting(info, ex);
+    let truncated = r.truncated;
+    const clip = (t: string, max: number) => {
+      if (t.length <= max) return t;
+      truncated = true;
+      return `${t.slice(0, max - 1).trimEnd()}…`;
+    };
+    let branch = ws?.branch;
+    if (!branch && ws?.kind === 'git') branch = await withTimeout(gitStatus(ws).then((g) => g.branch), 3000).catch(() => undefined);
+    const files = r.changedFiles.slice(0, 50).map((f) => ({ path: f.path, change: f.change }));
+    if (r.changedFiles.length > files.length) truncated = true;
+    const brief: SessionBrief = {
+      sessionId,
+      ...(info.title ? { title: info.title } : {}),
+      agent: info.agent,
+      status: info.status,
+      workspace: { id: info.workspaceId, ...(ws ? { path: ws.path } : {}), ...(branch ? { branch } : {}) },
+      ...(info.spawnedBy ? { parentId: info.spawnedBy } : {}),
+      createdAt: info.createdAt,
+      updatedAt: info.updatedAt,
+      asked: {
+        ...(prompts[0] ? { first: clip(prompts[0], 2000) } : {}),
+        later: prompts.slice(1).slice(-5).map((t) => clip(oneLine(t, 400), 400)),
+        prompts: prompts.length,
+      },
+      did: { turns: r.turns, tools: { total: r.tools.total, byKind: r.tools.byKind, failed: r.tools.failed }, changedFiles: files, prs: prs.list() },
+      ended: {
+        state: info.status,
+        ...(r.stopReason ? { stopReason: r.stopReason } : {}),
+        ...(r.error ? { error: oneLine(r.error, 400) } : {}),
+        ...(ex.lastReply ? { lastReply: clip(ex.lastReply.text, 2500) } : {}),
+      },
+      open: {
+        approvals: w?.approvals ?? [],
+        questions: w?.questions ?? [],
+        ...(w?.budget ? { budget: w.budget } : {}),
+        ...(w?.asks ? { asks: w.asks.question } : {}),
+      },
+      text: '',
+      truncated,
+    };
+    brief.text = briefText(brief);
+    return brief;
+  }
+
+  #sessionOfChannel(ch: string): SessionInfo | undefined {
+    const id = ch.startsWith('session:') ? ch.slice('session:'.length) : undefined;
+    return id && this.#d.sessions.has(id) ? this.#d.sessions.get(id).session : undefined;
+  }
+
   // ---- internals
 
   #workspace(id: string): WorkspaceInfo | undefined {
@@ -322,6 +480,65 @@ export class History {
     if (o.offset + o.limit < infos.length) out.nextOffset = o.offset + o.limit;
     return out;
   }
+}
+
+export interface HistorySearchParams {
+  query: string;
+  workspaceId?: string;
+  projectId?: string;
+  sessionId?: string;
+  role?: 'user' | 'assistant';
+  limit?: number;
+  offset?: number;
+}
+
+/** What an agent's history_search covers. */
+export type HistoryScope = 'workspace' | 'project';
+
+export const HISTORY_DEFAULT_LIMIT = 10;
+export const HISTORY_MAX_LIMIT = 50;
+
+const PR_URL = /https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/pull\/\d+/g;
+const PR_REF = /\b(?:PR|pull request|gh pr (?:view|merge|checks|create|edit|close|comment|review))\s*#?(\d{1,6})\b/gi;
+
+/** Pull requests a session mentions: full URLs, and bare "#n" only for numbers no URL covers. */
+class PrMentions {
+  readonly #urls = new Set<string>();
+  readonly #refs = new Set<string>();
+
+  scan(text: string): void {
+    for (const m of text.matchAll(PR_URL)) this.#urls.add(m[0]);
+    for (const m of text.matchAll(PR_REF)) this.#refs.add(m[1]!);
+  }
+
+  list(): string[] {
+    const covered = new Set([...this.#urls].map((u) => u.slice(u.lastIndexOf('/') + 1)));
+    return [...this.#urls, ...[...this.#refs].filter((n) => !covered.has(n)).map((n) => `#${n}`)].slice(0, 20);
+  }
+}
+
+/** The brief as markdown for another session. */
+export function briefText(b: SessionBrief): string {
+  const out = [`# ${b.title || 'Untitled session'} (${b.agent}, ${b.sessionId})`, '', `${b.status}, last active ${b.updatedAt}, in ${b.workspace.path ?? b.workspace.id}${b.workspace.branch ? ` on \`${b.workspace.branch}\`` : ''}${b.parentId ? `; a helper of ${b.parentId}` : ''}.`];
+  if (b.asked.first) out.push('', '## Asked', '', b.asked.first);
+  if (b.asked.later.length) {
+    out.push('', `## Later requests${b.asked.prompts - 1 > b.asked.later.length ? ` (last ${b.asked.later.length} of ${b.asked.prompts - 1})` : ''}`, '');
+    for (const l of b.asked.later) out.push(`- ${l}`);
+  }
+  const kinds = Object.entries(b.did.tools.byKind).map(([k, n]) => `${n} ${k}`).join(', ');
+  out.push('', '## Did', '', `${b.did.turns} turn${b.did.turns === 1 ? '' : 's'}, ${b.did.tools.total} tool call${b.did.tools.total === 1 ? '' : 's'}${kinds ? ` (${kinds})` : ''}${b.did.tools.failed ? `, ${b.did.tools.failed} failed` : ''}.`);
+  if (b.did.changedFiles.length) out.push('', 'Files changed:', ...b.did.changedFiles.map((f) => `- ${f.path} (${f.change})`));
+  if (b.did.prs.length) out.push('', `PRs mentioned: ${b.did.prs.join(', ')}`);
+  out.push('', '## Where it ended', '', `${b.ended.state}${b.ended.stopReason ? ` (${b.ended.stopReason})` : ''}${b.ended.error ? `: ${b.ended.error}` : ''}`);
+  if (b.ended.lastReply) out.push('', b.ended.lastReply);
+  const open = [
+    ...b.open.approvals.map((a) => `approval pending: ${a}`),
+    ...b.open.questions.map((q) => `question pending: ${q}`),
+    ...(b.open.budget ? [`budget: ${b.open.budget}`] : []),
+    ...(b.open.asks ? [`its last reply asks (heuristic): ${b.open.asks}`] : []),
+  ];
+  if (open.length) out.push('', '## Open', '', ...open.map((o) => `- ${o}`));
+  return out.join('\n');
 }
 
 function baseEntry(s: SessionInfo): Omit<OverviewEntry, 'turnOpen'> {

@@ -153,6 +153,8 @@ export async function serve(argv: string[], version: string): Promise<void> {
     ...(power ? { power } : {}),
   });
   knowledge?.bindMachine(() => node.machine);
+  const historyEndpoint = orchestration?.historyEndpoint?.bind(orchestration);
+  if (historyEndpoint) knowledge?.bindHistory(historyEndpoint);
   let server: BizziServer;
   try {
     server = await startServer(node, { host: values.host, port, token, logger });

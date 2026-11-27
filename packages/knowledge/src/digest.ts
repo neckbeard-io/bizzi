@@ -95,7 +95,9 @@ export const TOOLS_NOTE =
   'record it with `rule_add` and `userRequested: true`. Fix or retire outdated entries with `knowledge_update` / ' +
   '`knowledge_forget`, using the ids in brackets. `rules_in_effect` lists the rules that apply to you with their ids, ' +
   '`knowledge_list` browses rules, memories and your pending suggestions, `knowledge_get` reads one in full, and ' +
-  '`knowledge_promote` proposes moving one to a wider scope. Approving suggestions is the user\'s. Never store secrets.';
+  '`knowledge_promote` proposes moving one to a wider scope. `history_search` searches what earlier sessions in this ' +
+  'project were asked and answered, and `handoff_brief` summarises one of them. Approving suggestions is the user\'s. ' +
+  'Never store secrets.';
 
 function oneLine(s: string): string {
   return s.replace(/\s+/g, ' ').trim();
@@ -249,6 +251,8 @@ export interface SessionKnowledgeOptions extends DigestOptions {
   nodePath?: string;
   /** Skip the MCP server (e.g. the agent can't take one). */
   withMcp?: boolean;
+  /** Extra env for the MCP server process (the session-history endpoint and token). */
+  env?: Record<string, string>;
 }
 
 /** Everything a session start needs, ready to spread into `StartSessionOptions`. */
@@ -262,6 +266,7 @@ export function knowledgeForSession(
   const spec = mcpServerSpec(context, {
     dbPath: opts.dbPath ?? opts.store.path,
     ...(opts.nodePath !== undefined ? { nodePath: opts.nodePath } : {}),
+    ...(opts.env ? { env: opts.env } : {}),
   });
   return { systemPromptAppend, mcpServers: { [MCP_SERVER_NAME]: spec } };
 }

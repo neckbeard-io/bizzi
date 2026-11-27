@@ -387,3 +387,42 @@ test('bizzi-agents: sessions_overview and session_peek see every session, read-o
   }
   assert.equal(h.node.sessions.get(other.id).session.status, 'idle');
 });
+
+test('bizzi-agents: the /history endpoint serves bizzi-memory with its own per-session token, scoped to the project', async (t) => {
+  const h = await harness(t);
+  const { session: me, workspace } = await parentWithClient(t, h);
+  const { session: other } = await h.node.call('session.create', { workspaceId: workspace.id, agent: 'claude', title: 'Earlier' });
+  await waitFor(() => h.node.sessions.get(other.id).session.status === 'idle', 'other idle');
+  await h.node.call('session.send', { sessionId: other.id, input: [{ type: 'text', text: 'migrate the billing tables' }] });
+  await waitFor(() => h.node.sessions.get(other.id).session.status === 'idle' && !h.node.sessions.isBusy(other.id), 'other done');
+  const elsewhere = join(h.repo, '..', 'elsewhere');
+  mkdirSync(elsewhere);
+  const { workspace: ws2 } = await h.node.call('workspace.create', { path: elsewhere });
+  const { session: far } = await h.node.call('session.create', { workspaceId: ws2.id, agent: 'claude' });
+  await waitFor(() => h.node.sessions.get(far.id).session.status === 'idle', 'far idle');
+  await h.node.call('session.send', { sessionId: far.id, input: [{ type: 'text', text: 'billing in another project' }] });
+  await waitFor(() => h.node.sessions.get(far.id).session.status === 'idle' && !h.node.sessions.isBusy(far.id), 'far done');
+
+  const ep = h.ext.historyEndpoint(me.id)!;
+  assert.match(ep.url, /^http:\/\/127\.0\.0\.1:\d+\/history$/);
+  const post = (body: unknown, token = ep.token) =>
+    fetch(ep.url, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+  const search = (await (await post({ method: 'search', params: { query: 'billing' } })).json()) as { result: { hits: { sessionId: string }[] } };
+  assert.deepEqual(new Set(search.result.hits.map((x) => x.sessionId)), new Set([other.id]), 'not the other project');
+  const brief = (await (await post({ method: 'brief', params: { sessionId: other.id } })).json()) as { result: { brief: { asked: { first: string } } } };
+  assert.equal(brief.result.brief.asked.first, 'migrate the billing tables');
+  const refused = (await (await post({ method: 'brief', params: { sessionId: far.id } })).json()) as { error: { code: string } };
+  assert.equal(refused.error.code, 'not_found');
+  const bad = (await (await post({ method: 'stop', params: {} })).json()) as { error: { code: string } };
+  assert.equal(bad.error.code, 'bad_request');
+
+  // The MCP bearer is not a history token, and vice versa; a re-mint replaces the old one; ending revokes it.
+  const mcpToken = (h.claude.starts.find((s) => s.sessionId === me.id)!.mcpServers![MCP_SERVER_NAME] as { headers: Record<string, string> }).headers.Authorization!.slice(7);
+  assert.equal((await post({ method: 'search', params: { query: 'x' } }, mcpToken)).status, 401);
+  const next = h.ext.historyEndpoint(me.id)!;
+  assert.equal((await post({ method: 'search', params: { query: 'x' } })).status, 401, 'old token replaced');
+  assert.equal((await post({ method: 'search', params: { query: 'x' } }, next.token)).status, 200);
+  await h.node.call('session.stop', { sessionId: me.id });
+  await waitFor(() => h.node.sessions.get(me.id).session.status === 'ended', 'me ended');
+  assert.equal((await post({ method: 'search', params: { query: 'x' } }, next.token)).status, 401);
+});

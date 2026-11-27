@@ -3,6 +3,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
+import { BizziError } from '@bizzi/protocol';
 import type { AgentKind, ChannelEvent, SessionInfo, WorkspaceInfo } from '@bizzi/protocol';
 import type { Spent } from './budget.ts';
 
@@ -102,8 +103,90 @@ CREATE TABLE IF NOT EXISTS events (
 ) WITHOUT ROWID;
 `;
 
+/**
+ * Full-text history (bizzi-memory `history_search`): user prompts and top-level assistant replies, one row
+ * each in `history`, indexed by the external-content FTS5 table `history_fts` that triggers keep in step.
+ * Rows are added as events are appended; existing events are indexed once at open (meta `history.indexed`).
+ */
+const HISTORY_SCHEMA = `
+CREATE TABLE IF NOT EXISTS history (
+  id   INTEGER PRIMARY KEY,
+  ch   TEXT NOT NULL,
+  seq  INTEGER NOT NULL,
+  ts   TEXT NOT NULL,
+  role TEXT NOT NULL,
+  text TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS history_ch_seq ON history (ch, seq);
+`;
+const HISTORY_FTS_SCHEMA = `
+CREATE VIRTUAL TABLE IF NOT EXISTS history_fts USING fts5(text, content='history', content_rowid='id', tokenize='porter unicode61 remove_diacritics 2');
+CREATE TRIGGER IF NOT EXISTS history_ai AFTER INSERT ON history BEGIN
+  INSERT INTO history_fts (rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER IF NOT EXISTS history_ad AFTER DELETE ON history BEGIN
+  INSERT INTO history_fts (history_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+`;
+/** Bump to rebuild the history index from the event log at the next open. */
+const HISTORY_VERSION = '1';
+const HISTORY_META = 'history.indexed';
+/** Longest text kept per history row. */
+export const HISTORY_MAX_TEXT = 20_000;
+
+export interface HistoryDoc {
+  role: 'user' | 'assistant';
+  text: string;
+}
+
+/** The searchable text of an event, if it has any: what the user asked, or what the agent answered. */
+export function historyDoc(type: string, data: unknown): HistoryDoc | undefined {
+  const d = data as Record<string, unknown> | null;
+  if (!d || typeof d !== 'object') return undefined;
+  let doc: HistoryDoc | undefined;
+  if (type === 'turn.started' || type === 'turn.steered') {
+    if (d.auto || d.agent || !Array.isArray(d.input)) return undefined;
+    const text = (d.input as { type?: string; text?: unknown; path?: unknown }[])
+      .map((b) => (b.type === 'text' && typeof b.text === 'string' ? b.text : b.type === 'file' && typeof b.path === 'string' ? `[file ${b.path}]` : ''))
+      .filter(Boolean)
+      .join('\n')
+      .trim();
+    // bizzi's own prompts (the continuation after a restart) aren't the user's words.
+    if (text && !text.startsWith('[bizzi]')) doc = { role: 'user', text };
+  } else if (type === 'message.completed') {
+    if (d.role === 'assistant' && !d.parentToolId && typeof d.text === 'string' && d.text.trim()) doc = { role: 'assistant', text: d.text.trim() };
+  }
+  if (doc && doc.text.length > HISTORY_MAX_TEXT) doc.text = doc.text.slice(0, HISTORY_MAX_TEXT);
+  return doc;
+}
+
+const HISTORY_TYPES = new Set(['turn.started', 'turn.steered', 'message.completed']);
+
+export interface HistoryRow {
+  ch: string;
+  seq: number;
+  ts: string;
+  role: 'user' | 'assistant';
+  snippet: string;
+}
+
+export interface HistoryQuery {
+  /** Words (ANDed), "quoted phrases", `word*` prefixes and OR. */
+  query: string;
+  /** Limit to these channels. */
+  channels?: string[];
+  role?: 'user' | 'assistant';
+  limit: number;
+  offset: number;
+}
+
 export class Store {
   readonly path: string;
+  /** SQLite here has FTS5; without it history search falls back to substring matching. */
+  readonly ftsAvailable: boolean;
+  /** Rows indexed by the one-time backfill at this open (0 when it had already run). */
+  readonly historyBackfilled: number;
+  readonly #insertHistory: StatementSync;
   readonly #db: DatabaseSync;
   readonly #insertEvent: StatementSync;
   readonly #replay: StatementSync;
@@ -118,6 +201,16 @@ export class Store {
     this.#db = new DatabaseSync(this.path);
     this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL; PRAGMA busy_timeout = 5000;');
     this.#db.exec(SCHEMA);
+    this.#db.exec(HISTORY_SCHEMA);
+    let fts = true;
+    try {
+      this.#db.exec(HISTORY_FTS_SCHEMA);
+    } catch {
+      fts = false;
+    }
+    this.ftsAvailable = fts;
+    this.#insertHistory = this.#db.prepare('INSERT OR IGNORE INTO history (ch, seq, ts, role, text) VALUES (?, ?, ?, ?, ?)');
+    this.historyBackfilled = this.#backfillHistory();
     this.#insertEvent = this.#db.prepare('INSERT INTO events (ch, seq, ts, type, data) VALUES (?, ?, ?, ?, ?)');
     this.#replay = this.#db.prepare(
       'SELECT ch, seq, ts, type, data FROM events WHERE ch = ? AND seq > ? ORDER BY seq LIMIT ?',
@@ -162,6 +255,77 @@ export class Store {
 
   insertEvent(ev: ChannelEvent): void {
     this.#insertEvent.run(ev.ch, ev.seq, ev.ts, ev.type, JSON.stringify(ev.data));
+    if (!HISTORY_TYPES.has(ev.type)) return;
+    const doc = historyDoc(ev.type, ev.data);
+    if (doc) this.#insertHistory.run(ev.ch, ev.seq, ev.ts, doc.role, doc.text);
+  }
+
+  // --- history search ---------------------------------------------------------------------------
+
+  /** Index the event log once (and again after a HISTORY_VERSION bump). One scan of `events`. */
+  #backfillHistory(): number {
+    if (this.getMeta(HISTORY_META) === HISTORY_VERSION) return 0;
+    let n = 0;
+    this.#db.exec('BEGIN');
+    try {
+      this.#db.exec('DELETE FROM history');
+      const rows = this.#db
+        .prepare(`SELECT ch, seq, ts, type, data FROM events WHERE type IN (${[...HISTORY_TYPES].map(() => '?').join(', ')})`)
+        .iterate(...HISTORY_TYPES) as Iterable<{ ch: string; seq: number; ts: string; type: string; data: string }>;
+      for (const r of rows) {
+        let data: unknown;
+        try {
+          data = JSON.parse(r.data);
+        } catch {
+          continue;
+        }
+        const doc = historyDoc(r.type, data);
+        if (!doc) continue;
+        this.#insertHistory.run(r.ch, r.seq, r.ts, doc.role, doc.text);
+        n++;
+      }
+      this.setMeta(HISTORY_META, HISTORY_VERSION);
+      this.#db.exec('COMMIT');
+    } catch (err) {
+      this.#db.exec('ROLLBACK');
+      throw err;
+    }
+    return n;
+  }
+
+  /**
+   * Best matches first (bm25) with FTS5; without it, every term as a substring, newest first. Snippets
+   * mark matches with [ ].
+   */
+  searchHistory(q: HistoryQuery): HistoryRow[] {
+    const where: string[] = [];
+    const args: (string | number)[] = [];
+    if (q.channels) {
+      if (q.channels.length === 0) return [];
+      where.push('h.ch IN (SELECT value FROM json_each(?))');
+      args.push(JSON.stringify(q.channels));
+    }
+    if (q.role) {
+      where.push('h.role = ?');
+      args.push(q.role);
+    }
+    if (this.ftsAvailable) {
+      const match = ftsQuery(q.query);
+      const sql =
+        `SELECT h.ch, h.seq, h.ts, h.role, snippet(history_fts, 0, '[', ']', '…', 24) AS snippet
+         FROM history_fts JOIN history h ON h.id = history_fts.rowid
+         WHERE history_fts MATCH ?${where.length ? ` AND ${where.join(' AND ')}` : ''}
+         ORDER BY bm25(history_fts), h.ts DESC LIMIT ? OFFSET ?`;
+      return this.#db.prepare(sql).all(match, ...args, q.limit, q.offset) as unknown as HistoryRow[];
+    }
+    const terms = queryTerms(q.query).map((t) => t.text);
+    for (const t of terms) {
+      where.push("h.text LIKE ? ESCAPE '\\'");
+      args.push(`%${t.replace(/[\\%_]/g, (c) => `\\${c}`)}%`);
+    }
+    const sql = `SELECT h.ch, h.seq, h.ts, h.role, h.text FROM history h WHERE ${where.join(' AND ')} ORDER BY h.ts DESC LIMIT ? OFFSET ?`;
+    const rows = this.#db.prepare(sql).all(...args, q.limit, q.offset) as unknown as (HistoryRow & { text: string })[];
+    return rows.map(({ text, ...r }) => ({ ...r, snippet: likeSnippet(text, terms) }));
   }
 
   maxSeq(ch: string): number {
@@ -263,6 +427,7 @@ export class Store {
     this.#db.exec('BEGIN');
     try {
       this.#db.prepare('DELETE FROM events WHERE ch = ?').run(ch);
+      this.#db.prepare('DELETE FROM history WHERE ch = ?').run(ch);
       this.#db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
       this.#db.exec('COMMIT');
     } catch (err) {
@@ -270,4 +435,55 @@ export class Store {
       throw err;
     }
   }
+}
+
+// --- history query parsing ----------------------------------------------------------------------
+
+interface QueryTerm {
+  text: string;
+  phrase: boolean;
+  prefix: boolean;
+  or: boolean;
+}
+
+/** Words, "quoted phrases", `word*` prefixes and OR between terms; everything else is literal text. */
+function queryTerms(query: string): QueryTerm[] {
+  const out: QueryTerm[] = [];
+  let or = false;
+  for (const m of query.matchAll(/"([^"]*)"|(\S+)/g)) {
+    if (m[1] !== undefined) {
+      const text = m[1].trim();
+      if (text) out.push({ text, phrase: true, prefix: false, or });
+      or = false;
+      continue;
+    }
+    const raw = m[2]!;
+    if (raw === 'OR' && out.length > 0) {
+      or = true;
+      continue;
+    }
+    const prefix = raw.length > 1 && raw.endsWith('*');
+    const text = (prefix ? raw.slice(0, -1) : raw).replace(/"/g, '');
+    if (text) out.push({ text, phrase: false, prefix, or });
+    or = false;
+  }
+  return out;
+}
+
+/** An FTS5 MATCH expression with every term quoted, so user text can't be a syntax error. */
+export function ftsQuery(query: string): string {
+  const terms = queryTerms(query);
+  if (terms.length === 0) throw new BizziError('bad_request', 'query is empty');
+  return terms
+    .map((t, i) => `${i > 0 ? (t.or ? 'OR ' : 'AND ') : ''}"${t.text.replace(/"/g, '""')}"${t.prefix ? '*' : ''}`)
+    .join(' ');
+}
+
+function likeSnippet(text: string, terms: string[]): string {
+  const flat = text.replace(/\s+/g, ' ');
+  const lower = flat.toLowerCase();
+  const at = Math.max(0, lower.indexOf(terms[0]?.toLowerCase() ?? ''));
+  const start = Math.max(0, at - 80);
+  const end = Math.min(flat.length, at + 160);
+  return `${start > 0 ? '…' : ''}${flat.slice(start, end)}${end < flat.length ? '…' : ''}`;
 }

@@ -152,3 +152,99 @@ test('session peek: the session_read summary for any session, no ownership neede
   assert.equal(r.tools.total, 1);
   await assert.rejects(node.history.peek('s_nope'), /no session/);
 });
+
+// ---- full-text history (bizzi-memory history_search / handoff_brief)
+
+test('history index: prompts and replies indexed on append, backfilled once, dropped with the session', async () => {
+  const { Store, ftsQuery, historyDoc } = await import('../src/store.ts');
+  const tmp = tempDir();
+  try {
+    const store = new Store(tmp.path);
+    assert.equal(store.ftsAvailable, true, 'Node 26 sqlite has FTS5');
+    assert.equal(store.historyBackfilled, 0);
+    let seq = 0;
+    const put = (ch: string, type: string, data: unknown) => store.insertEvent({ ch, seq: ++seq, ts: new Date(1_800_000_000_000 + seq).toISOString(), type, data } as never);
+    put('session:s_a', 'turn.started', { turnId: 't1', input: [{ type: 'text', text: 'Please fix the flaky reconnection test' }, { type: 'image', mediaType: 'image/png', dataBase64: 'AAAA' }] });
+    put('session:s_a', 'message.delta', { messageId: 'm1', text: 'reconnection' });
+    put('session:s_a', 'message.completed', { messageId: 'm1', role: 'assistant', text: 'Fixed the reconnection test; opened PR #12.' });
+    put('session:s_a', 'message.completed', { messageId: 'm2', role: 'assistant', text: 'subagent says reconnection', parentToolId: 'x' });
+    put('session:s_a', 'turn.started', { turnId: 't2', input: [{ type: 'text', text: '[bizzi] bizzi restarted… reconnection' }], auto: true });
+    put('session:s_b', 'turn.started', { turnId: 't3', input: [{ type: 'text', text: 'Bump the reconnect timeout' }] });
+
+    // Porter stemming: "reconnection" finds "reconnect" too. Subagent text, deltas and bizzi's own prompts aren't indexed.
+    const hits = store.searchHistory({ query: 'reconnection', limit: 10, offset: 0 });
+    assert.deepEqual(hits.map((h) => [h.ch, h.role]).sort(), [['session:s_a', 'assistant'], ['session:s_a', 'user'], ['session:s_b', 'user']]);
+    assert.match(hits.find((h) => h.ch === 'session:s_a' && h.role === 'user')!.snippet, /\[reconnection\]/);
+    // Porter stemming and prefixes; channel and role filters; phrases; OR.
+    assert.equal(store.searchHistory({ query: 'reconnect*', limit: 10, offset: 0 }).length, 3);
+    assert.equal(store.searchHistory({ query: 'reconnect*', channels: ['session:s_b'], limit: 10, offset: 0 }).length, 1);
+    assert.equal(store.searchHistory({ query: 'reconnect*', role: 'assistant', limit: 10, offset: 0 }).length, 1);
+    assert.equal(store.searchHistory({ query: '"flaky reconnection"', limit: 10, offset: 0 }).length, 1);
+    assert.equal(store.searchHistory({ query: 'timeout OR flaky', limit: 10, offset: 0 }).length, 2);
+    assert.equal(store.searchHistory({ query: 'reconnect*', channels: [], limit: 10, offset: 0 }).length, 0);
+    // User text can't break the query syntax.
+    assert.equal(ftsQuery('a" OR NEAR( b*'), '"a" OR "NEAR(" AND "b"*');
+    assert.doesNotThrow(() => store.searchHistory({ query: 'NEAR( "unclosed AND -', limit: 5, offset: 0 }));
+    assert.throws(() => ftsQuery('   '), /empty/);
+    assert.equal(historyDoc('turn.started', { input: [], agent: true }), undefined);
+
+    // The one-time backfill: forget the index, reopen, everything comes back once.
+    store.setMeta('history.indexed', '0');
+    store.close();
+    const again = new Store(tmp.path);
+    assert.equal(again.historyBackfilled, 3);
+    assert.equal(again.searchHistory({ query: 'reconnect*', limit: 10, offset: 0 }).length, 3);
+    again.close();
+    const third = new Store(tmp.path);
+    assert.equal(third.historyBackfilled, 0, 'only once');
+    third.deleteSession('s_a', 'session:s_a');
+    assert.deepEqual(third.searchHistory({ query: 'reconnect*', limit: 10, offset: 0 }).map((h) => h.ch), ['session:s_b']);
+    third.close();
+  } finally {
+    tmp.cleanup();
+  }
+});
+
+test('history search and briefs: scoped to the caller\'s project, prompts, files, PRs, open questions', async (t) => {
+  const { node, tmp } = await setup(t);
+  const repo = makeRepo(tmp.path);
+  const { workspace: ws } = await node.call('workspace.create', { path: repo });
+  const { workspace: wt } = await node.call('worktree.create', { workspaceId: ws.id, branch: 'feat/y' });
+  const { workspace: other } = await node.call('workspace.create', { path: join(tmp.path, 'other'), create: true });
+  const { session: me } = await node.call('session.create', { workspaceId: wt.id, agent: 'claude' });
+  const { session: done } = await node.call('session.create', { workspaceId: ws.id, agent: 'claude', title: 'Release work' });
+  const { session: away } = await node.call('session.create', { workspaceId: other.id, agent: 'claude' });
+  await say(node, done.id, 'tag the release and open https://github.com/acme/app/pull/77 please');
+  await say(node, done.id, 'then gh pr merge 78 as well. Ready to ship?');
+  await say(node, away.id, 'release notes for the other project');
+
+  // Node method (any session on the node, or a workspace family).
+  const all = await node.call('history.search', { query: 'release' });
+  assert.equal(all.fullText, true);
+  assert.deepEqual(new Set(all.hits.map((h) => h.sessionId)), new Set([done.id, away.id]));
+  const inRepo = await node.call('history.search', { query: 'release', workspaceId: ws.id, role: 'user' });
+  assert.deepEqual(inRepo.hits.map((h) => [h.sessionId, h.role, h.title]), [[done.id, 'user', 'Release work']]);
+  assert.match(inRepo.hits[0]!.snippet, /\[release\]/);
+  const paged = await node.call('history.search', { query: 'release', limit: 1 });
+  assert.equal(paged.hits.length, 1);
+  assert.equal(paged.nextOffset, 1);
+
+  // For an agent: its project (the repo of its worktree, with every worktree), never the other project.
+  const mine = node.history.searchFor(me.id, { query: 'release' });
+  assert.deepEqual(new Set(mine.hits.map((h) => h.sessionId)), new Set([done.id]));
+  assert.equal(node.history.searchFor(me.id, { query: 'release', scope: 'workspace' }).hits.length, 0, 'workspace = just its worktree');
+
+  const brief = await node.history.briefFor(me.id, done.id);
+  assert.equal(brief.title, 'Release work');
+  assert.equal(brief.asked.first, 'tag the release and open https://github.com/acme/app/pull/77 please');
+  assert.deepEqual(brief.asked.later, ['then gh pr merge 78 as well. Ready to ship?']);
+  assert.deepEqual(brief.did.prs, ['https://github.com/acme/app/pull/77', '#78']);
+  assert.equal(brief.did.turns, 2);
+  assert.equal(brief.ended.lastReply, 'echo: then gh pr merge 78 as well. Ready to ship?');
+  assert.equal(brief.open.asks, 'Ready to ship?');
+  assert.equal(brief.workspace.branch, 'main');
+  assert.match(brief.text, /## Asked[\s\S]*## Did[\s\S]*PRs mentioned: https:\/\/github.com\/acme\/app\/pull\/77, #78[\s\S]*## Open/);
+  await assert.rejects(node.history.briefFor(me.id, away.id), /no session .* in this project/);
+  const viaMethod = await node.call('history.brief', { sessionId: away.id });
+  assert.equal(viaMethod.brief.asked.first, 'release notes for the other project');
+});
