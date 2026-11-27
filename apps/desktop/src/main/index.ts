@@ -18,6 +18,7 @@ import {
 } from 'electron';
 import type { LogLevel, ServeReady } from '@bizzi/protocol';
 import { createLogger, fileSink, stderrSink } from '../core/log.ts';
+import { ensureCoreCopy, pruneCoreCopies, readCoreId } from '../core/copy.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
 import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, testBuildFor } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
@@ -63,6 +64,13 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 let stopped = false;
+/** Set by "Quit and Stop Sessions": stop the core on quit instead of leaving it running. */
+let stopCoreOnQuit = false;
+/**
+ * The packaged core's id (core/copy.ts). With one, the core runs from its own copy and outlives the
+ * app; without (dev runs, BIZZI_CORE_ENTRY, older bundles) quitting stops it as before.
+ */
+const bundledCoreId = app.isPackaged && !env['BIZZI_CORE_ENTRY'] ? readCoreId(process.resourcesPath) : null;
 /** The connection the current page was loaded with; a different one triggers a reload. */
 let loadedConn: ServeReady | null = null;
 
@@ -70,16 +78,19 @@ const manager = new CoreManager({
   dataDir,
   logFile,
   logger: log,
+  coreId: bundledCoreId,
   resolveLaunch: async () => {
+    // Run the core from its copy, so replacing the app later doesn't pull files from under it.
+    const resourcesPath = bundledCoreId ? await ensureCoreCopy(process.resourcesPath, dataDir, bundledCoreId) : process.resourcesPath;
     const runtime = await resolveCoreRuntime({
       env,
       platform: process.platform,
       isPackaged: app.isPackaged,
-      resourcesPath: process.resourcesPath,
+      resourcesPath,
       execPath: process.execPath,
       electronNodeVersion: process.versions.node,
     });
-    const entry = resolveCoreEntry({ env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir });
+    const entry = resolveCoreEntry({ env, isPackaged: app.isPackaged, resourcesPath, appDir });
     if (!existsSync(entry)) throw new Error(`core entry not found: ${entry}`);
     log.log('info', 'core runtime', { kind: runtime.kind, command: runtime.command, nodeVersion: runtime.nodeVersion, entry });
     // A test build's core gets its data dir, secrets and widgets apart from the installed app's.
@@ -154,15 +165,19 @@ function setup(): void {
     e.preventDefault();
     if (quitting) return;
     quitting = true;
-    log.log('info', 'quitting');
+    // The core keeps running (and its sessions with it) unless it runs from inside the bundle or
+    // the user chose to stop it; the next launch re-adopts it.
+    const keepCore = bundledCoreId !== null && !stopCoreOnQuit;
+    log.log('info', 'quitting', { keepCore });
     updates.stop();
-    manager
-      .stop()
+    (keepCore ? manager.detach() : manager.stop())
       .catch((err: unknown) => log.log('error', 'core stop failed', { error: String(err) }))
       .finally(() => {
         stopped = true;
         tray?.destroy();
-        app.quit();
+        // Next tick: detach() settles within the same turn as this before-quit, and Electron drops
+        // an app.quit() made while it is still unwinding the quit this handler just cancelled.
+        setImmediate(() => app.quit());
       });
   });
   app.on('window-all-closed', () => {
@@ -243,6 +258,14 @@ async function onReady(): Promise<void> {
   updateTray(manager.status);
 
   const conn = await manager.start();
+  if (bundledCoreId) {
+    try {
+      const removed = pruneCoreCopies(dataDir, [bundledCoreId, manager.runningCoreId]);
+      if (removed.length) log.log('info', 'removed old core copies', { removed });
+    } catch (err) {
+      log.log('warn', 'could not prune old core copies', { error: String(err) });
+    }
+  }
   if (!conn) {
     void dialog.showMessageBox({
       type: 'warning',
@@ -381,6 +404,18 @@ function updateTray(status: CoreStatus): void {
       { label: 'Check for Updates…', click: () => checkForUpdates() },
       { type: 'separator' },
       { label: 'Quit bizzi', accelerator: isMac ? 'Command+Q' : undefined, click: () => app.quit() },
+      ...(bundledCoreId && status.owned
+        ? [
+            {
+              label: 'Quit and Stop Sessions',
+              toolTip: 'Quit and stop the core too; running agents stop. Plain Quit leaves them running.',
+              click: () => {
+                stopCoreOnQuit = true;
+                app.quit();
+              },
+            },
+          ]
+        : []),
     ]),
   );
 }

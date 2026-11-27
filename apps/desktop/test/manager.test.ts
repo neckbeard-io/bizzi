@@ -189,3 +189,63 @@ test('a relaunched app re-adopts the core it had spawned', async (t) => {
   assert.equal(isPidAlive(conn.pid), false);
   await a.m.stop();
 });
+
+test('detach leaves an owned core running; a relaunch with the same core id re-adopts it', async (t) => {
+  const dir = await tempDir(t);
+  const first = manager(dir, {}, { coreId: 'aaaa1111' });
+  const conn = await first.m.start();
+  assert.ok(conn);
+  t.after(() => {
+    try {
+      process.kill(conn.pid, 'SIGKILL');
+    } catch {
+      // already gone
+    }
+  });
+  assert.equal(first.m.runningCoreId, 'aaaa1111');
+  assert.equal(JSON.parse(await readFile(join(dir, 'desktop-core.json'), 'utf8')).coreId, 'aaaa1111');
+
+  await first.m.detach();
+  assert.equal(first.m.status.state, 'stopped');
+  assert.equal(isPidAlive(conn.pid), true, 'the core outlives the app');
+
+  const second = manager(dir, {}, { coreId: 'aaaa1111' });
+  const again = await second.m.start();
+  assert.equal(again?.pid, conn.pid, 'same process, nothing restarted');
+  assert.equal(second.m.status.state, 'attached');
+  assert.equal(second.m.status.owned, true);
+  assert.equal(second.launches(), 0);
+  await second.m.stop();
+  assert.equal(isPidAlive(conn.pid), false, 'an owned core still stops on an explicit stop');
+});
+
+test('a relaunch with a different core id restarts the owned core on the new code', async (t) => {
+  const dir = await tempDir(t);
+  const first = manager(dir, {}, { coreId: 'aaaa1111' });
+  const old = await first.m.start();
+  assert.ok(old);
+  await first.m.detach();
+
+  const second = manager(dir, {}, { coreId: 'bbbb2222' });
+  t.after(() => second.m.stop());
+  const conn = await second.m.start();
+  assert.ok(conn);
+  assert.notEqual(conn.pid, old.pid);
+  assert.equal(isPidAlive(old.pid), false, 'the out-of-date core was stopped');
+  assert.equal(second.m.status.state, 'running');
+  assert.equal(second.launches(), 1);
+  assert.equal(second.m.runningCoreId, 'bbbb2222');
+  assert.equal(JSON.parse(await readFile(join(dir, 'desktop-core.json'), 'utf8')).coreId, 'bbbb2222');
+});
+
+test('without a core id (dev runs, older builds) an owned core is adopted whatever recorded it', async (t) => {
+  const dir = await tempDir(t);
+  const first = manager(dir, {}, { coreId: 'aaaa1111' });
+  const old = await first.m.start();
+  assert.ok(old);
+  await first.m.detach();
+  const second = manager(dir);
+  t.after(() => second.m.stop());
+  assert.equal((await second.m.start())?.pid, old.pid);
+  assert.equal(second.launches(), 0);
+});

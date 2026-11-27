@@ -3,6 +3,7 @@
 //   staging/ui/    packages/ui/dist (the production UI build), or a placeholder page
 //   staging/core/  the core: root package files, packages/* (minus ui), apps/cli, production deps
 //   staging/node/  the Node runtime that runs it (bin/node, or node.exe on Windows)
+//   staging/core/core-id  a hash of core + node, so the app knows when a running core is out of date
 //
 // Builds for the host platform and arch only: the core's native addons (node-pty prebuilds) are
 // installed for the machine running this, so each target is staged on its own runner (release.yml).
@@ -22,6 +23,7 @@ import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { CORE_ID_FILE } from '../src/core/copy.ts';
 
 const appDir = fileURLToPath(new URL('..', import.meta.url));
 const repo = join(appDir, '..', '..');
@@ -156,4 +158,38 @@ function pruneCore(): void {
     }
   }
   log('core: dependencies installed');
+}
+
+// --- core id --------------------------------------------------------------------------------
+// A content hash of what the core process runs (core sources, dependencies, the Node runtime). The
+// app restarts a running core only when this changes, so a UI-only build or a release that only
+// bumps the version leaves running sessions alone. The stamped version is left out of the hash.
+const coreId = hashCore();
+writeFileSync(join(core, CORE_ID_FILE), coreId + '\n');
+log(`core: id ${coreId}`);
+
+function hashCore(): string {
+  const h = createHash('sha256');
+  // Both places the stamped version lands: the CLI manifest and npm's hidden lockfile entry for it.
+  const versionFile = join(core, 'apps', 'cli', 'package.json');
+  const hiddenLock = join(core, 'node_modules', '.package-lock.json');
+  const walk = (dir: string): void => {
+    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile() && p !== join(core, CORE_ID_FILE)) {
+        let data = readFileSync(p);
+        if (p === versionFile) data = Buffer.from(JSON.stringify({ ...JSON.parse(data.toString('utf8')), version: '' }));
+        if (p === hiddenLock) {
+          const lock = JSON.parse(data.toString('utf8')) as { packages?: Record<string, { version?: string }> };
+          if (lock.packages?.['apps/cli']) lock.packages['apps/cli'].version = '';
+          data = Buffer.from(JSON.stringify(lock));
+        }
+        h.update(p.slice(staging.length).replaceAll('\\', '/')).update('\0').update(data).update('\0');
+      }
+    }
+  };
+  walk(core);
+  walk(node);
+  return h.digest('hex').slice(0, 16);
 }

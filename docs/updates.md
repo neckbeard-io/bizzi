@@ -80,6 +80,7 @@ Updating the node is the same problem one level up:
 - PTY sessions run under the detached supervisor and survive a node restart.
 - Structured sessions declare `resumeAfterNodeRestart` and resume through the same sequence (§5).
 - The node drains at safe points first: no restart mid-turn.
+- **The desktop app doesn't restart the node unless the node changed.** A packaged app runs its core from a copy outside the bundle (`<dataDir>/core/<core id>/`) and leaves it running when it quits, so replacing the app (self-update, a local build) doesn't touch running sessions. The core id is a content hash of the core and its Node runtime, ignoring the version stamp. A relaunch with the same id re-adopts the running core; a different id restarts it (`apps/desktop/src/core/copy.ts`, `manager.ts`). Dev runs and `BIZZI_CORE_ENTRY` keep the old behavior (quit stops the core).
 
 ## 8. As built (core, first pass)
 
