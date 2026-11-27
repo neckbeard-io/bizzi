@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useIsWide } from '../../app/hooks.ts';
@@ -8,6 +8,7 @@ import type { DensityPref } from '../../app/theme.ts';
 import { Icon } from '../../components/icons.tsx';
 import { SectionTitle } from '../../components/layout.tsx';
 import { Badge, Button, Card, CopyButton, ErrorText, Field, Input, Modal, Segmented, cx } from '../../components/ui.tsx';
+import { CODE_FONT_SUGGESTIONS, DEFAULT_CODE_FONT, DEFAULT_UI_FONT, JETBRAINS_MONO, SYSTEM_FONT, UI_FONT_SUGGESTIONS, cleanFontName, codeFontStack, uiFontStack } from '../../lib/fonts.ts';
 import { BUILTIN_CATALOG, DEVICE_THEME_ID, deviceTheme } from '../../lib/theme/builtins/index.ts';
 import type { ThemeGroup } from '../../lib/theme/builtins/index.ts';
 import { IMPORT_ACCEPT, customThemeId, downloadName, parseThemeFile, serializeTheme, themeFromCurrent } from '../../lib/theme/files.ts';
@@ -27,8 +28,8 @@ const GROUP_LABEL: Record<ThemeGroup, string> = {
 type Entry = { id: string; theme: Theme | null; name: string; group: ThemeGroup; failures?: string[] };
 
 /**
- * Appearance settings (docs/theming.md §5): the theme and density are one choice for every device (stored on
- * the server); the mode and the sidebar width are per device. Custom themes live on the server.
+ * Appearance settings (docs/theming.md §5, §7a): the theme, density and fonts are one choice for every device
+ * (stored on the server); the mode and the sidebar width are per device. Custom themes live on the server.
  */
 export function AppearanceSettings(): ReactNode {
   const store = useStore();
@@ -91,6 +92,8 @@ export function AppearanceSettings(): ReactNode {
             ]}
           />
         </div>
+        <FontRow kind="ui" value={s.uiFont} />
+        <FontRow kind="code" value={s.codeFont} />
         {wide ? (
           <div className="flex flex-wrap items-center gap-3">
             <span className="flex-1 text-sm">
@@ -172,6 +175,91 @@ export function AppearanceSettings(): ReactNode {
       ) : null}
       {creating ? <CreateModal base={s.theme} onClose={() => setCreating(false)} /> : null}
     </>
+  );
+}
+
+type FontChoice = 'jetbrains' | 'system' | 'custom';
+
+/** One font pref: JetBrains Mono (bundled), the platform font, or any installed family by name. */
+function FontRow(props: { kind: 'ui' | 'code'; value: string }): ReactNode {
+  const listId = useId();
+  const isCode = props.kind === 'code';
+  const effective = cleanFontName(props.value) || (isCode ? DEFAULT_CODE_FONT : DEFAULT_UI_FONT);
+  const key = effective.toLowerCase();
+  const choice: FontChoice = key === JETBRAINS_MONO.toLowerCase() ? 'jetbrains' : key === SYSTEM_FONT ? 'system' : 'custom';
+  const [custom, setCustom] = useState(choice === 'custom' ? effective : '');
+  const [editing, setEditing] = useState(choice === 'custom');
+  useEffect(() => {
+    if (choice === 'custom') setCustom(effective);
+    setEditing(choice === 'custom');
+  }, [choice, effective]);
+
+  const save = (name: string): void => {
+    const clean = cleanFontName(name);
+    // The default is stored as '' so a future default change reaches everyone who never picked one.
+    const def = isCode ? DEFAULT_CODE_FONT : DEFAULT_UI_FONT;
+    const v = clean.toLowerCase() === def.toLowerCase() ? '' : clean;
+    themeStore.setFonts(isCode ? { codeFont: v } : { uiFont: v });
+  };
+  const pick = (c: FontChoice): void => {
+    if (c === 'custom') {
+      setEditing(true);
+      if (cleanFontName(custom)) save(custom);
+      return;
+    }
+    setEditing(false);
+    save(c === 'jetbrains' ? JETBRAINS_MONO : SYSTEM_FONT);
+  };
+  const shown: FontChoice = editing ? 'custom' : choice;
+  const stack = isCode ? codeFontStack(props.value) : uiFontStack(props.value);
+  const options: { value: FontChoice; label: string }[] = isCode
+    ? [
+        { value: 'jetbrains', label: 'JetBrains Mono' },
+        { value: 'system', label: 'System' },
+        { value: 'custom', label: 'Other…' },
+      ]
+    : [
+        { value: 'system', label: 'System' },
+        { value: 'jetbrains', label: 'JetBrains Mono' },
+        { value: 'custom', label: 'Other…' },
+      ];
+
+  return (
+    <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-3">
+        <span className="flex-1 text-sm">
+          {isCode ? 'Code font' : 'Interface font'} <span className="text-xs text-muted">· every device{isCode ? '; code, diffs and terminals' : ''}</span>
+        </span>
+        <Segmented<FontChoice> value={shown} onChange={pick} items={options} />
+      </div>
+      {shown === 'custom' ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={custom}
+            list={listId}
+            className="w-56"
+            placeholder={isCode ? 'Fira Code' : 'Inter'}
+            spellCheck={false}
+            autoCapitalize="off"
+            aria-label={isCode ? 'Code font name' : 'Interface font name'}
+            onChange={(e) => setCustom(e.target.value)}
+            onBlur={() => cleanFontName(custom) && save(custom)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && cleanFontName(custom)) save(custom);
+            }}
+          />
+          <datalist id={listId}>
+            {(isCode ? CODE_FONT_SUGGESTIONS : UI_FONT_SUGGESTIONS).map((f) => (
+              <option key={f} value={f} />
+            ))}
+          </datalist>
+          <span className="text-xs text-muted">Used where it's installed; otherwise the system font.</span>
+        </div>
+      ) : null}
+      <div className="truncate rounded-md border border-border bg-code px-2.5 py-1.5 text-[13px]" style={{ fontFamily: stack }}>
+        {isCode ? 'const ok = (x) => x !== null && x >= 0; // 0O 1lI {} []' : 'The quick brown fox jumps over the lazy dog · 0123456789'}
+      </div>
+    </div>
   );
 }
 

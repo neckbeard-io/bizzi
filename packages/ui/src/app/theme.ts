@@ -1,7 +1,8 @@
-// Theme state (theming.md §2, §5): which theme, which mode, which density. The theme and density are one
-// user-wide choice stored on the server (`prefs.*`; localStorage caches it for first paint and offline);
-// the mode (system / light / dark) is per device. Custom themes come from the server too. A module-level
-// store so every component (sidebar toggle, settings, terminals) sees the same theme, applied once per change.
+// Theme state (theming.md §2, §5, §7a): which theme, which mode, which density, which fonts. The theme,
+// density and fonts are one user-wide choice stored on the server (`prefs.*`; localStorage caches it for
+// first paint and offline); the mode (system / light / dark) is per device. Custom themes come from the
+// server too. A module-level store so every component (sidebar toggle, settings, terminals) sees the same
+// theme, applied once per change.
 import { useCallback, useEffect, useSyncExternalStore } from 'react';
 import type { BizziStore } from '@bizzi/client';
 import type { ThemeFile, UserPrefs } from '@bizzi/protocol';
@@ -13,11 +14,14 @@ import type { CustomTheme } from '../lib/theme/custom.ts';
 import { effectiveDensity, resolveTheme } from '../lib/theme/resolve.ts';
 import type { Density, ModePref, ResolvedTheme, Theme, ThemeMode } from '../lib/theme/types.ts';
 import { mergePrefs, reconcilePrefs } from '../lib/prefs.ts';
+import { applyFonts, FONT_CACHE_KEY, fontVars } from '../lib/fonts.ts';
 import { loadJson, loadString, remove, saveJson, saveString } from '../lib/storage.ts';
 
 const MODE_KEY = 'bizzi.theme'; // existing key (system|light|dark), also read by theme-init.js
 const ID_KEY = 'bizzi.theme.id';
 const DENSITY_KEY = 'bizzi.theme.density';
+const UI_FONT_KEY = 'bizzi.font.ui';
+const CODE_FONT_KEY = 'bizzi.font.code';
 /** The selected custom theme's JSON, so it applies at startup before the hub answers. */
 const SELECTED_KEY = 'bizzi.theme.selected';
 /** Custom themes when the server has no `themes.*` methods. */
@@ -32,6 +36,9 @@ export type ThemeState = {
   mode: ModePref;
   themeId: string;
   density: DensityPref;
+  /** Interface and code font prefs ('' = bizzi's default; see lib/fonts.ts). */
+  uiFont: string;
+  codeFont: string;
   /** A theme shown but not chosen (failed import, unsaved create). */
   preview: Theme | null;
   custom: CustomTheme[];
@@ -74,6 +81,8 @@ let state: ThemeState = {
     const d = loadString(DENSITY_KEY);
     return isDensityPref(d) ? d : 'theme';
   })(),
+  uiFont: loadString(UI_FONT_KEY) ?? '',
+  codeFont: loadString(CODE_FONT_KEY) ?? '',
   preview: null,
   custom: readThemeFiles(loadJson<ThemeFile[]>(LOCAL_KEY) ?? []),
   customSource: null,
@@ -115,6 +124,9 @@ function compute(s: ThemeState): ThemeSnapshot {
 function paint(snap: ThemeSnapshot): void {
   if (typeof document === 'undefined') return;
   applyTheme(snap.resolved, snap.effectiveDensity);
+  const fonts = fontVars(snap.uiFont, snap.codeFont);
+  applyFonts(fonts);
+  saveJson(FONT_CACHE_KEY, fonts);
   if (snap.preview || urlOverride) return;
   const cache: PaintCache = {
     light: paintEntry(resolveTheme(snap.theme, 'light')),
@@ -158,6 +170,11 @@ export const themeStore = {
     applyLocal({ density });
     void pushPrefs({ density });
   },
+  /** Interface and/or code font for every device ('' = bizzi's default). */
+  setFonts(fonts: { uiFont?: string; codeFont?: string }): void {
+    applyLocal(fonts);
+    void pushPrefs(fonts);
+  },
   /** Show a theme without choosing it (null ends the preview). */
   preview(theme: Theme | null): void {
     set({ preview: theme });
@@ -176,6 +193,10 @@ function cachedPrefs(): UserPrefs {
   if (id) p.themeId = id;
   const d = loadString(DENSITY_KEY);
   if (isDensityPref(d)) p.density = d;
+  const ui = loadString(UI_FONT_KEY);
+  if (ui !== null) p.uiFont = ui;
+  const code = loadString(CODE_FONT_KEY);
+  if (code !== null) p.codeFont = code;
   return p;
 }
 
@@ -191,6 +212,12 @@ function applyLocal(p: UserPrefs): void {
   if (p.density && isDensityPref(p.density)) {
     saveString(DENSITY_KEY, p.density);
     if (p.density !== state.density) patch.density = p.density;
+  }
+  for (const key of ['uiFont', 'codeFont'] as const) {
+    const v = p[key];
+    if (typeof v !== 'string') continue;
+    saveString(key === 'uiFont' ? UI_FONT_KEY : CODE_FONT_KEY, v);
+    if (v !== state[key]) patch[key] = v;
   }
   if (Object.keys(patch).length > 0) set(patch);
 }

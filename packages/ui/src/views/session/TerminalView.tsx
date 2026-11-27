@@ -5,7 +5,8 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebglAddon } from '@xterm/addon-webgl';
 import '@xterm/xterm/css/xterm.css';
 import { useBizzi, useStore } from '../../app/context.tsx';
-import { themeStore, useResolvedTheme } from '../../app/theme.ts';
+import { themeStore, useThemeState } from '../../app/theme.ts';
+import { codeFontStack } from '../../lib/fonts.ts';
 import { xtermTheme } from '../../lib/theme/terminal.ts';
 
 function wantsWebgl(): boolean {
@@ -17,6 +18,23 @@ function wantsWebgl(): boolean {
   }
 }
 
+/** Load the stack's first family (a web font loads lazily, on first use), then wait for every pending font. */
+function loadFont(family: string): Promise<unknown> {
+  const fonts = typeof document !== 'undefined' ? document.fonts : undefined;
+  if (!fonts) return Promise.resolve();
+  const first = family.split(',')[0]?.trim();
+  const load = first ? fonts.load(`13px ${first}`).catch(() => []) : Promise.resolve([]);
+  return load.then(() => fonts.ready);
+}
+
+/** xterm measures cells when `fontFamily` changes; set it again so a font that just loaded is measured. */
+function remeasure(term: Terminal): void {
+  const f = term.options.fontFamily ?? '';
+  term.options.fontFamily = `${f} `;
+  term.options.fontFamily = f;
+  term.clearTextureAtlas();
+}
+
 /**
  * Terminal-mode session (and login PTYs): xterm.js, colored with the theme's terminal palette
  * (derived from its UI colors when it has none). Output comes straight from the client's
@@ -25,9 +43,12 @@ function wantsWebgl(): boolean {
 export function TerminalView(props: { sessionId: string }): ReactNode {
   const { sessionId } = props;
   const store = useStore();
-  const theme = useResolvedTheme().terminal;
+  const themeState = useThemeState();
+  const theme = themeState.resolved.terminal;
+  const fontFamily = codeFontStack(themeState.codeFont);
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
+  const fitRef = useRef<(() => void) | null>(null);
   const exited = useBizzi((s) => s.timelines[sessionId]?.terminalExit ?? null);
   const status = useBizzi((s) => s.timelines[sessionId]?.status ?? s.sessions[sessionId]?.status);
   const [renderer, setRenderer] = useState<'webgl' | 'dom'>('dom');
@@ -36,9 +57,9 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
     const host = hostRef.current;
     if (!host) return;
     const term = new Terminal({
-      // No CSS-only generic keywords (ui-monospace): the WebGL renderer draws its glyph atlas with
-      // canvas `ctx.font`, which rejects them and falls back to 10px sans-serif (tiny, widely spaced text).
-      fontFamily: "'SF Mono', Menlo, Monaco, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', monospace",
+      // The code font pref (lib/fonts.ts); its stack has no CSS-only generic keywords (ui-monospace), which
+      // canvas `ctx.font` rejects. Re-applied once web fonts load (below) so cells are measured with it.
+      fontFamily: codeFontStack(themeStore.get().codeFont),
       fontSize: 13,
       cursorBlink: true,
       scrollback: 10_000,
@@ -73,8 +94,13 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
         setRenderer('dom');
       }
     };
-    const fontsReady: Promise<unknown> = document.fonts?.ready ?? Promise.resolve();
-    void fontsReady.then(() => requestAnimationFrame(attachWebgl));
+    const fontsReady: Promise<unknown> = loadFont(term.options.fontFamily ?? '');
+    void fontsReady.then(() => {
+      if (disposed) return;
+      remeasure(term);
+      fitRef.current?.();
+      requestAnimationFrame(attachWebgl);
+    });
     const dprQuery = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
     const onDprChange = () => webgl && term.clearTextureAtlas();
     dprQuery.addEventListener('change', onDprChange);
@@ -102,6 +128,13 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
       });
     });
     ro.observe(host);
+    fitRef.current = () => {
+      try {
+        fit.fit();
+      } catch {
+        // host not visible
+      }
+    };
     try {
       fit.fit();
     } catch {
@@ -121,6 +154,7 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
       onResize.dispose();
       term.dispose();
       termRef.current = null;
+      fitRef.current = null;
     };
   }, [store, sessionId]);
 
@@ -128,6 +162,21 @@ export function TerminalView(props: { sessionId: string }): ReactNode {
     const t = termRef.current;
     if (t) t.options.theme = xtermTheme(theme);
   }, [theme]);
+
+  useEffect(() => {
+    const t = termRef.current;
+    if (!t || t.options.fontFamily === fontFamily) return;
+    t.options.fontFamily = fontFamily;
+    let live = true;
+    void loadFont(fontFamily).then(() => {
+      if (!live || termRef.current !== t) return;
+      remeasure(t);
+      fitRef.current?.();
+    });
+    return () => {
+      live = false;
+    };
+  }, [fontFamily]);
 
   return (
     <div className="flex h-full flex-col bg-panel">

@@ -1,5 +1,5 @@
 // Apply the theme before first paint (no flash): mode from `bizzi.theme`, the last applied theme's
-// tokens from `bizzi.theme.paint` (written by src/lib/theme/apply.ts via src/app/theme.ts).
+// tokens from `bizzi.theme.paint` (written by src/lib/theme/apply.ts via src/app/theme.ts), and the fonts.
 try {
   var t = localStorage.getItem('bizzi.theme');
   var dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
@@ -17,6 +17,11 @@ try {
   }
   root.dataset.theme = dark ? 'dark' : 'light';
   if (cache && cache.density) root.dataset.density = cache.density;
+  // Fonts from `bizzi.fonts.paint` (src/lib/fonts.ts).
+  try {
+    var fonts = JSON.parse(localStorage.getItem('bizzi.fonts.paint') || 'null');
+    if (fonts) for (var f in fonts) if (f.indexOf('--bizzi-font-') === 0) root.style.setProperty(f, fonts[f]);
+  } catch (e) {}
 } catch (e) {
   document.documentElement.dataset.theme = 'light';
 }

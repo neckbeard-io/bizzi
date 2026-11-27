@@ -7367,6 +7367,14 @@
         "density": {
           "$ref": "#/$defs/DensityPref"
         },
+        "uiFont": {
+          "description": "Interface font: a family name, or `system` for the platform font. Unset or '': `system`. Used when the device has it (JetBrains Mono ships with the UI), else the platform font.",
+          "type": "string"
+        },
+        "codeFont": {
+          "description": "Code font (code blocks, diffs, terminals): a family name, or `system`. Unset or '': JetBrains Mono.",
+          "type": "string"
+        },
         "agentProfiles": {
           "description": "Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.",
           "type": "array",
@@ -9269,6 +9277,14 @@
             },
             "density": {
               "$ref": "#/$defs/DensityPref"
+            },
+            "uiFont": {
+              "description": "Interface font: a family name, or `system` for the platform font. Unset or '': `system`. Used when the device has it (JetBrains Mono ships with the UI), else the platform font.",
+              "type": "string"
+            },
+            "codeFont": {
+              "description": "Code font (code blocks, diffs, terminals): a family name, or `system`. Unset or '': JetBrains Mono.",
+              "type": "string"
             },
             "agentProfiles": {
               "description": "Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.",

@@ -365,6 +365,13 @@ export interface UserPrefs {
   themeId?: string;
   density?: DensityPref;
   /**
+   * Interface font: a family name, or `system` for the platform font. Unset or '': `system`. Used when the
+   * device has it (JetBrains Mono ships with the UI), else the platform font.
+   */
+  uiFont?: string;
+  /** Code font (code blocks, diffs, terminals): a family name, or `system`. Unset or '': JetBrains Mono. */
+  codeFont?: string;
+  /**
    * Saved session-start profiles (`AgentProfile`). Each agent has a built-in Default profile
    * (`defaultProfileId(agent)`), stored here only once edited; the others are user-created.
    */
