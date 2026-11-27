@@ -7267,6 +7267,10 @@
         },
         "windowMins": {
           "type": "number"
+        },
+        "group": {
+          "description": "Windows that limit the same pool of models share a group (agy: \"Gemini models\", \"Claude and GPT models\", each with its own 5h and weekly window). Absent: the login has one pool.",
+          "type": "string"
         }
       },
       "required": [

@@ -41,13 +41,13 @@ test('services share the knowledge store with the session-start hook', async () 
       return store(machineId);
     };
 
-    // Without the knowledge runtime: provisioning, login and updates only.
+    // Without the knowledge runtime: provisioning, login, updates and agy usage only.
     const bare = await loadServices({ dataDir: tmp.path, logger });
-    assert.equal((bare!.extensions as unknown[]).length, 3);
+    assert.equal((bare!.extensions as unknown[]).length, 4);
 
     const loaded = await loadServices({ dataDir: tmp.path, logger, knowledge: runtime });
     const extensions = loaded!.extensions as { methods: Record<string, (p: unknown, ctx: unknown) => unknown> }[];
-    assert.equal(extensions.length, 4);
+    assert.equal(extensions.length, 5);
     const knowledge = extensions.find((e) => 'knowledge.list' in e.methods)!;
     const ctx = { node: { machine: { id: 'm_TEST' } } };
     assert.deepEqual(await knowledge.methods['knowledge.list']!({}, ctx), { items: [] });

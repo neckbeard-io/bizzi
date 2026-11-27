@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import type { ReactNode } from 'react';
-import { accountConstraint, accountTone, formatAge, formatResetIn, primaryWindow, selectAccounts, selectWidgets, windowShortLabel, windowTone } from '@bizzi/client';
+import { accountConstraint, accountTone, formatAge, formatResetIn, meterStacks, primaryWindow, selectAccounts, selectWidgets, windowShortLabel, windowTone } from '@bizzi/client';
 import type { AccountUsage } from '@bizzi/protocol';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { useAction, useMediaQuery, useNow } from '../../app/hooks.ts';
@@ -39,7 +39,7 @@ export function UsageBar(): ReactNode {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="flex h-7 w-full shrink-0 items-center gap-5 overflow-hidden border-t border-border bg-panel px-3 text-left hover:bg-panel-2"
+        className="flex h-8 w-full shrink-0 items-center gap-5 overflow-hidden border-t border-border bg-panel px-3 text-left hover:bg-panel-2"
         title="Usage per login and widgets"
       >
         {shown.map((a) => (
@@ -55,29 +55,35 @@ export function UsageBar(): ReactNode {
   );
 }
 
-/** `[C] max 5h ▓▓▓░ 62% ↻1h20  7d 31%` or `[L] api key $12.40`. */
+/**
+ * `[C] max ┌5h ▓░░░ 12% ↻2h19` — one stack per quota pool, shortest window on top and longest below,
+ *              └7d ▓▓░░ 34% ↻6d21h   always in that order, or `[L] api key $12.40`.
+ */
 function AccountMeter(props: { account: AccountUsage; now: number }): ReactNode {
   const a = props.account;
   const tone = accountTone(a);
-  const main = primaryWindow(a);
-  const others = (a.windows ?? []).filter((w) => w !== main).slice(0, 1);
+  const stacks = meterStacks(a);
   const age = formatAge(a.observedAt, props.now);
   return (
     <span className="inline-flex shrink-0 items-center gap-1.5 text-xs whitespace-nowrap" title={`${a.label}${age ? ` · ${age}` : ''}`}>
       <span className="flex h-4 w-4 items-center justify-center rounded bg-panel-2 font-mono text-[10px] font-semibold text-muted">{AGENT_GLYPH[a.agent]}</span>
       <span className="text-muted">{planWord(a)}</span>
-      {main ? (
-        <>
-          <span className="text-muted">{windowShortLabel(main)}</span>
-          <Meter value={main.usedPercent / 100} tone={windowTone(main)} className="w-14" />
-          <span className={cx('tabular-nums', TONE_TEXT[tone])}>{Math.round(main.usedPercent)}%</span>
-          {main.resetsAt ? <span className="text-muted">↻{formatResetIn(main.resetsAt, props.now)}</span> : null}
-          {others.map((w) => (
-            <span key={w.id} className={cx('tabular-nums', TONE_TEXT[windowTone(w)] === 'text-fg' ? 'text-muted' : TONE_TEXT[windowTone(w)])}>
-              {windowShortLabel(w)} {Math.round(w.usedPercent)}%
+      {stacks.length > 0 ? (
+        stacks.map((st) => (
+          <span key={st.group ?? ''} className="inline-flex items-center gap-1.5">
+            {st.group ? <span className="text-muted">{st.group}</span> : null}
+            <span className="grid grid-cols-[auto_2.5rem_auto_auto] items-center gap-x-1.5 gap-y-0.5 text-[10px] leading-3">
+              {st.rows.map((w) => (
+                <Fragment key={w.id}>
+                  <span className="text-muted">{windowShortLabel(w)}</span>
+                  <Meter value={w.usedPercent / 100} tone={windowTone(w)} className="w-full" />
+                  <span className={cx('text-right tabular-nums', TONE_TEXT[windowTone(w)])}>{Math.round(w.usedPercent)}%</span>
+                  <span className="text-muted tabular-nums">{w.resetsAt ? `↻${formatResetIn(w.resetsAt, props.now)}` : ''}</span>
+                </Fragment>
+              ))}
             </span>
-          ))}
-        </>
+          </span>
+        ))
       ) : a.spend ? (
         <span className={cx('tabular-nums', TONE_TEXT[tone])}>
           {formatCost(a.spend.usd)}

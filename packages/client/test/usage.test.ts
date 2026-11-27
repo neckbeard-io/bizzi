@@ -8,6 +8,7 @@ import {
   contextView,
   emptyTimeline,
   formatResetIn,
+  meterStacks,
   reduceTimeline,
   selectAccounts,
   timelineItems,
@@ -76,6 +77,38 @@ test('context breakdown: used categories first, bizzi overhead called out, then 
       ['free', 150],
     ],
   );
+});
+
+test('meterStacks: short window over long, in report order per pool', () => {
+  const claude = account('claude', {
+    windows: [
+      { id: 'seven_day', label: '7d', usedPercent: 34, windowMins: 10080 },
+      { id: 'five_hour', label: '5h', usedPercent: 12, windowMins: 300 },
+      { id: 'seven_day_opus', label: '7d Opus', usedPercent: 90, windowMins: 10080 },
+      { id: 'overage', label: 'extra usage', usedPercent: 50 },
+    ],
+  });
+  assert.deepEqual(meterStacks(claude).map((s) => [s.group, s.rows.map((w) => w.id)]), [[undefined, ['five_hour', 'seven_day']]]);
+  const agy = account('agy', {
+    agent: 'agy',
+    windows: [
+      { id: 'gemini-weekly', label: 'Gemini · weekly', usedPercent: 17, windowMins: 10080, group: 'Gemini' },
+      { id: 'gemini-5h', label: 'Gemini · 5h', usedPercent: 70, windowMins: 300, group: 'Gemini' },
+      { id: '3p-weekly', label: 'Claude and GPT · weekly', usedPercent: 50, windowMins: 10080, group: 'Claude and GPT' },
+      { id: '3p-5h', label: 'Claude and GPT · 5h', usedPercent: 100, windowMins: 300, group: 'Claude and GPT' },
+    ],
+  });
+  assert.deepEqual(
+    meterStacks(agy).map((s) => [s.group, s.rows.map((w) => w.id)]),
+    [
+      ['Gemini', ['gemini-5h', 'gemini-weekly']],
+      ['Claude and GPT', ['3p-5h', '3p-weekly']],
+    ],
+  );
+  const one = account('codex', { windows: [{ id: 'primary', label: 'primary', usedPercent: 5, windowMins: 300 }] });
+  assert.deepEqual(meterStacks(one).map((s) => s.rows.length), [1]);
+  const untimed = account('x', { windows: [{ id: 'a', label: 'a', usedPercent: 5 }, { id: 'b', label: 'b', usedPercent: 9 }] });
+  assert.deepEqual(meterStacks(untimed)[0]!.rows.map((w) => w.id), ['b']);
 });
 
 test('accounts: most constrained first, amber from 80%, red when limited', () => {

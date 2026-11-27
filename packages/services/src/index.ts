@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { KnowledgeStore } from '@bizzi/knowledge';
 import { AGENT_KINDS, type AgentKind, type Logger } from '@bizzi/protocol';
 import type { RecipeSet } from '@bizzi/provision';
+import { createAgyUsageExtension, type AgyUsageExtension, type AgyUsageOptions } from './agy-usage.ts';
 import { InstallAssessor } from './assess.ts';
 import { createKnowledgeExtension, type KnowledgeExtension, type KnowledgeStoreSource } from './knowledge.ts';
 import { createLoginExtension, type LoginExtension, type LoginOptions } from './login.ts';
@@ -29,6 +30,17 @@ export {
 export { createLoginExtension, loginCommand, type LoginCommand, type LoginExtension, type LoginOptions } from './login.ts';
 export { createProvisioningExtension, toWirePlan, type ProvisioningExtension, type ProvisioningOptions } from './provisioning.ts';
 export { InstallAssessor, type AssessorOptions } from './assess.ts';
+export {
+  AGY_USAGE_ACTIVE_MS,
+  AGY_USAGE_IDLE_MS,
+  agyGroupName,
+  agyStatus,
+  createAgyUsageExtension,
+  parseAgyUsage,
+  type AgyRunner,
+  type AgyUsageExtension,
+  type AgyUsageOptions,
+} from './agy-usage.ts';
 export {
   checkPathOrder,
   liveSessionsOf,
@@ -125,6 +137,8 @@ export interface ServicesOptions {
   widgets?: Omit<WidgetsOptions, 'secret'> | false;
   /** Install watching, periodic probes and auto-updates (all off by default). Policies live in dataDir. */
   updates?: Omit<UpdatesOptions, 'assessor' | 'policies'>;
+  /** agy quota polling (`agy -p /usage`, spends nothing); only runs when agy is installed. `false` turns it off. */
+  agyUsage?: AgyUsageOptions | false;
 }
 
 export interface Services {
@@ -135,6 +149,7 @@ export interface Services {
   updates: UpdatesExtension;
   knowledge?: KnowledgeExtension;
   widgets?: WidgetsExtension;
+  agyUsage?: AgyUsageExtension;
 }
 
 /**
@@ -189,14 +204,16 @@ export async function createServices(opts: ServicesOptions): Promise<Services> {
   const knowledge =
     store === false ? undefined : createKnowledgeExtension({ store, ...(opts.claudeHome ? { claudeHome: opts.claudeHome } : {}) });
   const widgets = opts.widgets === false ? undefined : createWidgetsExtension({ ...opts.widgets, secret: secretLookup(secrets) });
+  const agyUsage = opts.agyUsage === false ? undefined : createAgyUsageExtension(opts.agyUsage ?? {});
   opts.logger?.log('info', 'services ready', { secrets: backend.name, knowledge: knowledge !== undefined, widgets: widgets?.dir ?? false });
   return {
-    extensions: [provisioning, login, updates, ...(knowledge ? [knowledge] : []), ...(widgets ? [widgets] : [])],
+    extensions: [provisioning, login, updates, ...(knowledge ? [knowledge] : []), ...(widgets ? [widgets] : []), ...(agyUsage ? [agyUsage] : [])],
     secrets,
     provisioning,
     login,
     updates,
     ...(knowledge ? { knowledge } : {}),
     ...(widgets ? { widgets } : {}),
+    ...(agyUsage ? { agyUsage } : {}),
   };
 }

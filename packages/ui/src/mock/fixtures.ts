@@ -477,7 +477,7 @@ export const LEAD_CONTEXT: ContextUsage = {
 const ago = (min: number): string => new Date(Date.now() - min * 60_000).toISOString();
 const ahead = (min: number): string => new Date(Date.now() + min * 60_000).toISOString();
 
-/** Per-login usage (usage.md §3): Claude Max at 62% of its 5-hour window, Codex Pro at 85%, a metered API key. */
+/** Per-login usage (usage.md §3): Claude Max at 62% of its 5-hour window, Codex Pro at 85%, agy's two pools, a metered API key. */
 export function mockAccounts(): AccountUsage[] {
   return [
     {
@@ -506,6 +506,21 @@ export function mockAccounts(): AccountUsage[] {
       ],
       status: 'warning',
       observedAt: ago(3),
+    },
+    {
+      agent: 'agy',
+      accountId: 'dev@example.com',
+      label: 'agy · google · dev@example.com',
+      billing: 'plan',
+      machines: [MACHINE.id],
+      windows: [
+        { id: 'gemini-weekly', label: 'Gemini · weekly', usedPercent: 17, resetsAt: ahead(60 * 24 * 6 + 1260), windowMins: 10080, group: 'Gemini' },
+        { id: 'gemini-5h', label: 'Gemini · 5h', usedPercent: 70, resetsAt: ahead(139), windowMins: 300, group: 'Gemini' },
+        { id: '3p-weekly', label: 'Claude and GPT · weekly', usedPercent: 50, resetsAt: ahead(60 * 24 * 6 + 1300), windowMins: 10080, group: 'Claude and GPT' },
+        { id: '3p-5h', label: 'Claude and GPT · 5h', usedPercent: 100, resetsAt: ahead(191), windowMins: 300, group: 'Claude and GPT' },
+      ],
+      status: 'warning',
+      observedAt: ago(2),
     },
     {
       agent: 'opencode',

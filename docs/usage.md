@@ -82,7 +82,7 @@ A login is an agent account (`AgentInstall` account label, spec §4). The same C
 | Claude API key | `total_cost_usd` on results | metered spend |
 | Codex (ChatGPT login) | `account/rateLimits/read`, `account/rateLimits/updated` | `primary` and `secondary` windows (`usedPercent`, `windowDurationMins`, `resetsAt`), credits, `planType`, spend-control state |
 | OpenCode | per provider: tokens × models.dev price | metered spend; subscription logins through OpenCode (Copilot, ChatGPT) have no window data (verify) |
-| agy | unknown | verify; until then "no usage data" |
+| agy (Google login) | `agy -p /usage --output-format json`, polled by the node (`@bizzi/services`, every 3 min while an agy session is live, else 15 min); read-only, starts no turn and spends no quota | per pool (Gemini models; Claude and GPT models): a `5h` and a `weekly` bucket with `remaining_fraction` and `reset_time`, reported as windows with `group`; identity is the active account in `~/.gemini/google_accounts.json`. API-key logins exit 2 and report nothing |
 | Indirect (LiteLLM, Bifrost) | a widget (§4) | whatever the gateway reports, e.g. LiteLLM `/key/info` → `spend`, `max_budget`, `budget_reset_at` |
 
 Collection:
@@ -99,7 +99,7 @@ interface AccountUsage {
   agent: AgentKind; accountId: string; label: string;      // e.g. "claude · max · mc@…"
   billing: 'metered' | 'plan' | 'budgetless';
   machines: string[];
-  windows?: { id: string; label: string; usedPercent: number; resetsAt?: string; windowMins?: number }[];
+  windows?: { id: string; label: string; usedPercent: number; resetsAt?: string; windowMins?: number; group?: string }[]; // group: quota pool (agy)
   spend?: { usd: number; capUsd?: number; period?: string; resetsAt?: string };
   status: 'ok' | 'warning' | 'limited' | 'unknown';
   observedAt: string;                                    // ISO; the UI shows age
@@ -108,10 +108,11 @@ interface AccountUsage {
 
 ### 3.4 UI
 
-- **Desktop: bottom bar.** One compact meter per login, most constrained first:
+- **Desktop: bottom bar.** One compact meter per login, most constrained first. Each quota pool is a two-row stack, the shortest window on top and the longest below, always in that order (never "whichever is fuller"), so the rows don't swap as usage moves. A login with several pools (agy: Gemini, Claude and GPT) shows one named stack per pool:
 
   ```
-  [C] max   5h ▓▓▓▓▓▓░░ 62% ↻1h20  7d 31%   [X] pro  5h 18%   [L] billed $554 / $2,474 (22%)   [H] h200 3/8
+  [C] max  5h ▓▓▓▓▓░░░ 62% ↻1h20    [A] google  Gemini 5h ▓▓▓▓▓░ 70% ↻2h19   Claude and GPT 5h ▓▓▓▓▓▓ 100% ↻3h11    [L] billed $554 / $2,474 (22%)
+           7d ▓▓░░░░░░ 31% ↻3d3h                       7d ▓░░░░░ 17% ↻6d21h                  7d ▓▓▓░░░  50% ↻6d21h
   ```
 
   Color carries state only (neutral, amber from 80%, red when limited). Click opens the usage panel: every window with reset time, which sessions consumed it, a 7-day sparkline, machines using the login. When the bar is narrow it shows the most constrained login plus `+n`.
@@ -181,6 +182,6 @@ Values are cached on the node and relayed through the hub like events; a stale v
 ## 6. Open questions
 
 1. Claude's window query is experimental. If it disappears, is `rate_limit_event` alone enough (it only arrives while sessions run)?
-2. agy and OpenCode subscription logins: is any usage data exposed?
+2. OpenCode subscription logins: is any usage data exposed? (agy: yes, through `/usage`; see §3.2.)
 3. Account identity for merging across machines: Claude and Codex expose an account email or ID through their auth status; confirm both, and decide what to do for API-key logins (key fingerprint).
 4. The "bizzi overhead" estimate: count tokens per model tokenizer, or approximate from bytes?

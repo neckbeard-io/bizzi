@@ -306,6 +306,11 @@ export interface UsageWindow {
   usedPercent: number;
   resetsAt?: string;
   windowMins?: number;
+  /**
+   * Windows that limit the same pool of models share a group (agy: "Gemini models", "Claude and GPT
+   * models", each with its own 5h and weekly window). Absent: the login has one pool.
+   */
+  group?: string;
 }
 
 /** A node-run widget's rendered value (usage.md §4). Widgets are data, never client-side code. */
