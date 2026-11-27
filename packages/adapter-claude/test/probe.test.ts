@@ -93,3 +93,16 @@ test('parsers', () => {
     notes: ['auth method: oauth_token', 'api provider: firstParty'],
   });
 });
+
+test("a package's node_modules/.bin on PATH never shadows the installed claude", async () => {
+  const dir = tempDir();
+  try {
+    const projectBin = join(dir, 'repo', 'node_modules', '.bin');
+    script(projectBin, nodeClaude('{}').replace('2.1.311', '2.1.100'));
+    const real = script(join(dir, 'real'), nodeClaude('{}'));
+    const env = { PATH: [projectBin, 'node_modules/.bin', join(dir, 'real'), '/usr/bin', '/bin'].join(':') };
+    assert.deepEqual(await findClaudeBinary({ env }), { path: real, wrapper: false });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -175,3 +175,17 @@ test('evaluateAuthCommand: json, text, exit codes, expired', () => {
   assert.deepEqual(evaluateAuthCommand(nonEmpty, r('[{"provider":"anthropic"}]')), { state: 'ok' });
   assert.deepEqual(evaluateAuthCommand(nonEmpty, r('[]')), { state: 'missing' });
 });
+
+test("probe: a package's node_modules/.bin on PATH never shadows the install", async () => {
+  // `npm run …` (and an app reopened from one) puts <pkg>/node_modules/.bin first on PATH; a repo
+  // with the agent CLI as a dev dependency must not flip the detected install and version.
+  const { home, bin, opts } = fakeSetup();
+  writeScript(join(bin, 'fake-agent'), 'echo "fake-agent 0.172.0"');
+  const projectBin = join(home, 'repo', 'worktree', 'node_modules', '.bin');
+  writeScript(join(projectBin, 'fake-agent'), 'echo "fake-agent 0.167.0"');
+  const env = isolatedEnv(home, { PATH: [projectBin, 'node_modules/.bin', bin, '/usr/bin', '/bin'].join(delimiter) });
+  const p = await probeTool('fake', env, opts);
+  assert.equal(p.path, join(bin, 'fake-agent'));
+  assert.equal(p.version, '0.172.0');
+  assert.ok(!augmentedPath({ env, home, npmPrefix: null }).split(delimiter).includes(projectBin));
+});

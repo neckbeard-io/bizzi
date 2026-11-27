@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { OpenCodeAdapter, probeOpenCode } from '../src/index.ts';
+import { locateBinary } from '../src/locate.ts';
 
 const dir = mkdtempSync(join(tmpdir(), 'bizzi-oc-probe-'));
 
@@ -73,4 +74,24 @@ test('v1 install is flagged', async () => {
   const p = await probeOpenCode({ binary: bin, env: isolated(join(dir, 'cfg4')), timeoutMs: 5_000 });
   assert.equal(p.version, '1.4.2');
   assert.ok(p.notes?.some((n) => n.includes('v1')));
+});
+
+test("a package's node_modules/.bin on PATH never shadows the installed opencode (probe and server)", async () => {
+  const bin = join(dir, 'pathbin');
+  const projectBin = join(dir, 'repo', 'node_modules', '.bin');
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(projectBin, { recursive: true });
+  const installed = join(bin, 'opencode');
+  writeFileSync(installed, '#!/bin/sh\necho "opencode v2.0.30"\n');
+  chmodSync(installed, 0o755);
+  writeFileSync(join(projectBin, 'opencode'), '#!/bin/sh\necho "opencode v2.0.1"\n');
+  chmodSync(join(projectBin, 'opencode'), 0o755);
+  const env = { ...isolated(join(dir, 'cfg-path')), OPENCODE_API_KEY: 'k', PATH: [projectBin, bin, '/usr/bin', '/bin'].join(':') };
+  const p = await probeOpenCode({ binary: 'opencode', env, timeoutMs: 5_000 });
+  assert.equal(p.path, installed);
+  assert.equal(p.version, '2.0.30');
+  // `opencode serve` is started through the same lookup.
+  assert.equal(locateBinary('opencode', env), installed);
+  assert.equal(locateBinary('/some/explicit/opencode', env), '/some/explicit/opencode');
+  assert.equal(locateBinary('not-there-bizzi', env), 'not-there-bizzi');
 });

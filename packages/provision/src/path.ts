@@ -1,10 +1,13 @@
 // PATH handling for non-interactive environments. launchd, systemd and container entrypoints don't
 // source the login shell, so binaries installed per-user (~/.local/bin, Homebrew, npm globals,
-// bizzi's tool dir) are often missing from PATH. Everything here augments, never replaces.
+// bizzi's tool dir) are often missing from PATH. Everything here augments, never replaces, except
+// that project-local entries (a package's `node_modules/.bin`, relative dirs) are dropped: they are
+// not installs, and they depend on where bizzi happened to be started (see isProjectBinDir).
 
 import { accessSync, constants, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { delimiter, join } from 'node:path';
+import { agentSearchDirs } from '@bizzi/protocol';
 import { execCapture } from './exec.ts';
 import type { Platform } from './types.ts';
 
@@ -59,10 +62,10 @@ export function extraPathDirs(ctx: PathContext = {}): string[] {
   return dirs;
 }
 
-/** prepend + inherited PATH + extras (deduplicated; inherited order wins). */
+/** prepend + inherited PATH (minus project-local entries) + extras (deduplicated; inherited order wins). */
 export function augmentedPath(ctx: PathContext = {}): string {
   const env = ctx.env ?? process.env;
-  const inherited = (env.PATH ?? '').split(delimiter).filter(Boolean);
+  const inherited = agentSearchDirs((env.PATH ?? '').split(delimiter).filter(Boolean));
   const base = inherited.length ? inherited : ['/usr/bin', '/bin', '/usr/sbin', '/sbin'];
   return dedupe([...(ctx.prepend ?? []), ...base, ...extraPathDirs(ctx)]).join(delimiter);
 }
