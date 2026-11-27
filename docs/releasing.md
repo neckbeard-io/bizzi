@@ -129,6 +129,30 @@ node scripts/release/build-desktop.ts --version 0.1.0-local   # this machine's p
 On a Mac this takes a couple of minutes and produces the `.dmg` and `.zip`. Other platforms build
 only on their own runners, because the core's native addons are installed for the host.
 
+### Installing a local build
+
+To run checkout code in the bizzi you use day to day without waiting for CI and an update, run this on macOS:
+
+```sh
+npm run install:local                 # build the working tree, then quit, swap and reopen /Applications/bizzi.app
+npm run install:local -- --skip-ui    # reuse packages/ui/dist
+npm run install:local -- --rollback   # put back the bundle the last install replaced
+```
+
+It takes about 20 s. It builds only the signed `bizzi.app`, with no `.zip` or `.dmg` (`build-desktop.ts
+--app-only`), and checks that the packaged core starts. Then a detached script waits `--delay`
+seconds (default 5), quits the app, and swaps the bundle. Quitting gives running turns up to 30 s
+to finish. Run from an agent inside that bizzi, the tool call returns first, and the session resumes
+after the relaunch. The swap is logged to `~/.bizzi/logs/local-install.log`, and the replaced bundle
+is kept in `~/.bizzi/local-install/previous.app`.
+
+The version is `<next release>-local.<UTC timestamp>`, e.g. `0.1.2-local.202611261530`. That sorts
+above `0.1.2-dev.N`, so the Dev channel doesn't replace it with an older CI build, and below
+`0.1.2`, so the next stable release is still offered. To go back to CI builds, run
+`bash scripts/install.sh --dev`. The installed app keeps its own data (`~/.bizzi`); test builds stay
+apart as before. `--target <path>/bizzi.app` installs somewhere else, e.g. a scratch copy, and keeps
+that copy's backup next to it.
+
 ## The self-updater
 
 `apps/desktop/src/update/` (main process), with the UI in Settings › Updates and a pill under the

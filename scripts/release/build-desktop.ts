@@ -7,7 +7,10 @@
 //   bizzi-<v>-linux-<amd64|arm64>.deb
 //   bizzi-<v>-windows-x64-setup.exe
 //
-//   node scripts/release/build-desktop.ts --version 0.1.0 [--skip-ui]
+//   node scripts/release/build-desktop.ts --version 0.1.0 [--skip-ui] [--app-only]
+//
+// --app-only (macOS): stop at the signed, verified bizzi.app in apps/desktop/release (no .zip/.dmg);
+// scripts/install-local.ts installs that.
 //
 // Run `npm ci` first. The core's native addons are installed for the host, so each target builds on
 // its own machine (release.yml has one runner per platform/arch).
@@ -25,7 +28,7 @@ const release = join(desktop, 'release');
 const dist = join(repo, 'dist');
 const isWin = process.platform === 'win32';
 
-const { values } = parseArgs({ options: { version: { type: 'string' }, 'skip-ui': { type: 'boolean' } } });
+const { values } = parseArgs({ options: { version: { type: 'string' }, 'skip-ui': { type: 'boolean' }, 'app-only': { type: 'boolean' } } });
 const version = values.version ?? '0.0.0-local';
 const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
 const log = (msg: string) => process.stderr.write(`build-desktop: ${msg}\n`);
@@ -57,6 +60,11 @@ if (process.platform === 'darwin') {
   // (codesign --verify) before swapping bundles. A Developer ID + notarization replaces this later.
   run('codesign', ['--force', '--deep', '--sign', '-', app]);
   run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', app]);
+  if (values['app-only']) {
+    await verifyPackagedCore();
+    log(`app: ${app}`);
+    process.exit(0);
+  }
   const zip = join(dist, `${base}-macos-${arch}.zip`);
   rmSync(zip, { force: true });
   run('ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', app, zip]);
