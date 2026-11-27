@@ -42,6 +42,10 @@ test('a turn cut off by a shutdown continues on its own after the restart; idle 
   await waitFor(() => turnsStarted(n2.bus.replay(sessionChannel(busy))).includes(CONTINUE_AFTER_RESTART));
   const events = n2.bus.replay(sessionChannel(busy));
   assert.ok(events.some((e) => e.type === 'session.restarted'), 'the restart divider closes as usual');
+  // bizzi's own message is marked as such and never names the session.
+  const cont = events.find((e) => e.type === 'turn.started' && (e.data as { input: { text?: string }[] }).input[0]?.text === CONTINUE_AFTER_RESTART);
+  assert.equal((cont?.data as { auto?: boolean }).auto, true);
+  assert.equal(n2.sessions.get(busy).session.title, '/approve deploy');
   await waitFor(() => n2.sessions.get(busy).session.status === 'idle');
   assert.equal(turnsStarted(n2.bus.replay(sessionChannel(quiet))).includes(CONTINUE_AFTER_RESTART), false, 'an idle session is not poked');
 });

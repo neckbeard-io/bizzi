@@ -67,7 +67,11 @@ export interface SessionEventMap {
     commands?: { name: string; description?: string }[];
   };
   /** Emitted by the core when a turn starts; echoes the user input. */
-  'turn.started': { turnId: string; input: InputBlock[] };
+  /**
+   * `auto`: bizzi sent this input itself (continuing a turn cut off by a restart), not the user; it
+   * doesn't title the session and isn't the user's request.
+   */
+  'turn.started': { turnId: string; input: InputBlock[]; auto?: true };
   /** Emitted by the core when input is steered into the in-flight turn. */
   'turn.steered': { turnId: string; input: InputBlock[] };
   /** Emitted by the adapter when the turn finishes, with the same turnId. */

@@ -892,7 +892,7 @@
         }
       },
       "turn.started": {
-        "description": "Emitted by the core when a turn starts; echoes the user input.",
+        "description": "Emitted by the core when a turn starts; echoes the user input. */ /** `auto`: bizzi sent this input itself (continuing a turn cut off by a restart), not the user; it doesn't title the session and isn't the user's request.",
         "data": {
           "$ref": "#/$defs/session:turn.started"
         }
@@ -11606,6 +11606,9 @@
           "items": {
             "$ref": "#/$defs/InputBlock"
           }
+        },
+        "auto": {
+          "const": true
         }
       },
       "required": [

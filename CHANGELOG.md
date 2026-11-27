@@ -16,6 +16,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
 ### Changed
+- Sessions you didn't name keep up with the conversation: after `/clear`, your next message renames the session, and with a title model the title is refreshed now and then from your original request plus your latest messages.
 - The sidebar is a file tree: each workspace lists its open sessions (and then its worktrees) with guide lines, and each session shows its state, name and how full its context window is. Fold a workspace to get the old one-line summary back.
 - In the desktop app's File menu, ⌘N / Ctrl+N is now New Workspace and New Prompt moved to ⌘⇧N / Ctrl+Shift+N.
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
@@ -25,6 +26,7 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - When bizzi has to restart while an agent is mid-turn, the agent picks its work back up on its own once bizzi is back, instead of waiting for your next message. After three crashes in a row with no message from you it waits for you instead; a run of ordinary restarts (updates, local installs) gets ten.
 
 ### Fixed
+- Sessions are no longer named "[bizzi] bizzi restarted while you were…": bizzi's own continue message never names a session, and sessions it already renamed, or that were left "Untitled session", take their name from your first message again.
 - The desktop window reopens where you left it, at the same size and position (and maximized or full screen if it was), instead of resetting on every restart or update.
 - Quitting, restarting or updating bizzi no longer ends your Claude and Codex sessions. Sessions that an earlier version ended this way reopen the next time bizzi starts.
 - Text you've typed but not sent stays in the composer, per session, when bizzi reloads, restarts or updates.
