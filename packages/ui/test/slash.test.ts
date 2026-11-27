@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, builtinCommand, matchCommands, sessionCommands, slashQuery } from '../src/lib/slash.ts';
+import { applyCommand, builtinCommand, commandDetail, matchCommands, sessionCommands, slashQuery } from '../src/lib/slash.ts';
 
 test('bizzi commands come first, agent commands are normalized and deduped', () => {
   const cmds = sessionCommands([{ name: '/review', description: 'Review a PR' }, { name: 'compact' }, { name: 'clear' }, { name: 'new' }, { name: 'review' }, { name: 'bad name' }]);
@@ -25,7 +25,7 @@ test('slashQuery only while typing the first word of a draft that starts with /'
 test('matchCommands ranks prefixes first and keeps order otherwise', () => {
   const cmds = sessionCommands([{ name: 'review' }, { name: 'security-review' }, { name: 'compact' }]);
   assert.deepEqual(matchCommands(cmds, '').map((c) => c.name), ['clear', 'review', 'security-review', 'compact']);
-  assert.deepEqual(matchCommands(cmds, 're').map((c) => c.name), ['review', 'security-review']);
+  assert.deepEqual(matchCommands(cmds, 're').map((c) => c.name), ['reset', 'review', 'security-review']);
   assert.deepEqual(matchCommands(cmds, 'c').map((c) => c.name), ['clear', 'compact', 'security-review']);
   assert.deepEqual(matchCommands(cmds, 'zzz'), []);
 });
@@ -42,4 +42,20 @@ test('builtinCommand recognizes /clear and its aliases, alone', () => {
 test('applyCommand replaces the first word and puts the caret after one space', () => {
   assert.deepEqual(applyCommand('/re', { name: 'review' }), { text: '/review ', caret: 8 });
   assert.deepEqual(applyCommand('/re 123', { name: 'review' }), { text: '/review 123', caret: 8 });
+});
+
+test('aliases show up in the menu under the name you typed', () => {
+  const cmds = sessionCommands([{ name: 'review' }, { name: 'compact' }]);
+  const n = matchCommands(cmds, 'n');
+  assert.deepEqual(n.map((c) => c.name), ['new']);
+  assert.equal(n[0]!.aliasOf, 'clear');
+  assert.equal(n[0]!.builtin, true);
+  assert.deepEqual(matchCommands(cmds, 're').map((c) => c.name), ['reset', 'review']);
+  // The canonical name wins when it matches too; the aliases aren't listed twice.
+  assert.deepEqual(matchCommands(cmds, '').map((c) => c.name), ['clear', 'review', 'compact']);
+  assert.deepEqual(matchCommands(cmds, 'cl').map((c) => c.name), ['clear']);
+  assert.match(commandDetail(cmds[0]!)!, /also \/new, \/reset$/);
+  assert.match(commandDetail(n[0]!)!, /same as \/clear$/);
+  assert.equal(commandDetail({ name: 'compact' }), undefined);
+  assert.equal(builtinCommand(`/${n[0]!.name}`), 'clear');
 });

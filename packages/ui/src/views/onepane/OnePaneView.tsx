@@ -32,7 +32,7 @@ import {
 import type { ActiveToken, Completion, RoutePlan } from '../../lib/onePane.ts';
 import { AGENT_LABEL } from '../../lib/states.ts';
 import { CompletionMenu } from '../../components/CompletionMenu.tsx';
-import { builtinCommand, matchCommands, sessionCommands } from '../../lib/slash.ts';
+import { builtinCommand, commandDetail, matchCommands, sessionCommands } from '../../lib/slash.ts';
 import { AttachImageButton, AttachmentTray, useDraftAttachments } from '../session/Attachments.tsx';
 import { Timeline } from '../session/Timeline.tsx';
 import { RoutingRules } from './RoutingRules.tsx';
@@ -161,7 +161,10 @@ function RouteComposer(props: { sessionId?: string; onMakeRule: (workspaceId: st
   // Continuing a session, `/` at the start also offers its slash commands (before the agents).
   const commandItems: Completion[] = useMemo(() => {
     if (!continuing || menuClosed || token?.sigil !== '/' || token.start !== 0) return [];
-    return matchCommands(sessionCommands(advertised), token.query).map((c) => ({ key: `cmd:${c.name}`, label: c.name, insert: `/${c.name}`, ...(c.description ? { detail: c.description } : {}) }));
+    return matchCommands(sessionCommands(advertised), token.query).map((c) => {
+      const detail = commandDetail(c);
+      return { key: `cmd:${c.name}`, label: c.name, insert: `/${c.name}`, ...(detail ? { detail } : {}) };
+    });
   }, [continuing, menuClosed, token?.sigil, token?.start, token?.query, advertised]);
   const menu = useMemo(() => [...commandItems, ...items].map((c) => ({ ...c, prefix: token?.sigil ?? '' })), [commandItems, items, token?.sigil]);
   const menuTitle = commandItems.length ? (items.length ? 'Commands and agents' : 'Commands') : token?.sigil === '@' ? 'Machines' : token?.sigil === '#' ? 'Workspaces' : 'Agents';

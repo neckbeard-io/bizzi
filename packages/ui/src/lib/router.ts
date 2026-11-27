@@ -121,3 +121,16 @@ export function pairCodeFromLocation(loc: { search: string; hash: string }): str
   const m = /^pair\/([^/?#]+)/.exec(h);
   return m?.[1] ? decodeURIComponent(m[1]) : null;
 }
+
+/**
+ * The route to save as "where you were", so a restart (or an update) reopens it; null for pages that
+ * aren't worth coming back to or the start page: pairing, a login terminal, list pages, and one-off
+ * requests carried in a query (`?add=1`).
+ */
+export function restorableHash(hash: string): string | null {
+  const h = hash.replace(/^#\/?/, '');
+  if (!h || h.includes('?') || h.startsWith('pair')) return null;
+  const r = parseHash(hash);
+  if (r.name === 'login' || r.name === 'machines' || r.name === 'workspaces') return null;
+  return routeHref(r);
+}

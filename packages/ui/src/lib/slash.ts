@@ -9,16 +9,22 @@ export interface SlashCommand {
   description?: string;
   /** Run by bizzi rather than sent to the agent. */
   builtin?: boolean;
+  /** Other names that run the same command (`/new` for `/clear`). */
+  aliases?: readonly string[];
+  /** Set on a menu entry matched by an alias: the command it runs. */
+  aliasOf?: string;
 }
 
 export type BuiltinCommand = 'clear';
 
 export const BUILTIN_COMMANDS: readonly SlashCommand[] = [
-  { name: 'clear', description: 'Fresh conversation: the agent forgets everything so far', builtin: true },
+  { name: 'clear', description: 'Fresh conversation: the agent forgets everything so far', builtin: true, aliases: ['new', 'reset'] },
 ];
 
-/** Other names people type for a built-in. */
-const ALIASES: Readonly<Record<string, BuiltinCommand>> = { clear: 'clear', new: 'clear', reset: 'clear' };
+/** Every name a built-in answers to, its aliases included. */
+const ALIASES: Readonly<Record<string, BuiltinCommand>> = Object.fromEntries(
+  BUILTIN_COMMANDS.flatMap((c) => [c.name, ...(c.aliases ?? [])].map((n) => [n, c.name as BuiltinCommand])),
+);
 
 const MAX_SHOWN = 8;
 
@@ -42,21 +48,41 @@ export function slashQuery(text: string, caret: number): string | null {
   return m[1]!;
 }
 
-/** Commands matching `query`: name prefix first, then a later word of the name, then anywhere. */
+/**
+ * Commands matching `query`: name prefix first, then a later word of the name, then anywhere. A
+ * command whose name doesn't match but an alias does is listed under that alias (`/new` while typing
+ * `/n`), marked with `aliasOf`, so what you typed is what you see.
+ */
 export function matchCommands(commands: readonly SlashCommand[], query: string): SlashCommand[] {
   const q = query.toLowerCase();
-  const rank = (c: SlashCommand): number => {
-    const n = c.name.toLowerCase();
+  const rank = (name: string): number => {
+    const n = name.toLowerCase();
     if (n.startsWith(q)) return 0;
     if (n.split(/[:._-]/).some((w) => w.startsWith(q))) return 1;
     return n.includes(q) ? 2 : -1;
   };
+  const matched = (c: SlashCommand): { c: SlashCommand; r: number } => {
+    const r = rank(c.name);
+    if (r >= 0 || !c.aliases) return { c, r };
+    let best: { c: SlashCommand; r: number } = { c, r: -1 };
+    for (const a of c.aliases) {
+      const ra = rank(a);
+      if (ra >= 0 && (best.r < 0 || ra < best.r)) best = { c: { ...c, name: a, aliasOf: c.name }, r: ra };
+    }
+    return best;
+  };
   return commands
-    .map((c, i) => ({ c, r: rank(c), i }))
+    .map((c, i) => ({ ...matched(c), i }))
     .filter((x) => x.r >= 0)
     .sort((a, b) => a.r - b.r || a.i - b.i)
     .slice(0, MAX_SHOWN)
     .map((x) => x.c);
+}
+
+/** The menu's grey text for a command: its description, and its other names. */
+export function commandDetail(c: SlashCommand): string | undefined {
+  const names = c.aliasOf ? `same as /${c.aliasOf}` : c.aliases?.length ? `also ${c.aliases.map((a) => `/${a}`).join(', ')}` : undefined;
+  return [c.description, names].filter(Boolean).join(' · ') || undefined;
 }
 
 /** A draft that is exactly a built-in command (`/clear`, `/new`, `/reset`), else null. */

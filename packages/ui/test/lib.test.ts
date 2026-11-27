@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { defaultUrl, isMockQuery, normalizeUrl, resolveInitialTarget } from '../src/lib/connection.ts';
 import { contextUse, formatCost, formatDuration, formatRelative, formatTokens, joinPath, parentPath, tail, usageSummary } from '../src/lib/format.ts';
 import { escapeHtml, renderMarkdown, safeUrl } from '../src/lib/markdown.ts';
-import { parseHash, routeHref } from '../src/lib/router.ts';
+import { parseHash, restorableHash, routeHref } from '../src/lib/router.ts';
 import type { Route } from '../src/lib/router.ts';
 
 test('format helpers', () => {
@@ -74,4 +74,13 @@ test('markdown renders GFM and never passes raw HTML or unsafe links through', (
   assert.equal(safeUrl('javascript:alert(1)'), null);
   assert.equal(safeUrl('docs/readme.md'), 'docs/readme.md');
   assert.equal(escapeHtml('<a href="x">'), '&lt;a href=&quot;x&quot;&gt;');
+});
+
+test('restorableHash keeps pages worth reopening after a restart', () => {
+  assert.equal(restorableHash('#/s/s_1'), '#/s/s_1');
+  assert.equal(restorableHash('#/s/s_1/changes'), '#/s/s_1/changes');
+  assert.equal(restorableHash('#/w/w_1'), '#/w/w_1');
+  assert.equal(restorableHash('#/machine/m_1'), '#/machine/m_1');
+  assert.equal(restorableHash('#/settings/hotkeys'), '#/settings/hotkeys');
+  for (const h of ['', '#', '#/', '#/pair?code=x', '#/login/s_2', '#/machines', '#/workspaces', '#/workspaces?add=1', '#/ask?q=hi']) assert.equal(restorableHash(h), null, h);
 });
