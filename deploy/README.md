@@ -22,6 +22,11 @@ mkdir -p /srv/bizzi/workspaces  # create it yourself, otherwise Docker creates i
 docker compose up -d --build
 ```
 
+**Prebuilt images.** Releases publish `ghcr.io/neckbeard-io/bizzi-hub` and `ghcr.io/neckbeard-io/bizzi-node`
+(amd64 and arm64; tags `latest`, `dev` and each version). To use them instead of building, set
+`BIZZI_HUB_IMAGE`, `BIZZI_NODE_IMAGE` and `BIZZI_TAG` in `.env` (see `.env.example`), then
+`docker compose pull && docker compose up -d --no-build`. Updating is the same two commands.
+
 Point your reverse proxy at `hub:7777` (see [Reverse proxy](#reverse-proxy)) so that
 `BIZZI_PUBLIC_URL` (e.g. `https://bizzi.example.com`) reaches the hub.
 

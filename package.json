@@ -13,8 +13,8 @@
   "scripts": {
     "setup": "npm ci --no-audit --no-fund && npm run setup:electron",
     "setup:electron": "node node_modules/electron/install.js",
-    "typecheck": "npm run typecheck --workspaces --if-present",
-    "test": "npm run test --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present && tsc -p scripts/release",
+    "test": "npm run test --workspaces --if-present && npm run test:release",
     "build:ui": "npm run build -w @bizzi/ui",
     "check": "npm run typecheck && npm run schema:check && npm test && npm run build:ui",
     "dev:desktop": "npm run build:ui && node scripts/dev-desktop.ts",
@@ -24,7 +24,9 @@
     "smoke:hub": "node scripts/smoke-hub.ts",
     "smoke:v12": "node scripts/smoke-v12.ts",
     "schema": "node scripts/gen-schema.ts",
-    "schema:check": "node scripts/gen-schema.ts --check"
+    "schema:check": "node scripts/gen-schema.ts --check",
+    "test:release": "node --test scripts/release/test/*.test.ts",
+    "release:desktop": "node scripts/release/build-desktop.ts"
   },
   "devDependencies": {
     "@types/node": "^26.6.6",
