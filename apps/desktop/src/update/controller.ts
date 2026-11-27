@@ -8,7 +8,7 @@
 //   - a check that lands after a download started leaves the download alone
 //   - only the newest download may change the state (a cancelled one can still be winding down)
 
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
 import type { UpdateAction, UpdateChannel, UpdateState } from '../shared/update.ts';
 import { downloadAsset } from './download.ts';
 import { describeFailure, fetchReleases, latestFor, matchAsset, type Fetch, type GitHubAsset } from './github.ts';
@@ -88,9 +88,22 @@ export class UpdateController {
     return this.#state;
   }
 
-  /** Background checks: one shortly after launch, then every few hours, while auto-check is on. */
+  /**
+   * Clears what earlier updates downloaded (an installed update's archive is ~160 MB), then starts
+   * the background checks: one shortly after launch, then every few hours, while auto-check is on.
+   */
   start(): void {
+    this.clearDownloads();
     this.#schedule(FIRST_CHECK_DELAY_MS);
+  }
+
+  /** Removes the download directory. A Windows installer still exiting may hold its file: skip it. */
+  clearDownloads(): void {
+    try {
+      rmSync(this.#o.downloadDir, { recursive: true, force: true, maxRetries: 2 });
+    } catch (err) {
+      this.#o.log('info', 'could not clear earlier update downloads', { error: String(err) });
+    }
   }
 
   stop(): void {
