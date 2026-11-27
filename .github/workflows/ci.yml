@@ -1,8 +1,13 @@
 name: CI
 
+# Every pull request, and pushes to main. Pushes to dev don't run it: work reaches dev through a PR,
+# and release.yml builds what lands there.
 on:
   push:
+    branches: [main]
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE']
   pull_request:
+    paths-ignore: ['**.md', 'docs/**', 'LICENSE', 'NOTICE']
   workflow_dispatch:
 
 permissions:
@@ -72,45 +77,3 @@ jobs:
           tags: bizzi/node:ci
           cache-from: type=gha,scope=node-image
           cache-to: type=gha,scope=node-image,mode=max
-
-  desktop-pack:
-    name: desktop pack (macOS, unsigned)
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: check
-    runs-on: macos-latest
-    timeout-minutes: 45
-    env:
-      # Unsigned: don't look for a signing identity in the keychain.
-      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version-file: .nvmrc
-          cache: npm
-
-      - run: npm ci --strict-allow-scripts
-
-      # Stage the real UI build instead of the placeholder page.
-      - run: npm run build:ui
-
-      # build (esbuild) + stage + electron-builder --dir -> apps/desktop/release/mac*/bizzi.app
-      - run: npm run pack -w @bizzi/desktop
-
-      # upload-artifact drops symlinks and permissions, which an .app bundle needs; zip with ditto.
-      - name: Zip the unpacked app
-        run: |
-          mkdir -p artifacts
-          for app in apps/desktop/release/mac*/*.app; do
-            dir=$(basename "$(dirname "$app")")
-            ditto -c -k --sequesterRsrc --keepParent "$app" "artifacts/bizzi-${dir}-unsigned.zip"
-          done
-          ls -la artifacts
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: bizzi-desktop-mac-unpacked
-          path: artifacts/*.zip
-          if-no-files-found: error
-          retention-days: 14

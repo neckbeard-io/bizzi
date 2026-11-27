@@ -1,0 +1,248 @@
+name: Release
+
+# Builds the desktop app (macOS, Linux, Windows) and the Docker images, and publishes a GitHub Release.
+#
+#   push to dev       → vX.Y.Z-dev.N pre-release (Dev update channel), notes = changelog lines since the last tag
+#   push to main      → vX.Y.Z from the closed "## vX.Y.Z" in CHANGELOG.md (Stable channel)
+#   pull_request      → build-only check when packaging changes; nothing is published
+#   workflow_dispatch → any ref with an explicit version, or main/dev with the version worked out as above
+#
+# Pushes that only touch docs or workflows publish nothing: a release for them would offer every
+# installed copy an update to an identical build. Rapid pushes cancel the older run.
+# docs/releasing.md has the whole story.
+
+on:
+  push:
+    branches: [main, dev]
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.github/**'
+      - '.gitignore'
+      - 'LICENSE'
+      - 'NOTICE'
+  pull_request:
+    paths:
+      - '.github/workflows/release.yml'
+      - 'scripts/release/**'
+      - 'apps/desktop/**'
+      - 'apps/cli/src/workspaces-hook.ts'
+      - 'deploy/Dockerfile.*'
+      - 'package-lock.json'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version without the v (e.g. 0.2.0 or 0.2.1-dev.3). Empty: worked out from the branch.'
+        required: false
+        type: string
+      channel:
+        description: 'Release channel (stable or dev); inferred from the version when empty'
+        required: false
+        type: string
+      publish:
+        description: 'Create the tag, the GitHub Release and the images'
+        required: false
+        default: true
+        type: boolean
+      docker:
+        description: 'Build and push the Docker images'
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NPM_CONFIG_FUND: 'false'
+  NPM_CONFIG_AUDIT: 'false'
+
+jobs:
+  setup:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      channel: ${{ steps.resolve.outputs.channel }}
+      publish: ${{ steps.resolve.outputs.publish }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+      - id: resolve
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_CHANNEL: ${{ inputs.channel }}
+          INPUT_PUBLISH: ${{ inputs.publish }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: node scripts/release/resolve.ts
+
+  desktop:
+    name: Desktop (${{ matrix.name }})
+    needs: setup
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: macos-arm64, os: macos-15 }
+          - { name: macos-x64, os: macos-15-intel }
+          - { name: linux-x64, os: ubuntu-24.04 }
+          - { name: linux-arm64, os: ubuntu-24.04-arm }
+          - { name: windows-x64, os: windows-latest }
+    # Pinned images, not -latest: Linux packages link against the build host's glibc.
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      # electron-builder's bundled fpm (for .deb) is x64-only; arm64 uses the system one.
+      - name: Install fpm (Linux arm64)
+        if: matrix.name == 'linux-arm64'
+        run: |
+          sudo apt-get update -o Acquire::Retries=2
+          sudo apt-get install -y --no-install-recommends ruby ruby-dev build-essential
+          sudo gem install --no-document fpm
+          echo "USE_SYSTEM_FPM=true" >> "$GITHUB_ENV"
+
+      - run: npm ci --strict-allow-scripts
+
+      # UI build + esbuild + stage (Node runtime from nodejs.org, core deps) + electron-builder.
+      - name: Build
+        run: node scripts/release/build-desktop.ts --version ${{ needs.setup.outputs.version }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  docker:
+    name: Docker images
+    needs: [setup, desktop]
+    if: needs.setup.outputs.publish == 'true' && (github.event_name != 'workflow_dispatch' || inputs.docker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    env:
+      NODE_IMAGE: ghcr.io/${{ github.repository_owner }}/bizzi-node
+      HUB_IMAGE: ghcr.io/${{ github.repository_owner }}/bizzi-hub
+      VERSION: ${{ needs.setup.outputs.version }}
+      # Stable releases move :latest; dev pre-releases move :dev.
+      MOVING: ${{ needs.setup.outputs.channel == 'stable' && 'latest' || 'dev' }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Node image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.node
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BIZZI_VERSION=${{ env.VERSION }}
+          tags: |
+            ${{ env.NODE_IMAGE }}:${{ env.VERSION }}
+            ${{ env.NODE_IMAGE }}:${{ env.MOVING }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=node-image
+          cache-to: type=gha,scope=node-image,mode=max
+
+      - name: Hub image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile.hub
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: BIZZI_NODE_IMAGE=${{ env.NODE_IMAGE }}:${{ env.VERSION }}
+          tags: |
+            ${{ env.HUB_IMAGE }}:${{ env.VERSION }}
+            ${{ env.HUB_IMAGE }}:${{ env.MOVING }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.licenses=Apache-2.0
+          cache-from: type=gha,scope=hub-image
+          cache-to: type=gha,scope=hub-image,mode=max
+
+  release:
+    name: Publish GitHub Release
+    needs: [setup, desktop, docker]
+    # always(): a skipped docker job (dispatch without images) doesn't block; a failure does.
+    if: |
+      always() && needs.setup.outputs.publish == 'true'
+      && needs.desktop.result == 'success'
+      && (needs.docker.result == 'success' || needs.docker.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v5
+        with:
+          node-version-file: .nvmrc
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: desktop-*
+          merge-multiple: true
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum -- * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      # The body is the changelog: a stable release without its section fails here, before publishing.
+      - name: Release notes
+        run: |
+          node scripts/release/notes.ts "${{ needs.setup.outputs.version }}" "${{ needs.setup.outputs.channel }}" > body.md
+          cat body.md
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: v${{ needs.setup.outputs.version }}
+          PRERELEASE: ${{ needs.setup.outputs.prerelease }}
+        run: |
+          flag=""
+          if [ "$PRERELEASE" = "true" ]; then flag="--prerelease"; else flag="--latest"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A re-run refreshes assets and notes rather than failing.
+            gh release upload "$TAG" dist/* --clobber
+            gh release edit "$TAG" --notes-file body.md $flag
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --title "bizzi $TAG" --notes-file body.md $flag dist/*
+          fi
+          gh release view "$TAG" --json assets --jq '.assets[].name'

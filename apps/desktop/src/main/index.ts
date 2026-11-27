@@ -19,9 +19,12 @@ import {
 import type { LogLevel, ServeReady } from '@bizzi/protocol';
 import { createLogger, fileSink, stderrSink } from '../core/log.ts';
 import { CoreManager, type CoreStatus } from '../core/manager.ts';
-import { resolveCoreEntry, resolveCoreRuntime, resolveDataDir } from '../core/runtime.ts';
+import { coreNodeArgs, resolveCoreEntry, resolveCoreRuntime, resolveDataDir } from '../core/runtime.ts';
 import { DEFAULT_CHROME, overlayFor, parseChrome, titleBarFor, windowChromeOptions, type ChromeColors } from '../shared/chrome.ts';
 import { IPC_BOOTSTRAP, IPC_CHROME, IPC_NAVIGATE, isMenuRoute, type Bootstrap } from '../shared/ipc.ts';
+import { IPC_UPDATE_ACTION, IPC_UPDATE_STATE, parseUpdateAction } from '../shared/update.ts';
+import { filePrefs, UpdateController } from '../update/controller.ts';
+import { detectInstall, installUpdate, relaunchEnv } from '../update/install.ts';
 import { buildCsp } from './csp.ts';
 import { appMenu } from './menu.ts';
 import { trayIcon } from './tray.ts';
@@ -75,9 +78,34 @@ const manager = new CoreManager({
     const entry = resolveCoreEntry({ env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, appDir });
     if (!existsSync(entry)) throw new Error(`core entry not found: ${entry}`);
     log.log('info', 'core runtime', { kind: runtime.kind, command: runtime.command, nodeVersion: runtime.nodeVersion, entry });
-    return { command: runtime.command, args: [entry], env: runtime.env };
+    return { command: runtime.command, args: [...coreNodeArgs(entry), entry], env: runtime.env };
   },
   onStatus: (status) => onCoreStatus(status),
+});
+
+// Self-update from GitHub Releases (src/update/). Downloads go to a temp dir; prefs live in userData.
+const updateTarget = detectInstall({ isPackaged: app.isPackaged, platform: process.platform, execPath: process.execPath, env });
+const updates = new UpdateController({
+  currentVersion: app.getVersion(),
+  arch: process.arch,
+  target: updateTarget,
+  fetch: (url, init) => fetch(url, init),
+  prefs: filePrefs(join(app.getPath('userData'), 'update.json')),
+  downloadDir: join(app.getPath('temp'), 'bizzi-updates'),
+  install: (file) =>
+    installUpdate({
+      target: updateTarget,
+      file,
+      pid: process.pid,
+      quit: () => app.quit(),
+      openPath: (f) => shell.openPath(f),
+      logFile: join(dataDir, 'logs', 'update.log'),
+      env: relaunchEnv(env),
+    }),
+  onState: (s) => {
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_UPDATE_STATE, s);
+  },
+  log: (level, msg, fields) => log.log(level, msg, { component: 'update', ...fields }),
 });
 
 registerAppScheme();
@@ -120,6 +148,7 @@ function setup(): void {
     if (quitting) return;
     quitting = true;
     log.log('info', 'quitting');
+    updates.stop();
     manager
       .stop()
       .catch((err: unknown) => log.log('error', 'core stop failed', { error: String(err) }))
@@ -166,6 +195,16 @@ async function onReady(): Promise<void> {
     e.returnValue = trusted ? bootstrap() : null;
   });
 
+  ipcMain.handle(IPC_UPDATE_ACTION, async (e, raw: unknown) => {
+    if (!trustedSender(e)) return null;
+    if (raw !== 'get') {
+      const action = parseUpdateAction(raw);
+      if (!action) return null;
+      await updates.act(action);
+    }
+    return updates.state;
+  });
+
   powerMonitor.on('suspend', () => log.log('info', 'system suspend', { component: 'power' }));
   powerMonitor.on('resume', () => log.log('info', 'system resume', { component: 'power' }));
 
@@ -186,6 +225,7 @@ async function onReady(): Promise<void> {
         forward: () => win?.webContents.navigationHistory.goForward(),
         showCoreLog: () => shell.showItemInFolder(logFile),
         openDataDir: () => void shell.openPath(dataDir),
+        checkForUpdates: () => checkForUpdates(),
       }),
     ),
   );
@@ -203,6 +243,17 @@ async function onReady(): Promise<void> {
     });
   }
   createWindow();
+  if (updateTarget.method !== 'unsupported') updates.start();
+}
+
+/** Menu / tray: open Settings › Updates and check now. */
+function checkForUpdates(): void {
+  openRoute('#/settings/updates');
+  void updates.check({ silent: false });
+}
+
+function trustedSender(e: Electron.IpcMainInvokeEvent | Electron.IpcMainEvent): boolean {
+  return win !== null && e.sender === win.webContents && originOf(e.senderFrame?.url ?? '') === uiOrigin;
 }
 
 function bootstrap(): Bootstrap {
@@ -319,6 +370,7 @@ function updateTray(status: CoreStatus): void {
       { type: 'separator' },
       { label: coreLabel(status), enabled: false },
       { label: 'Show Core Log', click: () => shell.showItemInFolder(logFile) },
+      { label: 'Check for Updates…', click: () => checkForUpdates() },
       { type: 'separator' },
       { label: 'Quit bizzi', accelerator: isMac ? 'Command+Q' : undefined, click: () => app.quit() },
     ]),

@@ -1,6 +1,7 @@
 import type { HubCredentials } from '@bizzi/client';
 import type { MachineRole } from '@bizzi/protocol';
 import { loadJson, loadString, remove, saveJson, saveString } from './storage.ts';
+import type { UpdateBridge } from './updates.ts';
 
 export interface ConnectionTarget {
   /** WebSocket URL of the client endpoint (node or hub). */
@@ -33,6 +34,8 @@ export interface BizziBridge {
   setChrome?: (c: ChromeColors) => void;
   /** System accent color (`rrggbbaa`, macOS/Windows) for the Device theme. */
   accentColor?: string;
+  /** The desktop app's self-updater (Settings › Updates). */
+  updates?: UpdateBridge;
 }
 
 declare global {

@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import { buildCsp } from '../src/main/csp.ts';
-import { nodeMajor, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, type ResolveRuntimeOptions } from '../src/core/runtime.ts';
+import { coreNodeArgs, nodeMajor, resolveCoreEntry, resolveCoreRuntime, resolveDataDir, type ResolveRuntimeOptions } from '../src/core/runtime.ts';
 
 const base = (over: Partial<ResolveRuntimeOptions> = {}): ResolveRuntimeOptions => ({
   env: { PATH: '/a:/b', HOME: '/home/u' },
@@ -74,4 +74,15 @@ test('CSP: strict in production, dev server allowed in dev', () => {
   const dev = buildCsp({ devOrigin: 'http://localhost:5173' });
   assert.match(dev, /connect-src [^;]*ws:\/\/localhost:5173/);
   assert.match(dev, /script-src [^;]*http:\/\/localhost:5173/);
+});
+
+test('coreNodeArgs loads the workspaces hook only in a staged core (no node_modules/@bizzi)', () => {
+  const entry = join('/r', 'core', 'apps', 'cli', 'src', 'main.ts');
+  const hook = join('/r', 'core', 'apps', 'cli', 'src', 'workspaces-hook.ts');
+  const links = join('/r', 'core', 'node_modules', '@bizzi');
+  const staged = coreNodeArgs(entry, (f) => f === hook);
+  assert.equal(staged[0], '--import');
+  assert.match(staged[1] ?? '', /^file:\/\/.*workspaces-hook\.ts$/);
+  assert.deepEqual(coreNodeArgs(entry, (f) => f === hook || f === links), [], 'dev checkout: the links resolve');
+  assert.deepEqual(coreNodeArgs(entry, () => false), [], 'no hook file (an older core)');
 });

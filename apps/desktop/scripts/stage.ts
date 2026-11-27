@@ -1,27 +1,34 @@
 // Stages what electron-builder copies into the app's resources (see electron-builder.yml):
 //
 //   staging/ui/    packages/ui/dist (the production UI build), or a placeholder page
-//   staging/core/  the core sources: root package files, packages/* (minus ui), apps/cli
-//   staging/node/  a Node >= 26 runtime for the target platform/arch (bin/node, or node.exe)
+//   staging/core/  the core: root package files, packages/* (minus ui), apps/cli, production deps
+//   staging/node/  the Node runtime that runs it (bin/node, or node.exe on Windows)
 //
-// Status: ui + core sources are real. Two steps are still stubs, by design for now:
-//   1. Node runtime: copied from BIZZI_STAGE_NODE_DIR (an extracted nodejs.org dist, e.g.
-//      node-v26.x-darwin-arm64/) when set; otherwise a placeholder. The plan is to download the
-//      official tarball per target (darwin arm64/x64, linux x64/arm64, win x64), verify it against
-//      SHASUMS256.txt, and extract it here, once per electron-builder target arch.
-//   2. Core dependencies: `npm ci --omit=dev` inside staging/core with that *target* Node, so native
-//      addons (node-pty, ...) match Node 26's ABI and the target arch. Enabled with
-//      BIZZI_STAGE_INSTALL=1 (host platform only; cross-arch needs a per-arch CI runner).
-// Signing/notarization of the bundled node binary comes with app signing (tech-choices: Packaging).
+// Builds for the host platform and arch only: the core's native addons (node-pty prebuilds) are
+// installed for the machine running this, so each target is staged on its own runner (release.yml).
+//
+// Node: the official nodejs.org build of the exact version running this script, checked against
+// SHASUMS256.txt and cached in .cache/node. The installed native addons then match its ABI.
+//
+//   BIZZI_VERSION=<version>      the version the staged core reports (release builds)
+//   BIZZI_STAGE_NODE_DIR=<dir>   copy an extracted Node dist instead of downloading one
+//   BIZZI_STAGE_NODE=0           skip the runtime (the app then needs a system Node >= 26)
+//   BIZZI_STAGE_INSTALL=0        skip installing the core's dependencies
+//   BIZZI_STAGE_CLAUDE_BINARY=1  keep the Claude Agent SDK's bundled `claude` (~300 MB per platform);
+//                                by default the adapter runs the installed one bizzi provisions
 
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const appDir = fileURLToPath(new URL('..', import.meta.url));
 const repo = join(appDir, '..', '..');
 const staging = join(appDir, 'staging');
+const cacheDir = join(appDir, '.cache', 'node');
+const env = process.env;
+const isWin = process.platform === 'win32';
 const log = (msg: string) => process.stderr.write(`stage: ${msg}\n`);
 
 rmSync(staging, { recursive: true, force: true });
@@ -44,47 +51,109 @@ if (existsSync(join(uiDist, 'index.html'))) {
 // --- core sources ---------------------------------------------------------------------------
 const core = join(staging, 'core');
 const skip = (src: string) => !/[\\/](node_modules|test|dist|out|coverage)([\\/]|$)/.test(src.slice(repo.length));
-for (const f of ['package.json', 'package-lock.json', 'tsconfig.base.json']) {
+for (const f of ['package.json', 'package-lock.json', 'tsconfig.base.json', 'LICENSE', 'NOTICE']) {
   if (existsSync(join(repo, f))) cpSync(join(repo, f), join(core, f));
 }
 for (const pkg of readdirSync(join(repo, 'packages'))) {
   if (pkg === 'ui') continue;
   cpSync(join(repo, 'packages', pkg), join(core, 'packages', pkg), { recursive: true, filter: skip });
 }
-if (existsSync(join(repo, 'apps', 'cli'))) {
-  cpSync(join(repo, 'apps', 'cli'), join(core, 'apps', 'cli'), { recursive: true, filter: skip });
-  log('core: copied sources');
-} else {
-  log('core: apps/cli missing in this checkout; staged packages only (the packaged app cannot start a core)');
+cpSync(join(repo, 'apps', 'cli'), join(core, 'apps', 'cli'), { recursive: true, filter: skip });
+log('core: copied sources');
+// The core reports its CLI package's version (hello → serverVersion); releases stamp theirs in.
+if (env['BIZZI_VERSION']) {
+  const manifest = join(core, 'apps', 'cli', 'package.json');
+  writeFileSync(manifest, JSON.stringify({ ...JSON.parse(readFileSync(manifest, 'utf8')), version: env['BIZZI_VERSION'] }, null, 2) + '\n');
+  log(`core: version ${env['BIZZI_VERSION']}`);
 }
 
 // --- node runtime ---------------------------------------------------------------------------
 const node = join(staging, 'node');
-const nodeSrc = process.env['BIZZI_STAGE_NODE_DIR'];
-if (nodeSrc) {
-  cpSync(nodeSrc, node, { recursive: true, filter: (s) => !/[\\/](include|share)([\\/]|$)/.test(s.slice(nodeSrc.length)) });
-  log(`node: copied ${nodeSrc}`);
-} else {
+const nodeExe = join(node, isWin ? 'node.exe' : join('bin', 'node'));
+if (env['BIZZI_STAGE_NODE_DIR']) {
+  copyRuntime(env['BIZZI_STAGE_NODE_DIR']);
+  log(`node: copied ${env['BIZZI_STAGE_NODE_DIR']}`);
+} else if (env['BIZZI_STAGE_NODE'] === '0') {
   mkdirSync(node);
-  writeFileSync(
-    join(node, 'PLACEHOLDER.txt'),
-    'Node >= 26 runtime goes here (bin/node or node.exe). Set BIZZI_STAGE_NODE_DIR to an extracted nodejs.org dist.\n' +
-      'Without it the packaged app falls back to BIZZI_NODE or a system Node >= 26.\n',
-  );
-  log('node: no BIZZI_STAGE_NODE_DIR, wrote a placeholder (packaged app will need a system Node >= 26)');
+  writeFileSync(join(node, 'PLACEHOLDER.txt'), 'No Node runtime was staged; the app falls back to BIZZI_NODE or a system Node >= 26.\n');
+  log('node: skipped (BIZZI_STAGE_NODE=0)');
+} else {
+  const dist = await officialNode(process.version, process.platform, process.arch);
+  copyRuntime(dist);
+  log(`node: ${process.version} (${process.platform}-${process.arch}) from nodejs.org`);
 }
 
 // --- core dependencies ----------------------------------------------------------------------
-if (process.env['BIZZI_STAGE_INSTALL'] === '1') {
-  const npmNode = nodeSrc ? join(node, process.platform === 'win32' ? 'node.exe' : join('bin', 'node')) : process.execPath;
-  log(`core: npm ci --omit=dev with ${npmNode}`);
-  // NOTE: the root lockfile also lists workspaces that aren't staged (ui, desktop); expect to
-  // need a pruned lockfile here once the core's dependency set settles.
-  execFileSync('npm', ['ci', '--omit=dev', '--workspace', '@bizzi/cli'], {
+if (env['BIZZI_STAGE_INSTALL'] === '0') {
+  log('core: dependencies not installed (BIZZI_STAGE_INSTALL=0)');
+} else {
+  log('core: npm ci --omit=dev --workspace @bizzi/cli');
+  execFileSync(isWin ? 'npm.cmd' : 'npm', ['ci', '--omit=dev', '--no-audit', '--no-fund', '--workspace', '@bizzi/cli'], {
     cwd: core,
     stdio: 'inherit',
-    env: { ...process.env, PATH: `${join(npmNode, '..')}${process.platform === 'win32' ? ';' : ':'}${process.env['PATH']}` },
+    shell: isWin, // npm.cmd is a batch file
   });
-} else {
-  log('core: dependencies not installed (set BIZZI_STAGE_INSTALL=1)');
+  pruneCore();
+}
+
+// ---------------------------------------------------------------------------------------------
+
+/** Keep only what runs: the node binary and its license (no npm, headers or docs). */
+function copyRuntime(dist: string): void {
+  mkdirSync(join(node, isWin ? '' : 'bin'), { recursive: true });
+  cpSync(join(dist, isWin ? 'node.exe' : join('bin', 'node')), nodeExe);
+  if (existsSync(join(dist, 'LICENSE'))) cpSync(join(dist, 'LICENSE'), join(node, 'LICENSE'));
+}
+
+/** Downloads (once) and verifies the official Node build; returns its extracted directory. */
+async function officialNode(version: string, platform: NodeJS.Platform, arch: string): Promise<string> {
+  const os = platform === 'win32' ? 'win' : platform;
+  const base = `node-${version}-${os}-${arch}`;
+  const file = `${base}.${platform === 'win32' ? 'zip' : 'tar.gz'}`;
+  const dir = join(cacheDir, base);
+  if (existsSync(join(dir, platform === 'win32' ? 'node.exe' : join('bin', 'node')))) return dir;
+
+  mkdirSync(cacheDir, { recursive: true });
+  const url = `https://nodejs.org/dist/${version}`;
+  const sums = await (await fetchOk(`${url}/SHASUMS256.txt`)).text();
+  const expected = sums.split('\n').find((l) => l.endsWith(`  ${file}`))?.split(' ')[0];
+  if (!expected) throw new Error(`stage: ${file} is not listed in ${url}/SHASUMS256.txt`);
+  const archive = Buffer.from(await (await fetchOk(`${url}/${file}`)).arrayBuffer());
+  const actual = createHash('sha256').update(archive).digest('hex');
+  if (actual !== expected) throw new Error(`stage: checksum mismatch for ${file}: ${actual} != ${expected}`);
+  const archivePath = join(cacheDir, file);
+  writeFileSync(archivePath, archive);
+  // bsdtar (macOS, Windows 10+) and GNU tar both read .tar.gz. On Windows use System32's bsdtar,
+  // which reads .zip; Git for Windows puts a GNU tar earlier on PATH that doesn't.
+  const tar = platform === 'win32' ? join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'tar.exe') : 'tar';
+  execFileSync(tar, ['-xf', archivePath, '-C', cacheDir], { stdio: 'inherit' });
+  rmSync(archivePath);
+  return dir;
+}
+
+async function fetchOk(url: string): Promise<Response> {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`stage: GET ${url}: HTTP ${res.status}`);
+  return res;
+}
+
+/**
+ * Leaves no links in the staged tree. The workspace links in node_modules/@bizzi are replaced by
+ * apps/cli/src/workspaces-hook.ts (installers copy links as real directories, and Node won't strip
+ * types under node_modules), and .bin shims aren't needed.
+ */
+function pruneCore(): void {
+  const modules = join(core, 'node_modules');
+  rmSync(join(modules, '@bizzi'), { recursive: true, force: true });
+  rmSync(join(modules, '.bin'), { recursive: true, force: true });
+  for (const pkg of readdirSync(join(core, 'packages'))) rmSync(join(core, 'packages', pkg, 'node_modules', '.bin'), { recursive: true, force: true });
+  if (env['BIZZI_STAGE_CLAUDE_BINARY'] !== '1') {
+    const scope = join(modules, '@anthropic-ai');
+    for (const name of existsSync(scope) ? readdirSync(scope) : []) {
+      if (!name.startsWith('claude-agent-sdk-')) continue;
+      rmSync(join(scope, name), { recursive: true, force: true });
+      log(`core: dropped @anthropic-ai/${name} (the installed claude runs instead)`);
+    }
+  }
+  log('core: dependencies installed');
 }

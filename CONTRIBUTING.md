@@ -95,13 +95,21 @@ npm run smoke:live -- opencode <model>
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push and pull request:
+`.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
 
 - `check` on ubuntu-latest and macos-latest: `npm ci --strict-allow-scripts`, typecheck, schema check
   (`docs/protocol.schema.json` vs `packages/protocol`; regenerate with `npm run schema`), tests, UI build, `smoke:hub` and `smoke:v12`.
 - `docker`: builds `deploy/Dockerfile.node` (no push), with a buildx cache.
-- `desktop-pack` (pushes to `main` only): `npm run pack -w @bizzi/desktop` on macOS, unsigned, and
-  uploads the zipped `.app` as an artifact.
+
+`.github/workflows/release.yml` builds the desktop app and the Docker images and publishes releases.
+It runs on pushes to `dev` and `main`, and as a build-only check on PRs that touch packaging. See
+[docs/releasing.md](docs/releasing.md).
+
+## Branches, changelog and releases
+
+Branch from `dev` and open the PR against `dev`; `main` only takes promotion PRs from `dev`. Every
+user-visible change adds a line to `## Unreleased` in [CHANGELOG.md](CHANGELOG.md) in the same PR.
+Rules in [AGENTS.md](AGENTS.md#changelog).
 
 ## Conventions
 

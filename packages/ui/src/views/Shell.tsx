@@ -17,6 +17,7 @@ import { pickerRequestFromHash } from '../lib/picker.ts';
 import { desktopRedirect, routeHref } from '../lib/router.ts';
 import type { Route } from '../lib/router.ts';
 import { SIDEBAR_MIN, keyWidth, manualMax, clampManual, sidebarWidth } from '../lib/sidebarWidth.ts';
+import { pillLabel, updateOffered, useUpdates } from '../lib/updates.ts';
 import { AddWorkspaceDialog } from './AddWorkspaceDialog.tsx';
 import { Logo } from '../components/Logo.tsx';
 import { InboxView } from './InboxView.tsx';
@@ -218,6 +219,8 @@ function useWindowWidth(): number {
 
 /** Horizontal space around the tree inside the sidebar (padding, border, a thin scrollbar). */
 const TREE_CHROME = 18;
+/** The header row spans the sidebar, so only its right border (and a pixel of rounding) is extra. */
+const HEADER_CHROME = 2;
 
 /**
  * Natural width of the tree: a hidden, max-content copy laid out once, without the rows that never widen
@@ -228,6 +231,12 @@ function measureTree(el: HTMLElement): number {
   if (!parent) return 0;
   const copy = el.cloneNode(true) as HTMLElement;
   for (const n of copy.querySelectorAll('[data-fit-ignore]')) n.remove();
+  // `flex-1 min-w-0` blocks (the header's name and status) contribute ~0 to a max-content layout:
+  // in the copy they take their text's width instead, so the auto width leaves room for it.
+  for (const n of copy.querySelectorAll<HTMLElement>('[data-fit-natural]')) {
+    n.style.flex = 'none';
+    n.style.minWidth = 'max-content';
+  }
   copy.removeAttribute('id');
   copy.setAttribute('aria-hidden', 'true');
   copy.style.cssText = 'position:fixed;left:-10000px;top:0;width:max-content;visibility:hidden;pointer-events:none;contain:layout style';
@@ -284,7 +293,7 @@ function Sidebar(props: { route: Route }): ReactNode {
   const natural = useTreeWidth(treeRef, pref.mode === 'auto');
   // The header (name, connection status, nav icons) must fit too, or the status gets cut off.
   const header = useTreeWidth(headerRef, pref.mode === 'auto');
-  const content = natural === null ? null : Math.max(natural + TREE_CHROME, header ?? 0);
+  const content = natural === null ? null : Math.max(natural + TREE_CHROME, header === null ? 0 : header + HEADER_CHROME);
   const width = sidebarWidth(pref, content, windowWidth);
 
   return (
@@ -292,7 +301,7 @@ function Sidebar(props: { route: Route }): ReactNode {
       <TitleBarStrip />
       <div ref={headerRef} className="flex items-center gap-2 px-3 pt-3 pb-2">
         <Logo size={28} />
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1" data-fit-natural>
           <div className="truncate text-sm font-semibold">bizzi</div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted">
             <span className={cx('h-1.5 w-1.5 shrink-0 rounded-full', conn === 'open' ? 'bg-ok' : conn === 'reconnecting' ? 'bg-warn' : 'bg-muted')} />
@@ -303,6 +312,7 @@ function Sidebar(props: { route: Route }): ReactNode {
         </div>
         <HeaderNav route={props.route} />
       </div>
+      <UpdatePill />
       <div className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-x-hidden overflow-y-auto border-t border-sidebar-border px-1 pt-2 pb-2">
         <div ref={treeRef}>
           <MachineTree variant="desktop" activeWorkspaceId={activeWs} activeMachineId={activeMachine} />
@@ -317,6 +327,27 @@ function Sidebar(props: { route: Route }): ReactNode {
       </div>
       <ResizeHandle width={width} windowWidth={windowWidth} auto={pref.mode === 'auto'} />
     </aside>
+  );
+}
+
+/** The desktop app has an update on offer: one slim row under the header, to Settings › Updates. */
+function UpdatePill(): ReactNode {
+  const s = useUpdates();
+  if (!s || !updateOffered(s)) return null;
+  const icon: IconName = s.stage === 'ready' || s.stage === 'installing' ? 'refresh' : 'download';
+  return (
+    <div className="px-3 pb-2">
+      <button
+        type="button"
+        onClick={() => navigate({ name: 'settings', section: 'updates' })}
+        className="flex w-full items-center gap-1.5 rounded-md border border-accent/50 bg-accent/10 px-2 py-1 text-left text-xs font-medium text-fg hover:bg-accent/20"
+        title={`bizzi v${s.latest?.version ?? ''} is available`}
+      >
+        <Icon name={icon} size={14} className="shrink-0 text-accent" />
+        <span className="min-w-0 flex-1 truncate">{s.stage === 'available' ? 'Update available' : 'Update'}</span>
+        <span className="shrink-0 font-mono text-[11px] text-muted">{pillLabel(s)}</span>
+      </button>
+    </div>
   );
 }
 

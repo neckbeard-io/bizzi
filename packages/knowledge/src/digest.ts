@@ -3,7 +3,7 @@
 // McpServerSpec that launches the bizzi-memory MCP server for the session over stdio.
 
 import { fileURLToPath } from 'node:url';
-import { BizziError } from '@bizzi/protocol';
+import { BizziError, inheritedImportArgs } from '@bizzi/protocol';
 import type { MachineInfo, McpServerSpec, StartSessionOptions } from '@bizzi/protocol';
 import { rankMemories, resolveRules } from './resolver.ts';
 import { scopeLabel } from './scope.ts';
@@ -235,7 +235,8 @@ export function mcpServerSpec(context: KnowledgeContext, opts: McpSpecOptions): 
   return {
     type: 'stdio',
     command: opts.nodePath ?? process.execPath,
-    args: mcpServerArgs(context, opts.dbPath),
+    // A packaged core's `--import` hook (resolving @bizzi/*) must load in the server too.
+    args: [...inheritedImportArgs(process.execArgv), ...mcpServerArgs(context, opts.dbPath)],
     ...(opts.env ? { env: { ...opts.env } } : {}),
   };
 }

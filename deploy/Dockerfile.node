@@ -50,6 +50,11 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/ packages/
 COPY apps/ apps/
+# Release builds stamp their version in; the core reports apps/cli's package version.
+ARG BIZZI_VERSION=
+RUN if [ -n "$BIZZI_VERSION" ]; then \
+      node -e 'const f="apps/cli/package.json",fs=require("fs"),p=JSON.parse(fs.readFileSync(f));p.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(p,null,2)+"\n")' "$BIZZI_VERSION"; \
+    fi
 # Production deps only. Native addons (node-pty, ...) build here against Node 26 with build-essential.
 # Installs just the CLI's dependency tree when apps/cli exists, everything else otherwise.
 RUN if [ -f apps/cli/package.json ]; then \
