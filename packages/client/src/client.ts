@@ -100,6 +100,8 @@ interface ChannelState {
   pending: Map<number, ChannelEvent>;
   wanted: boolean;
   gapTimer: ReturnType<typeof setTimeout> | null;
+  /** The server's last seq when the channel was last (re)subscribed: events at or below it are replayed history. */
+  replayEnd: number;
 }
 
 const OPEN = 1;
@@ -346,6 +348,14 @@ export class BizziClient {
     return this.channels.get(ch)?.lastSeq ?? 0;
   }
 
+  /**
+   * The server's last seq for `ch` when it was last (re)subscribed. Events at or below it were
+   * replayed to catch up (they happened before this subscription); later ones are live.
+   */
+  replayEnd(ch: string): number {
+    return this.channels.get(ch)?.replayEnd ?? 0;
+  }
+
   isSubscribed(ch: string): boolean {
     return this.channels.get(ch)?.wanted ?? false;
   }
@@ -353,7 +363,7 @@ export class BizziClient {
   private channel(ch: string): ChannelState {
     let st = this.channels.get(ch);
     if (!st) {
-      st = { lastSeq: 0, pending: new Map(), wanted: false, gapTimer: null };
+      st = { lastSeq: 0, pending: new Map(), wanted: false, gapTimer: null, replayEnd: 0 };
       this.channels.set(ch, st);
     }
     return st;
@@ -363,13 +373,15 @@ export class BizziClient {
     const st = this.channel(ch);
     const since = st.lastSeq;
     const res = (await this.enqueue('subscribe', { ch, since }, this.opts.requestTimeoutMs, true)) as MethodResult<'subscribe'>;
+    st.replayEnd = res.lastSeq;
     if (res.lastSeq < since && st.lastSeq >= since) {
       // The server's log is behind our cursor: it was reset or we talk to a different server.
       this.logger.log('warn', 'channel reset by server', { ch, since, serverLastSeq: res.lastSeq });
       st.lastSeq = 0;
       st.pending.clear();
       for (const l of this.resetListeners) this.safe(() => l(ch));
-      await this.enqueue('subscribe', { ch, since: 0 }, this.opts.requestTimeoutMs, true);
+      const again = (await this.enqueue('subscribe', { ch, since: 0 }, this.opts.requestTimeoutMs, true)) as MethodResult<'subscribe'>;
+      st.replayEnd = again.lastSeq;
     }
   }
 

@@ -119,3 +119,34 @@ test('inbox collects pending approvals, and sessions waiting for approval are wa
   assert.equal(inbox[0]?.sessionId, 's_2');
   assert.equal(inbox[0]?.item.kind, 'approval');
 });
+
+test('install jobs that finished before the client connected are not brought back by the replay', async (t) => {
+  const server = await FakeServer.start();
+  const client = new BizziClient({ backoff: { baseMs: 10, maxMs: 20 }, requestTimeoutMs: 1000 });
+  const scheduler = createManualScheduler();
+  const store = new BizziStore(client, { scheduler });
+  t.after(async () => {
+    store.dispose();
+    client.close();
+    await server.stop();
+  });
+  // History from before this client: a finished update, a detected version change, and an install still running.
+  server.push('global', { type: 'install.progress', data: { agent: 'codex', jobId: 'job_old', stage: 'install', step: 1, total: 2 } });
+  server.push('global', { type: 'install.progress', data: { agent: 'codex', jobId: 'job_old', stage: 'done', step: 2, total: 2, done: true, ok: true } });
+  server.push('global', { type: 'install.progress', data: { agent: 'codex', jobId: 'watch_1', stage: 'detected', message: 'codex 0.1 → 0.2 installed', done: true, ok: true } });
+  server.push('global', { type: 'install.progress', data: { agent: 'opencode', jobId: 'job_run', stage: 'install', step: 1, total: 2 } });
+  await client.connect(server.url, 'secret');
+  await waitFor(() => client.lastSeq('global') === 4 && client.replayEnd('global') === 4);
+  scheduler.flush();
+  assert.deepEqual(Object.keys(store.getState().jobs), ['job_run']);
+
+  // Live events still show: the running job finishing, and a new detection.
+  server.push('global', { type: 'install.progress', data: { agent: 'opencode', jobId: 'job_run', stage: 'done', step: 2, total: 2, done: true, ok: true } });
+  server.push('global', { type: 'install.progress', data: { agent: 'codex', jobId: 'watch_2', stage: 'detected', message: 'codex 0.2 → 0.3 installed', done: true, ok: true } });
+  await waitFor(() => client.lastSeq('global') === 6);
+  scheduler.flush();
+  const jobs = store.getState().jobs;
+  assert.deepEqual(Object.keys(jobs).sort(), ['job_run', 'watch_2']);
+  assert.equal(jobs.job_run?.done, true);
+  assert.equal(jobs.job_run?.log.length, 2);
+});

@@ -257,6 +257,8 @@ export class BizziStore {
   private seenUnsupported = false;
   private readonly gitInflight = new Set<string>();
   private readonly agentsReload = new Set<string>();
+  /** Jobs known only from replayed history so far (none of their events arrived live). */
+  private readonly replayedJobs = new Set<string>();
 
   /** Number of notifications sent (handy for perf tests). */
   notifications = 0;
@@ -626,7 +628,7 @@ export class BizziStore {
         this.dropSession(ev.data.sessionId);
         return;
       case 'install.progress':
-        this.applyProgress(ev.data, ev.ts);
+        this.applyProgress(ev.data, ev.ts, ev.seq <= this.client.replayEnd(GLOBAL_CHANNEL));
         return;
       case 'knowledge.changed':
         this.patch({ knowledgeRev: this.state.knowledgeRev + 1 });
@@ -716,9 +718,22 @@ export class BizziStore {
     this.patch({ accounts: { ...this.state.accounts, [key]: next } });
   }
 
-  private applyProgress(data: GlobalEventMap['install.progress'], ts: string): void {
+  /**
+   * `replayed`: the event is history caught up on (re)subscribing, not live. A job that started and
+   * finished entirely in that history is dropped: it ended before this client was around, and
+   * showing it again would bring back every past install or detected version change (already
+   * dismissed or not) on each restart or reload. Jobs still running, or finishing live, are kept.
+   */
+  private applyProgress(data: GlobalEventMap['install.progress'], ts: string, replayed = false): void {
     const jobId = data.jobId ?? `${data.agent}:${data.tool ?? 'agent'}`;
     const prev = this.state.jobs[jobId];
+    if (!replayed) this.replayedJobs.delete(jobId);
+    else if (!prev) this.replayedJobs.add(jobId);
+    if (replayed && (data.done ?? false) && this.replayedJobs.has(jobId)) {
+      this.replayedJobs.delete(jobId);
+      if (prev) this.patch({ jobs: withoutKey(this.state.jobs, jobId) });
+      return;
+    }
     const job: InstallJob = prev
       ? { ...prev }
       : {
@@ -1315,6 +1330,7 @@ export class BizziStore {
   }
 
   dismissJob(jobId: string): void {
+    this.replayedJobs.delete(jobId);
     if (!(jobId in this.state.jobs)) return;
     this.patch({ jobs: withoutKey(this.state.jobs, jobId) });
   }
