@@ -116,3 +116,29 @@ test('pending approvals are tracked until resolved', () => {
   const tool = tl.items['tool:tc_2'];
   assert.ok(tool?.kind === 'tool' && tool.approvalId === 'ap_1');
 });
+
+test('tools left running by work that ended unrecorded stop spinning; agent turns are marked', () => {
+  const tl = reduceTimeline(
+    emptyTimeline('s_1'),
+    script([
+      { type: 'turn.started', data: { turnId: 't_1', input: [{ type: 'text', text: 'run checks' }] } },
+      { type: 'turn.completed', data: { turnId: 't_1', stopReason: 'end_turn' } },
+      // An older node didn't record the turn Claude ran on its own, then the node was killed mid-tool.
+      { type: 'tool.started', data: { toolId: 'tc_orphan', kind: 'shell', name: 'Bash', title: 'gh pr checks --watch' } },
+      { type: 'subagent.started', data: { subagentId: 'sa_bg', description: 'background research' } },
+      { type: 'turn.started', data: { turnId: 't_2', input: [], agent: true } },
+      { type: 'tool.started', data: { toolId: 'tc_live', kind: 'shell', name: 'Bash', title: 'npm test' } },
+    ]),
+  );
+  const byId = (id: string) => timelineItems(tl).find((i) => i.id === id);
+  assert.equal((byId('tool:tc_orphan') as { status: string }).status, 'cancelled');
+  // A background subagent may outlive its turn; a new turn leaves it alone.
+  assert.equal((byId('sub:sa_bg') as { status: string }).status, 'running');
+  assert.equal((byId('tool:tc_live') as { status: string }).status, 'running');
+  assert.equal((byId('turn:t_2') as { agent?: true }).agent, true);
+
+  // Nothing survives the agent process being replaced.
+  const after = reduceTimeline(tl, script([{ type: 'session.restarting', data: { reason: 'bizzi restarted' } }]).map((e) => ({ ...e, seq: 100 })));
+  const items = timelineItems(after);
+  assert.ok(items.every((i) => !((i.kind === 'tool' || i.kind === 'subagent') && i.status === 'running')));
+});

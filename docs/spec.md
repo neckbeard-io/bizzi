@@ -387,7 +387,7 @@ A file tree: machines first, workspaces (usually a repo) under each, and under e
 
 - One mark per live session, at most four, then `+n`. Order: waiting, failed, working, background, done-unseen, idle.
 - Mark = the agent-type icon with a ring in the state color; plain dots when the sidebar is narrow.
-- States: **⚠ waiting** (approval, question, login; amber, pulses) · **✗ failed** · **◐ working** (spins) · **∿ background** (the turn is over but the agent left work running, such as a shell command it waits on or a subagent; working color, the glyph bobs up and down inside a still ring; the session row's second line names the work) · **✓ done, not yet seen** (clears when the session is opened) · **● idle** (gray, hollow).
+- States: **⚠ waiting** (approval, question, login; amber, pulses) · **✗ failed** · **◐ working** (spins) · **∿ background** (the turn is over but the agent left work running, such as a shell command it waits on or a subagent; working color, the glyph bobs up and down inside a still ring; the session row's second line names the work; when that work finishes and the agent picks things up on its own, that's a turn again (`turn.started.agent`, shown as "continued on its own") and the session is working) · **✓ done, not yet seen** (clears when the session is opened) · **● idle** (gray, hollow).
 - Helper sessions (§12.1) count inside their parent's mark as a small number, not as marks of their own.
 
 **Row 2 (folded workspaces, only when something needs you):** the single most urgent item in the workspace, one line, ellipsised: waiting (with the reason) > failed > done-unseen (first line of the final message). Clicking it opens that session directly.

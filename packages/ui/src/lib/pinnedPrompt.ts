@@ -3,13 +3,16 @@ import type { InputBlock } from '@bizzi/protocol';
 
 /**
  * The text of a user prompt, flattened for the pinned bar; null when the item isn't one. Steers are left
- * out: the prompt that started the turn is the one worth keeping in view.
+ * out: the prompt that started the turn is the one worth keeping in view. So is anything bizzi sent
+ * itself (the continue-after-restart note) and turns the agent started on its own: only what you wrote.
  */
 export function promptText(item: TimelineItem | undefined): string | null {
   if (!item) return null;
-  if (item.kind === 'turn') return inputText(item.input);
-  if (item.kind === 'message' && item.role === 'user') return item.text.trim() || null;
-  return null;
+  let text: string | null = null;
+  if (item.kind === 'turn') text = item.auto || item.agent ? null : inputText(item.input);
+  else if (item.kind === 'message' && item.role === 'user') text = item.text.trim() || null;
+  // History from nodes older than `turn.started.auto` only has the note's `[bizzi]` prefix to go by.
+  return text !== null && /^\[bizzi\]/i.test(text) ? null : text;
 }
 
 function inputText(input: readonly InputBlock[]): string | null {

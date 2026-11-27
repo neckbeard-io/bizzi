@@ -67,12 +67,14 @@ export interface SessionEventMap {
     /** Slash commands / skills the agent advertises. */
     commands?: { name: string; description?: string }[];
   };
-  /** Emitted by the core when a turn starts; echoes the user input. */
   /**
+   * Emitted by the core when a turn starts; echoes the user input.
    * `auto`: bizzi sent this input itself (continuing a turn cut off by a restart), not the user; it
    * doesn't title the session and isn't the user's request.
+   * `agent`: the agent started this turn on its own, with no input from bizzi (Claude picking work back
+   * up when a background task finishes). Emitted by the adapter; `input` is empty.
    */
-  'turn.started': { turnId: string; input: InputBlock[]; auto?: true };
+  'turn.started': { turnId: string; input: InputBlock[]; auto?: true; agent?: true };
   /** Emitted by the core when input is steered into the in-flight turn. */
   'turn.steered': { turnId: string; input: InputBlock[] };
   /** Emitted by the adapter when the turn finishes, with the same turnId. */

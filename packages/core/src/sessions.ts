@@ -1798,6 +1798,14 @@ export class Sessions {
     }
     switch (body.type) {
       case 'turn.started':
+        // The agent started a turn on its own (adapter contract): track it like any other turn, so the
+        // session shows as working and a restart closes it. Only when nothing else is in flight.
+        if (body.data.agent && !rt.state.currentTurnId && !rt.reservedTurn) {
+          body = { type: 'turn.started', data: { turnId: body.data.turnId, input: [], agent: true } };
+          break;
+        }
+        this.#log.log(body.data.agent ? 'debug' : 'warn', 'adapter turn.started dropped', { sessionId: rt.info.id, agent: body.data.agent === true });
+        return;
       case 'turn.steered':
         this.#log.log('warn', `adapters must not emit ${body.type}; dropped`, { sessionId: rt.info.id });
         return;
@@ -1890,8 +1898,9 @@ export class Sessions {
         rt.cancelled.clear();
         setStatus('running');
         changed = true;
-        // bizzi's own continue-after-restart isn't the user's request: it never titles the session.
-        if (!body.data.auto) this.#noteUserTurn(rt, body.data.input);
+        // bizzi's own continue-after-restart and turns the agent started itself aren't the user's
+        // request: they never title the session.
+        if (!body.data.auto && !body.data.agent) this.#noteUserTurn(rt, body.data.input);
         break;
       case 'turn.completed':
         rt.state.currentTurnId = undefined;
@@ -2191,7 +2200,7 @@ export class Sessions {
     for (let page = 0; page < 10; page++) {
       const evs = this.#d.bus.replay(ch, since, REPLAY_PAGE);
       for (const ev of evs) {
-        if (ev.type === 'turn.started' && !ev.data.auto && !isBizziNote(messageText(ev.data.input)) && autoTitle(ev.data.input)) return ev.data.input;
+        if (ev.type === 'turn.started' && !ev.data.auto && !ev.data.agent && !isBizziNote(messageText(ev.data.input)) && autoTitle(ev.data.input)) return ev.data.input;
       }
       if (evs.length < REPLAY_PAGE) return undefined;
       since = evs[evs.length - 1]!.seq;

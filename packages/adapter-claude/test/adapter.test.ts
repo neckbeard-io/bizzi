@@ -528,6 +528,47 @@ test('background_tasks_changed becomes background.updated: the whole set, ambien
   await session.stop();
 });
 
+test('a turn Claude starts on its own (after a background task) is opened and completed as an agent turn', async () => {
+  const { session, c, fq } = await setup((fq, u) => {
+    fq.emit(assistant('msg_1', { type: 'text', text: 'started it in the background' }), result([u.uuid!], 0.01));
+  });
+  await session.send('t_1', [{ type: 'text', text: 'run the checks' }]);
+  await waitFor(() => c.of('turn.completed').length === 1);
+
+  // A background subagent's output alone doesn't open a turn.
+  fq.emit(toolUse('msg_s', 'tu_s', 'Read', { file_path: '/a' }, 'tu_task'));
+  await tick();
+  assert.equal(c.of('turn.started').length, 0);
+
+  // The task finished; the CLI runs a turn of its own, with no send() from bizzi.
+  fq.emit(
+    { type: 'system', subtype: 'task_notification', task_id: 'b1', status: 'completed', uuid: 'n', session_id: 's' },
+    ...streamText('msg_2', 0, ['Checks passed']),
+    toolUse('msg_2', 'tu_1', 'Bash', { command: 'gh pr merge 1' }),
+  );
+  await waitFor(() => c.of('tool.started').some((t) => t.toolId === 'tu_1'));
+  const [started] = c.of('turn.started');
+  assert.ok(started && started.agent === true && started.turnId.startsWith('t_'));
+  assert.deepEqual(started.input, []);
+
+  // A send while it runs waits for it, then runs as its own turn.
+  await session.send('t_2', [{ type: 'text', text: 'next' }]);
+  assert.equal(fq.received.length, 1);
+  fq.emit(toolResult('tu_1', 'merged'), result(['notification-uuid'], 0.02));
+  // (The fake answers t_2 as soon as it receives it.)
+  await waitFor(() => c.of('turn.completed').length === 3);
+  assert.deepEqual(
+    c.of('turn.completed').map((t) => [t.turnId, t.stopReason]),
+    [
+      ['t_1', 'end_turn'],
+      [started.turnId, 'end_turn'],
+      ['t_2', 'end_turn'],
+    ],
+  );
+  assert.equal(c.of('turn.started').length, 1);
+  await session.stop();
+});
+
 test('image and file input become SDK content blocks', async () => {
   const { session, fq } = await setup(() => {});
   await session.send('t', [

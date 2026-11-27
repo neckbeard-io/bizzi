@@ -98,6 +98,9 @@ export interface AdapterSession {
   /**
    * Start a turn. The core has already emitted `turn.started` with this turnId.
    * The adapter must eventually emit `turn.completed` with the same turnId (also on error/interrupt).
+   * The only `turn.started` an adapter emits itself is one with `agent: true`, for a turn the agent
+   * began on its own while none was in flight (its own `t_` turnId, empty input); it completes it the
+   * same way. The core drops it when a turn is already in flight.
    * Resolves once the input is accepted, not when the turn finishes.
    */
   send(turnId: string, input: InputBlock[]): Promise<void>;

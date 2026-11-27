@@ -178,6 +178,13 @@ function UserImage(props: { mediaType: string; dataBase64: string }): ReactNode 
 }
 
 function TurnRow(props: { item: TurnItem }): ReactNode {
+  if (props.item.agent) {
+    return (
+      <div className="flex items-center gap-1.5 text-xs text-muted">
+        <Icon name="refresh" size={11} /> continued on its own
+      </div>
+    );
+  }
   const parts = inputParts(props.item.input);
   if (parts.length === 0) return null;
   return <UserBubble>{parts}</UserBubble>;
