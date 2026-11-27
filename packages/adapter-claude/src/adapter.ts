@@ -44,6 +44,8 @@ export interface ClaudeAdapterOptions {
   allowBypassPermissions?: boolean;
   /** How long to wait for the SDK's interrupted result before completing the turn anyway. Default 10s. */
   interruptGraceMs?: number;
+  /** Minimum interval between context refreshes while a turn runs. Default 1.5 s. */
+  contextRefreshMs?: number;
   /** Extra SDK options merged last (hooks, agents, thinking, sandbox, plugins, …). */
   sdkOptions?: Partial<Options>;
   /** Whether Claude Code has a transcript to resume (`undefined`: can't tell). Default: looks in its projects dir. */
@@ -222,6 +224,7 @@ export class ClaudeAdapter implements AgentAdapter {
       {
         maxToolOutputChars: this.#opts.maxToolOutputChars ?? 8000,
         interruptGraceMs: this.#opts.interruptGraceMs ?? 10_000,
+        ...(this.#opts.contextRefreshMs !== undefined ? { contextRefreshMs: this.#opts.contextRefreshMs } : {}),
         allowBypassPermissions: allowBypass,
         resumed: !!resumeRef,
         injection: {

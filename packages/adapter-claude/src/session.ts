@@ -104,6 +104,8 @@ export interface SessionConfig {
   keyFingerprint?: string;
   /** Minimum interval between experimental plan-usage queries. Default 5 min. */
   planQueryIntervalMs?: number;
+  /** Minimum interval between mid-turn context refreshes. Default 1.5 s. */
+  contextRefreshMs?: number;
 }
 
 type AnyMsg = SDKMessage & Record<string, unknown>;
@@ -145,6 +147,11 @@ export class ClaudeSession implements AdapterSession {
   #lastPlanQuery = 0;
   #ctxBusy = false;
   #ctxAgain = false;
+  #ctxTimer: ReturnType<typeof setTimeout> | undefined;
+  #ctxLast = 0;
+  #ctxKey: string | undefined;
+  /** The main thread's latest API message id: a new one means the window grew. */
+  #ctxMsgId: string | undefined;
 
   constructor(emit: EmitFn, log: Logger, cfg: SessionConfig, ref: string | undefined) {
     this.#emit = emit;
@@ -264,6 +271,7 @@ export class ClaudeSession implements AdapterSession {
       return;
     }
     this.#state = 'stopping';
+    this.#clearContextTimer();
     this.#cancelPending('Session stopped.');
     this.#failAllTurns('interrupted');
     this.#input.end();
@@ -490,6 +498,7 @@ export class ClaudeSession implements AdapterSession {
 
   #die(reason: string): void {
     this.#state = 'dead';
+    this.#clearContextTimer();
     const tail = this.#stderr.slice(-5).join('\n');
     const message = tail && !reason.includes(tail) ? `${reason}\n${tail}` : reason;
     this.#log.log('error', 'claude process died', { reason: message });
@@ -620,6 +629,7 @@ export class ClaudeSession implements AdapterSession {
         if (typeof meta?.pre_tokens === 'number') data.before = meta.pre_tokens;
         if (typeof meta?.post_tokens === 'number') data.after = meta.post_tokens;
         this.#emit({ type: 'context.compacted', data });
+        this.#ctxKey = undefined; // the bar now shows `after`: always send the refreshed figure
         void this.#refreshContext();
         return;
       }
@@ -723,6 +733,12 @@ export class ClaudeSession implements AdapterSession {
       this.#emit({ type: 'error', data: { message: assistantText(msg) || String(m.error), code: String(m.error), fatal: false } });
     }
     if (unmapped.length) this.#raw(m);
+    // Each main-thread API response re-sends the whole conversation: refresh the bar mid-turn too.
+    // Subagents run in their own window.
+    if (!parent && apiId !== this.#ctxMsgId) {
+      this.#ctxMsgId = apiId;
+      this.#scheduleContext();
+    }
   }
 
   #ensureToolStarted(toolId: string, name: string, input: unknown, parentToolId: string | undefined): void {
@@ -795,6 +811,8 @@ export class ClaudeSession implements AdapterSession {
       });
       if (status === 'ok' && tool) this.#afterToolOk(tool.name, tool.input, m.tool_use_result);
     }
+    // A tool result (a file read, a long command output) lands in the window before the next response.
+    if (!parent) this.#scheduleContext();
   }
 
   #afterToolOk(name: string, input: unknown, result: unknown): void {
@@ -889,10 +907,28 @@ export class ClaudeSession implements AdapterSession {
 
   // ---------------------------------------------------------------- context + account usage
 
+  /** Mid-turn refresh: at most one per `contextRefreshMs`, and the last request always runs. */
+  #scheduleContext(): void {
+    if (this.#ctxTimer || this.#state !== 'running' || !this.#q?.getContextUsage) return;
+    const wait = this.#ctxLast + (this.#cfg.contextRefreshMs ?? 1500) - Date.now();
+    if (wait <= 0) return void this.#refreshContext();
+    this.#ctxTimer = setTimeout(() => {
+      this.#ctxTimer = undefined;
+      void this.#refreshContext();
+    }, wait);
+    this.#ctxTimer.unref?.();
+  }
+
+  #clearContextTimer(): void {
+    if (this.#ctxTimer) clearTimeout(this.#ctxTimer);
+    this.#ctxTimer = undefined;
+  }
+
   /** `getContextUsage()` → `context.updated`; coalesces overlapping refreshes. */
   async #refreshContext(): Promise<void> {
     const q = this.#q;
     if (!q?.getContextUsage || this.#state !== 'running') return;
+    this.#clearContextTimer();
     if (this.#ctxBusy) {
       this.#ctxAgain = true;
       return;
@@ -901,11 +937,16 @@ export class ClaudeSession implements AdapterSession {
     try {
       do {
         this.#ctxAgain = false;
+        this.#ctxLast = Date.now();
         // 'summary' answers from the last response and local estimates, without token-count API calls.
         const r = await q.getContextUsage({ detail: 'summary' });
         if (this.#state !== 'running') return;
         const ctx = r && contextFromSdk(r, this.#cfg.injection);
-        if (ctx) this.#emit({ type: 'context.updated', data: ctx });
+        const key = ctx && JSON.stringify(ctx);
+        if (ctx && key !== this.#ctxKey) {
+          this.#ctxKey = key;
+          this.#emit({ type: 'context.updated', data: ctx });
+        }
       } while (this.#ctxAgain);
     } catch (e) {
       this.#log.log('debug', 'getContextUsage failed', { error: String(e) });

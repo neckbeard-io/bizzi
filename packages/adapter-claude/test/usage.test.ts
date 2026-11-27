@@ -5,7 +5,7 @@ import type { SDKControlGetContextUsageResponse, SDKControlGetUsageResponse } fr
 import { ClaudeAdapter } from '../src/index.ts';
 import type { ClaudeSession } from '../src/session.ts';
 import { approxTokens, claudeAccount, contextFromSdk, keyFingerprint, PlanUsage, readPlanUsage } from '../src/usage.ts';
-import { collector, fakeQueryFn, init, result, silentLogger, tick, waitFor } from './fake.ts';
+import { assistant, collector, fakeQueryFn, init, result, silentLogger, tick, toolResult, toolUse, waitFor } from './fake.ts';
 import type { FakeQuery, Script } from './fake.ts';
 
 const base: StartSessionOptions = { sessionId: 's_1', mode: 'structured', cwd: '/tmp/ws' };
@@ -39,9 +39,9 @@ function ctxResponse(over: Partial<SDKControlGetContextUsageResponse> = {}): SDK
   } as SDKControlGetContextUsageResponse;
 }
 
-async function setup(script: Script, extend: (fq: FakeQuery) => void, start: Partial<StartSessionOptions> = {}) {
+async function setup(script: Script, extend: (fq: FakeQuery) => void, start: Partial<StartSessionOptions> = {}, contextRefreshMs?: number) {
   const fq = fakeQueryFn(script, extend);
-  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true });
+  const adapter = new ClaudeAdapter({ claudePath: null, queryFn: fq.queryFn, hasTranscript: async () => true, ...(contextRefreshMs !== undefined ? { contextRefreshMs } : {}) });
   const c = collector();
   const session = (await adapter.start({ ...base, ...start }, c.emit, { logger: silentLogger })) as ClaudeSession;
   return { adapter, session, c, fq: fq.last() };
@@ -118,6 +118,52 @@ test('compact boundary -> context.compacted with before/after, then a refresh', 
   assert.deepEqual(c.of('context.compacted'), [{ before: 160000, after: 12000 }]);
   await waitFor(() => c.of('context.updated').length === 2);
   assert.equal(c.of('agent.raw').length, 0);
+  await session.stop();
+});
+
+test('context refreshes mid-turn on each main-thread response and tool result, throttled and deduplicated', async () => {
+  let used = 40000;
+  let calls = 0;
+  let release: (() => void) | undefined;
+  const { session, c, fq } = await setup(
+    () => new Promise<void>((r) => (release = r)), // the turn stays open until the test ends it
+    (fq) =>
+      withMethods(fq, {
+        getContextUsage: async () => {
+          calls++;
+          return ctxResponse({ totalTokens: used });
+        },
+      }),
+    {},
+    20,
+  );
+  await waitFor(() => c.of('context.updated').length === 1);
+  await session.send('t_1', [{ type: 'text', text: 'hi' }]);
+  await waitFor(() => !!release);
+
+  used = 52000;
+  fq.emit(toolUse('msg_1', 'toolu_1', 'Read', { file_path: '/w/a' }));
+  await waitFor(() => c.of('context.updated').length === 2);
+  assert.equal(c.of('context.updated')[1]?.used, 52000);
+
+  used = 90000;
+  fq.emit(toolResult('toolu_1', 'x'.repeat(1000)));
+  await waitFor(() => c.of('context.updated').length === 3);
+  assert.equal(c.of('context.updated')[2]?.used, 90000);
+
+  // More blocks of the same response don't ask again; subagent responses don't count.
+  const before = calls;
+  fq.emit(assistant('msg_1', { type: 'text', text: 'more' }), toolUse('msg_sub', 'toolu_2', 'Read', {}, 'toolu_task'));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.equal(calls, before);
+
+  // A burst within the interval coalesces into one trailing refresh; an unchanged figure isn't re-sent.
+  fq.emit(toolUse('msg_2', 'toolu_3', 'Read', {}), toolUse('msg_3', 'toolu_4', 'Read', {}), toolUse('msg_4', 'toolu_5', 'Read', {}));
+  await new Promise((r) => setTimeout(r, 80));
+  assert.ok(calls - before <= 2, `burst coalesced (${calls - before} calls)`);
+  assert.equal(c.of('context.updated').length, 3);
+
+  release!();
   await session.stop();
 });
 
