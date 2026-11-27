@@ -2,9 +2,9 @@
 // Env passes through: BIZZI_UI_URL (Vite dev server), BIZZI_NODE, BIZZI_DATA_DIR, BIZZI_CORE_ENTRY, ...
 //
 // macOS takes the menu bar's app name and the Dock icon from the app bundle, not from the running
-// code, so plain dev runs would say "Electron". We launch a cached copy of Electron.app named bizzi
-// with the bee icon instead (.dev-app/, rebuilt when Electron or the icon changes).
-// BIZZI_DEV_PLAIN_ELECTRON=1 skips that.
+// code, so plain dev runs would say "Electron". We launch a cached copy of Electron.app named
+// "bizzi test" with the TEST-ribboned bee instead (.dev-app/, rebuilt when Electron or the icon
+// changes), so it never passes for the installed app. BIZZI_DEV_PLAIN_ELECTRON=1 skips that.
 
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -30,14 +30,15 @@ child.on('exit', (code, signal) => {
   process.exit(code ?? (signal ? 1 : 0));
 });
 
-/** .dev-app/bizzi.app: Electron.app with CFBundleName bizzi and the bee icon. Returns its executable. */
+/** .dev-app/bizzi.app: Electron.app named "bizzi test" with the test icon. Returns its executable. */
 function macDevBundle(electronBinary: string): string {
   const source = dirname(dirname(dirname(electronBinary))); // …/Electron.app/Contents/MacOS/Electron
-  const icns = join(appDir, 'build-resources', 'icon.icns');
+  const icns = join(appDir, 'build-resources', 'icon-test.icns');
+  const name = 'bizzi test';
   const dest = join(appDir, '.dev-app', 'bizzi.app');
   const exe = join(dest, 'Contents', 'MacOS', 'Electron');
   const electronVersion = (require('electron/package.json') as { version: string }).version;
-  const stamp = `${electronVersion} ${createHash('sha256').update(readFileSync(icns)).digest('hex')}`;
+  const stamp = `${electronVersion} ${name} ${createHash('sha256').update(readFileSync(icns)).digest('hex')}`;
   const stampFile = join(appDir, '.dev-app', 'stamp');
   if (existsSync(exe) && existsSync(stampFile) && readFileSync(stampFile, 'utf8') === stamp) return exe;
 
@@ -51,8 +52,8 @@ function macDevBundle(electronBinary: string): string {
     }
     const plist = join(dest, 'Contents', 'Info.plist');
     const fields: [string, string][] = [
-      ['CFBundleName', 'bizzi'],
-      ['CFBundleDisplayName', 'bizzi'],
+      ['CFBundleName', name],
+      ['CFBundleDisplayName', name],
       ['CFBundleIdentifier', 'dev.bizzi.desktop.dev'],
     ];
     for (const [key, value] of fields) {

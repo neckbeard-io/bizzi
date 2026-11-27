@@ -47,7 +47,7 @@ const appName = testBuild ? 'bizzi (test build)' : 'bizzi';
 const appDir = app.getAppPath();
 /** The bee icons (scripts/icons.ts); inside app.asar when packaged. */
 const assetsDir = join(appDir, 'assets');
-const appIcon = join(assetsDir, 'icon.png');
+const appIcon = join(assetsDir, testBuild ? 'icon-test.png' : 'icon.png');
 const dataDir = resolveDataDir(env, testBuild);
 const logFile = join(dataDir, 'logs', 'core.log');
 // Desktop log lines go to our stderr and into the core's log file (its stderr channel).
@@ -248,7 +248,8 @@ async function onReady(): Promise<void> {
     ...(isMac ? {} : { iconPath: appIcon }),
   });
   // Packaged builds carry the icon in the bundle; in dev the Dock would show Electron's.
-  if (isMac && !app.isPackaged) app.dock?.setIcon(appIcon);
+  // A packaged test build would otherwise pass for the installed app.
+  if (isMac && (!app.isPackaged || testBuild)) app.dock?.setIcon(appIcon);
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
       appMenu(process.platform, {
@@ -262,8 +263,10 @@ async function onReady(): Promise<void> {
       }),
     ),
   );
-  tray = new Tray(trayIcon(process.platform, assetsDir));
+  tray = new Tray(trayIcon(process.platform, assetsDir, testBuild !== null));
   tray.setToolTip(appName);
+  // The macOS menu bar icon is a monochrome template, so a test build says so in text.
+  if (isMac && testBuild) tray.setTitle('test');
   if (!isMac) tray.on('click', () => showWindow());
   updateTray(manager.status);
 
@@ -415,8 +418,11 @@ function createWindow(): void {
   });
   win.once('ready-to-show', () => {
     if (!win) return;
+    // A test build opens behind whatever you're working in rather than taking focus; the Dock or
+    // the tray brings it forward.
+    if (testBuild) win.showInactive();
     if (saved?.maximized) win.maximize();
-    win.show();
+    if (!testBuild) win.show();
     if (saved?.fullScreen) win.setFullScreen(true);
   });
   win.on('resize', saveWindowStateSoon);
