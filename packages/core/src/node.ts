@@ -44,6 +44,7 @@ import { Forks } from './fork.ts';
 import { HubPort } from './hub-port.ts';
 import { DEFAULT_WAIT_MS, MAX_READ_TOKENS, MAX_WAIT_MS, OrchestrationSettingsStore, Orchestrator, WAIT_UNTIL } from './orchestration.ts';
 import { Pipelines, pipelinesExtension } from './pipelines.ts';
+import { KeepAwake, parseKeepAwakeSettings, readKeepAwakeSettings, type PowerBackend } from './power.ts';
 import { Restarts } from './restart.ts';
 import { asParams, oneOf, optBool, optInt, optString, reqBase64, reqInt, reqString, type Params } from './params.ts';
 import { Sessions, composePrepareStart, validateCommand, type AgentEnvProvider, type PrepareStart } from './sessions.ts';
@@ -110,6 +111,13 @@ export interface NodeOptions {
    * one taken from the message (titles.ts). `agentEnv` gives an agent's stored secrets (API keys).
    */
   suggestTitle?: (text: string, ctx: { agentEnv: AgentEnvProvider }) => Promise<string | undefined>;
+  /**
+   * Holds the machine awake while agents work (spec §8.1; `platformPowerBackend()` from power.ts). Absent:
+   * the keep-awake setting is stored but shows as unavailable. `bizzi serve` passes the OS's backend.
+   */
+  power?: PowerBackend;
+  /** Keep-awake linger after the last work ends (default 90 s; tests shorten it). */
+  keepAwakeLingerMs?: number;
 }
 
 /** Protocol methods the core doesn't implement; they answer `unsupported` unless an extension claims them. */
@@ -232,6 +240,8 @@ const DISPOSE_TIMEOUT_MS = 10_000;
 
 /** Meta key for the machine's user-owned fields (tags, description), which survive restarts. */
 const MACHINE_USER_META = 'machineUser';
+/** Meta key for the keep-awake setting (spec §8.1). */
+const KEEP_AWAKE_META = 'keepAwake';
 
 export interface Subscription {
   lastSeq: number;
@@ -258,6 +268,8 @@ export interface BizziNode {
   readonly hub: HubPort;
   /** Forks onto other machines (topology.md §6). */
   readonly forks: Forks;
+  /** Keeping the machine awake while agents work (spec §8.1). */
+  readonly keepAwake: KeepAwake;
   /** Typed in-process call. Throws BizziError. */
   call<M extends DispatchMethod>(method: M, params: MethodParams<M>): Promise<MethodResult<M>>;
   /** Untyped entry point used by transports: validates `method` and `params`. */
@@ -290,11 +302,25 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     const machine = buildMachineInfo({ id: machineId, name: opts.machineName, version: opts.version });
     applyMachineUserFields(machine, readMachineUserFields(store.getMeta(MACHINE_USER_META)));
     for (const ext of opts.extensions ?? []) ext.describeMachine?.(machine);
-    const machineJson = JSON.stringify(machine);
-    if (store.getMeta('machineInfo') !== machineJson) {
-      store.setMeta('machineInfo', machineJson);
-      bus.append(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine } });
-    }
+    const publishMachine = (): void => {
+      const machineJson = JSON.stringify(machine);
+      if (store.getMeta('machineInfo') !== machineJson) {
+        store.setMeta('machineInfo', machineJson);
+        bus.append(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...machine } } });
+      }
+    };
+    const keepAwake = new KeepAwake({
+      ...(opts.power ? { backend: opts.power } : {}),
+      settings: readKeepAwakeSettings(store.getMeta(KEEP_AWAKE_META)),
+      logger: logger.child({ component: 'power' }),
+      ...(opts.keepAwakeLingerMs !== undefined ? { lingerMs: opts.keepAwakeLingerMs } : {}),
+      onChange: (state) => {
+        machine.keepAwake = state;
+        if (store.isOpen) publishMachine();
+      },
+    });
+    machine.keepAwake = keepAwake.state();
+    publishMachine();
 
     const envProviders = new Map<NodeExtension, AgentEnvProvider>();
     const agentEnv: AgentEnvProvider = async (agent) => {
@@ -324,6 +350,24 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
       ...(opts.suggestTitle ? { suggestTitle: (text: string) => opts.suggestTitle!(text, { agentEnv }) } : {}),
     });
     sessions.load();
+    // Count the work that may hold the machine awake on every session change (coalesced per tick).
+    let countQueued = false;
+    const countWork = (): void => {
+      countQueued = false;
+      let turns = 0;
+      let background = 0;
+      for (const s of sessions.list()) {
+        if (s.status === 'running') turns++;
+        else if (s.background?.length) background++;
+      }
+      keepAwake.update({ turns, background });
+    };
+    bus.on(GLOBAL_CHANNEL, (ev) => {
+      if (countQueued || (ev.type !== 'session.created' && ev.type !== 'session.updated' && ev.type !== 'session.removed')) return;
+      countQueued = true;
+      queueMicrotask(countWork);
+    });
+    countWork();
     const hub = new HubPort();
     const orchestration = new Orchestrator({ sessions, workspaces, registry, settings, bus, logger, store, machine, hub });
     const restarts = new Restarts({ sessions, registry, bus, logger });
@@ -332,6 +376,7 @@ export async function createNode(opts: NodeOptions): Promise<BizziNode> {
     const browser = new FsBrowser({ ...opts.browse, workspaces: () => workspaces.list() });
     node = new Node(opts.version, machine, logger, store, bus, registry, workspaces, sessions, orchestration, restarts, browser);
     node.hub = hub;
+    node.keepAwake = keepAwake;
     node.forks = new Forks({ sessions, workspaces, registry, bus, hub, machine, dataDir: opts.dataDir, logger });
     const usage = new UsageTracker({ dbPath: store.path, bus, machineId, logger: logger.child({ component: 'usage' }) });
     node.usage = usage;
@@ -401,6 +446,7 @@ class Node implements BizziNode {
   readonly restarts: Restarts;
   hub!: HubPort;
   forks!: Forks;
+  keepAwake!: KeepAwake;
   readonly #browser: FsBrowser;
   readonly #store: Store;
   readonly #handlers: Record<DispatchMethod, Handler>;
@@ -485,6 +531,7 @@ class Node implements BizziNode {
             this.logger.log('warn', 'extension stop failed', { err });
           }
         }
+        this.keepAwake?.close();
         this.orchestration.close();
         this.restarts.close();
         await this.sessions.close();
@@ -561,14 +608,20 @@ class Node implements BizziNode {
         if (description) next.description = description;
         const color = p.color === undefined ? cur.color : parseLabelColor(p.color);
         if (color) next.color = color;
+        const keepAwake = p.keepAwake === undefined ? undefined : parseKeepAwakeSettings(p.keepAwake, this.keepAwake.settings);
         this.#store.setMeta(MACHINE_USER_META, JSON.stringify(next));
         applyMachineUserFields(this.machine, next);
+        if (keepAwake) {
+          this.#store.setMeta(KEEP_AWAKE_META, JSON.stringify(keepAwake));
+          // Publishes machine.updated (with the user fields above) when the state changes.
+          this.keepAwake.setSettings(keepAwake);
+        }
         const machineJson = JSON.stringify(this.machine);
         if (this.#store.getMeta('machineInfo') !== machineJson) {
           this.#store.setMeta('machineInfo', machineJson);
           this.bus.append(GLOBAL_CHANNEL, { type: 'machine.updated', data: { machine: { ...this.machine } } });
         }
-        return { machine: { ...this.machine, tags: [...this.machine.tags] } };
+        return { machine: { ...this.machine, tags: [...this.machine.tags], ...(this.machine.keepAwake ? { keepAwake: { ...this.machine.keepAwake } } : {}) } };
       },
       'agents.list': async (p) => ({ agents: await this.registry.list(optBool(p, 'refresh') ?? false) }),
       'agents.models': async (p) => {

@@ -15,6 +15,8 @@ export const MACHINE: MachineInfo = {
   online: true,
   roles: ['node'],
   bizziVersion: '0.0.1-mock',
+  // Held awake on the power adapter while a turn runs (spec §8.1).
+  keepAwake: { supported: true, settings: { mode: 'turns', onBattery: false }, active: true, since: new Date(Date.now() - 4 * 60_000).toISOString(), turns: 1, background: 0, power: 'ac' },
 };
 
 /** server-a: offline in the demo (its data comes from the hub's replica). */
@@ -31,6 +33,8 @@ export const SERVER: MachineInfo = {
   online: false,
   roles: ['node'],
   bizziVersion: '0.0.1',
+  // No keep-awake backend on Linux yet: the setting shows as unavailable.
+  keepAwake: { supported: false, settings: { mode: 'turns', onBattery: false }, active: false, turns: 0, background: 0 },
 };
 
 /** mac-mini: an always-on second Mac (online), where Codex runs a version newer than bizzi tested. */
@@ -48,6 +52,13 @@ export const MINI: MachineInfo = {
   online: true,
   roles: ['node'],
   bizziVersion: '0.0.1-mock',
+  keepAwake: { supported: true, settings: { mode: 'turns_and_background', onBattery: true }, active: true, since: new Date(Date.now() - 25 * 60_000).toISOString(), turns: 0, background: 1, power: 'ac' },
+};
+
+/** What each demo machine is doing, for keep-awake in mock `machine.set` (mac-mini watches a CI run). */
+export const MOCK_KEEP_AWAKE_WORK: Record<string, { turns: number; background: number }> = {
+  m_laptop: { turns: 1, background: 0 },
+  m_mini: { turns: 0, background: 1 },
 };
 
 export const OTHER_MACHINES: MachineInfo[] = [SERVER, MINI];

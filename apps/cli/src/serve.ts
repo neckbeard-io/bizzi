@@ -4,7 +4,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import { createJsonLogger, createNode, isLogLevel, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
+import { createJsonLogger, createNode, isLogLevel, platformPowerBackend, startServer, type BizziServer, type NodeExtension } from '@bizzi/core';
 import type { AgentAdapter, ServeReady } from '@bizzi/protocol';
 import { createContainersExtension } from '@bizzi/containers';
 import { createRoutingExtension, routerOptionsFromEnv, type RouterOptions } from '@bizzi/routing';
@@ -136,6 +136,7 @@ export async function serve(argv: string[], version: string): Promise<void> {
   // Untitled sessions are named from their first message; a configured utility model refines that.
   const suggestTitle = await loadTitleSuggester(dataDir, logger);
 
+  const power = platformPowerBackend();
   const node = await createNode({
     dataDir,
     machineName: values.name,
@@ -147,6 +148,8 @@ export async function serve(argv: string[], version: string): Promise<void> {
     // Turns cut off by the last shutdown continue on their own (updates.md §7); 0 turns that off.
     resumeInterrupted: process.env.BIZZI_RESUME_INTERRUPTED !== '0',
     ...(suggestTitle ? { suggestTitle } : {}),
+    // Holds this machine awake while its agents work, per the machine's keep-awake setting (spec §8.1).
+    ...(power ? { power } : {}),
   });
   knowledge?.bindMachine(() => node.machine);
   let server: BizziServer;

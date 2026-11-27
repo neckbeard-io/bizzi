@@ -47,7 +47,7 @@
       }
     },
     "machine.set": {
-      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list, `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it). Emits `machine.updated`.",
+      "description": "Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list, `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it), `keepAwake` changes the given keep-awake fields (spec §8.1). Emits `machine.updated`.",
       "params": {
         "$ref": "#/$defs/params:machine.set"
       },
@@ -3064,6 +3064,80 @@
         "title"
       ]
     },
+    "KeepAwakeMode": {
+      "description": "What keeps the machine awake: `off`; `turns`: a session is running a turn or a terminal session is busy; `turns_and_background`: also while a session has background work the agent is watching (`background.updated`).",
+      "type": "string",
+      "enum": [
+        "off",
+        "turns",
+        "turns_and_background"
+      ]
+    },
+    "KeepAwakeSettings": {
+      "description": "Per-machine keep-awake setting, stored on the node and set with `machine.set`.",
+      "type": "object",
+      "properties": {
+        "mode": {
+          "$ref": "#/$defs/KeepAwakeMode"
+        },
+        "onBattery": {
+          "description": "Also hold the machine awake on battery; false = only while on a power adapter.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "mode",
+        "onBattery"
+      ]
+    },
+    "KeepAwakeState": {
+      "description": "The node's keep-awake setting and hold (`MachineInfo.keepAwake`). Only idle system sleep is held, never the display.",
+      "type": "object",
+      "properties": {
+        "supported": {
+          "description": "This OS has a backend. False: the setting is stored but does nothing here (shown as unavailable).",
+          "type": "boolean"
+        },
+        "settings": {
+          "$ref": "#/$defs/KeepAwakeSettings"
+        },
+        "active": {
+          "description": "The machine is being held awake now.",
+          "type": "boolean"
+        },
+        "since": {
+          "description": "When the current hold started.",
+          "type": "string"
+        },
+        "turns": {
+          "description": "Sessions running a turn (or busy terminals) that count under the setting.",
+          "type": "number"
+        },
+        "background": {
+          "description": "Sessions with background work that count under the setting (mode `turns_and_background`).",
+          "type": "number"
+        },
+        "lingerUntil": {
+          "description": "Nothing counts any more, but the hold lingers until then (a follow-up may be on its way).",
+          "type": "string"
+        },
+        "power": {
+          "description": "Last power source seen; absent when it isn't checked (unsupported OS, or nothing to hold).",
+          "$ref": "#/$defs/PowerSource"
+        },
+        "pausedOnBattery": {
+          "description": "There is work to hold for, but the machine is on battery and `onBattery` is off.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "supported",
+        "settings",
+        "active",
+        "turns",
+        "background"
+      ]
+    },
     "KnowledgeInboxCard": {
       "type": "object",
       "properties": {
@@ -3561,6 +3635,10 @@
             "model",
             "maxOptions"
           ]
+        },
+        "keepAwake": {
+          "description": "Keeping this machine from idle-sleeping while agents work (spec §8.1): the node's setting and what it is holding now. Absent from nodes that predate it.",
+          "$ref": "#/$defs/KeepAwakeState"
         }
       },
       "required": [
@@ -4140,6 +4218,14 @@
       "required": [
         "text",
         "status"
+      ]
+    },
+    "PowerSource": {
+      "type": "string",
+      "enum": [
+        "ac",
+        "battery",
+        "unknown"
       ]
     },
     "PushActionRequest": {
@@ -9145,6 +9231,18 @@
                   "const": ""
                 }
               ]
+            },
+            "keepAwake": {
+              "type": "object",
+              "properties": {
+                "mode": {
+                  "$ref": "#/$defs/KeepAwakeMode"
+                },
+                "onBattery": {
+                  "description": "Also hold the machine awake on battery; false = only while on a power adapter.",
+                  "type": "boolean"
+                }
+              }
             }
           }
         }

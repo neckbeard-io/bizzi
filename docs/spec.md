@@ -339,6 +339,17 @@ Exact commands get verified per release in CI; recipes are data, so fixing one d
 - Offline: the desktop app keeps working against its own node. On reconnect the outbox uploads events, and knowledge replicates.
 - Missed events replay from the last `seq`; push notifications cover the gap (approvals, questions, turn done).
 
+### 8.1 Keeping the machine awake
+
+The node holds its own machine awake while its agents work, so a laptop doesn't fall asleep mid-turn and drop off the hub. It runs in the core (`packages/core/src/power.ts`), not the desktop shell, so headless `bizzi serve` does it too.
+
+- **Setting, per machine, stored on the node** (`machine.set { keepAwake }`, shown on the machine page): *when*: `off`, `turns` (a session is running a turn or a terminal session is busy; the default), or `turns_and_background` (also while a session has background work the agent watches, `background.updated`); and *power*: only on a power adapter (the default) or also on battery.
+- **Linger:** after the last work ends the hold stays for 90 s, since a follow-up from the phone often comes a minute later. Turning the setting off or narrowing it releases at once; so does switching to battery when it's adapter-only.
+- **Power source:** read when the work changes (a reading up to 10 s old is reused) and polled every 60 s while it matters, so unplugging releases the hold and plugging back in takes it again.
+- **Status:** `MachineInfo.keepAwake` (`active`, `since`, counts of the turns and background sessions that count, `lingerUntil`, `power`, `pausedOnBattery`), republished with `machine.updated`. The machine page and its sidebar header show it, and `bizzi status` prints it.
+- **Only idle system sleep is held, never the display.** On macOS a closed lid on battery still sleeps the Mac (unless an external display is attached); overriding that needs root (`pmset disablesleep`), which bizzi doesn't do.
+- **Backends are child processes tied to the core's pid,** with no native add-ons, so a crashed core never leaves the machine held. macOS: `caffeinate -i -w <pid>` (visible in `pmset -g assertions` as "caffeinate command-line tool") and `pmset -g ps`. **Linux and Windows are not done yet** ([landscape.md](landscape.md) §4.8); there `supported` is false and the setting shows as unavailable.
+
 ## 9. Knowledge & memory (summary; details in [knowledge.md](knowledge.md))
 
 - **Rules** (always injected) and **memories** (ranked digest + search), one scope model: global > machine > project > workspace > session, optionally limited to certain agents.

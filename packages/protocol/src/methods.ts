@@ -30,6 +30,7 @@ import type {
   KnowledgeRecord,
   KnowledgeScope,
   KnowledgeScopeLevel,
+  KeepAwakeSettings,
   KnowledgeSettings,
   LabelColor,
   LoginMode,
@@ -117,11 +118,11 @@ export interface Methods {
   'machines.list': { params: Empty; result: { machines: MachineInfo[] } };
   /**
    * Set a machine's user-owned fields (knowledge.md §9.1–9.2, spec §11.1): `tags` replaces the list,
-   * `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it).
-   * Emits `machine.updated`.
+   * `description` replaces the text (`''` clears it), `color` sets the identity color (`''` clears it),
+   * `keepAwake` changes the given keep-awake fields (spec §8.1). Emits `machine.updated`.
    */
   'machine.set': {
-    params: MachineTarget & { tags?: string[]; description?: string; color?: LabelColor | '' };
+    params: MachineTarget & { tags?: string[]; description?: string; color?: LabelColor | ''; keepAwake?: Partial<KeepAwakeSettings> };
     result: { machine: MachineInfo };
   };
   'agents.list': { params: MachineTarget & { refresh?: boolean }; result: { agents: AgentListing[] } };

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { connectionKey, defaultUrl, isMockQuery, normalizeUrl, resolveInitialTarget, staleDesktopKeys } from '../src/lib/connection.ts';
-import { contextUse, formatCost, formatDuration, formatRelative, formatTokens, joinPath, parentPath, tail, usageSummary } from '../src/lib/format.ts';
+import { contextUse, formatCost, formatDuration, formatRelative, formatTokens, joinPath, keepAwakeSummary, parentPath, tail, usageSummary } from '../src/lib/format.ts';
 import { escapeHtml, renderMarkdown, safeUrl } from '../src/lib/markdown.ts';
 import { parseHash, restorableHash, routeHref } from '../src/lib/router.ts';
 import type { Route } from '../src/lib/router.ts';
@@ -100,4 +100,15 @@ test('the desktop core keeps one storage key across restarts, whatever port it g
     ]),
     ['bizzi.cache.node:ws://127.0.0.1:56674/ws', 'bizzi.route.node:ws://127.0.0.1:56917/ws', 'bizzi.machine.node:ws://localhost:7777/ws'],
   );
+});
+
+test('keepAwakeSummary says why the machine is held awake', () => {
+  const base = { supported: true, settings: { mode: 'turns' as const, onBattery: false }, active: false, turns: 0, background: 0 };
+  assert.equal(keepAwakeSummary(undefined), undefined);
+  assert.equal(keepAwakeSummary(base), undefined);
+  assert.equal(keepAwakeSummary({ ...base, supported: false, active: true, turns: 1 }), undefined);
+  assert.equal(keepAwakeSummary({ ...base, active: true, turns: 1 }), 'Keeping awake: 1 turn running');
+  assert.equal(keepAwakeSummary({ ...base, active: true, turns: 2, background: 1 }), 'Keeping awake: 2 turns running, 1 session with background work');
+  assert.equal(keepAwakeSummary({ ...base, active: true, lingerUntil: '2026-11-27T00:00:00Z' }), 'Keeping awake a little longer after the last work ended');
+  assert.equal(keepAwakeSummary({ ...base, turns: 1, pausedOnBattery: true }), 'Not keeping awake on battery (1 turn running)');
 });

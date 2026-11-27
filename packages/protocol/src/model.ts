@@ -43,6 +43,48 @@ export interface MachineInfo {
    * on its network). A hub without one of its own borrows it with `route.score`.
    */
   routing?: { model: string; maxOptions: number };
+  /**
+   * Keeping this machine from idle-sleeping while agents work (spec §8.1): the node's setting and
+   * what it is holding now. Absent from nodes that predate it.
+   */
+  keepAwake?: KeepAwakeState;
+}
+
+/**
+ * What keeps the machine awake: `off`; `turns`: a session is running a turn or a terminal session is busy;
+ * `turns_and_background`: also while a session has background work the agent is watching (`background.updated`).
+ */
+export type KeepAwakeMode = 'off' | 'turns' | 'turns_and_background';
+export const KEEP_AWAKE_MODES: readonly KeepAwakeMode[] = ['off', 'turns', 'turns_and_background'];
+
+/** Per-machine keep-awake setting, stored on the node and set with `machine.set`. */
+export interface KeepAwakeSettings {
+  mode: KeepAwakeMode;
+  /** Also hold the machine awake on battery; false = only while on a power adapter. */
+  onBattery: boolean;
+}
+
+export type PowerSource = 'ac' | 'battery' | 'unknown';
+
+/** The node's keep-awake setting and hold (`MachineInfo.keepAwake`). Only idle system sleep is held, never the display. */
+export interface KeepAwakeState {
+  /** This OS has a backend. False: the setting is stored but does nothing here (shown as unavailable). */
+  supported: boolean;
+  settings: KeepAwakeSettings;
+  /** The machine is being held awake now. */
+  active: boolean;
+  /** When the current hold started. */
+  since?: string;
+  /** Sessions running a turn (or busy terminals) that count under the setting. */
+  turns: number;
+  /** Sessions with background work that count under the setting (mode `turns_and_background`). */
+  background: number;
+  /** Nothing counts any more, but the hold lingers until then (a follow-up may be on its way). */
+  lingerUntil?: string;
+  /** Last power source seen; absent when it isn't checked (unsupported OS, or nothing to hold). */
+  power?: PowerSource;
+  /** There is work to hold for, but the machine is on battery and `onBattery` is off. */
+  pausedOnBattery?: boolean;
 }
 
 /** A machine tag: lowercase letters, digits, `.`, `_` and `-`, starting with a letter or digit, at most 64 characters. */

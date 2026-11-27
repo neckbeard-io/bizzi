@@ -72,9 +72,20 @@ export function formatStatus(r: StatusReport, url: string): string {
     `machine  ${m.name} (${m.id})`,
     `         ${m.os}/${m.arch} host=${m.hostname} headful=${m.headful} bizzi=${m.bizziVersion}`,
     `         ${url}`,
-    '',
-    `workspaces (${r.workspaces.length})`,
   ];
+  const k = m.keepAwake;
+  if (k) {
+    const setting = `${k.settings.mode}${k.settings.mode === 'off' ? '' : k.settings.onBattery ? ', also on battery' : ', on power adapter only'}`;
+    const now = !k.supported
+      ? 'unavailable on this OS'
+      : k.active
+        ? `holding (turns=${k.turns} background=${k.background}${k.lingerUntil ? `, lingering until ${k.lingerUntil}` : ''})`
+        : k.pausedOnBattery
+          ? 'paused on battery'
+          : 'not holding';
+    lines.push(`         keep awake: ${setting}; ${now}`);
+  }
+  lines.push('', `workspaces (${r.workspaces.length})`);
   for (const w of r.workspaces) lines.push(`  ${w.id}  ${w.name.padEnd(20)} ${w.kind.padEnd(4)} ${w.path}`);
   lines.push('', `sessions (${r.sessions.length})`);
   const wsName = new Map(r.workspaces.map((w) => [w.id, w.name]));
