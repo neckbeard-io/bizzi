@@ -59,7 +59,7 @@ scripts/                                  dev-desktop, smoke tests (smoke:hub, s
 
 ## Branches and releases
 
-- **Branch from `dev` and open the PR against `dev`.** `dev` reaches `main` through a promotion PR; never merge feature branches into `main`.
+- **Every change goes on a branch off `dev` and through a PR against `dev`,** however small: code, docs, chores and agent-guidance edits alike. `dev` reaches `main` through a promotion PR; never merge feature branches into `main`.
 - **Never push to `dev` or `main` directly.** A push to `dev` publishes a `vX.Y.Z-dev.N` pre-release that every Dev-channel install offers to update to, and CI runs on the PR, not on `dev`.
 - **A merge into `main` publishes the stable `vX.Y.Z`** from the closed `## vX.Y.Z — <date>` section of `CHANGELOG.md`; the release fails without it. Docs-only changes publish nothing.
 - **Never bump `version` in a `package.json`.** Builds stamp the version in.
