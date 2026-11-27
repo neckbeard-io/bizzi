@@ -7,11 +7,12 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { createNode, type BizziNode } from '@bizzi/core';
 import { FakeAdapter, defaultScript, type FakeScript } from '@bizzi/core/testing';
 import type { McpServerSpec, SessionInfo } from '@bizzi/protocol';
-import { createOrchestrationExtension, MCP_SERVER_NAME, type OrchestrationExtension } from '../src/index.ts';
+import { createAgentsMcpServer, createOrchestrationExtension, MCP_SERVER_NAME, type OrchestrationExtension } from '../src/index.ts';
 
 function tempDir(): { path: string; cleanup: () => void } {
   const path = mkdtempSync(join(os.tmpdir(), 'bizzi-orch-'));
@@ -321,4 +322,34 @@ test('bizzi-agents: session_answer with parentAnswersApprovals (spec §12.5)', a
   assert.equal(late.isError, undefined);
   assert.equal(late.structuredContent?.answered, false);
   assert.match(textOf(late), /Already answered by parent session/);
+});
+
+test('session_wait keeps a long wait alive with progress, and returns early when the client has no progress token', async (t) => {
+  const h = await harness(t);
+  const { workspace } = await h.node.call('workspace.create', { path: h.repo });
+  const { session: parent } = await h.node.call('session.create', { workspaceId: workspace.id, agent: 'claude' });
+  const server = createAgentsMcpServer(h.node, parent.id, { progressEveryMs: 30, silentWaitMaxMs: 150 });
+  const [ct, st] = InMemoryTransport.createLinkedPair();
+  await server.connect(st);
+  const client = new Client({ name: 'test', version: '0' });
+  await client.connect(ct);
+  t.after(() => client.close());
+  const { session: helper } = await h.node.orchestration.startHelper(parent.id, { agent: 'claude', prompt: 'hi' });
+  await h.node.orchestration.wait(parent.id, helper.id, 'idle', 5000);
+
+  // With a progress token: keep-alives until the timeout; the helper never ends, so reached is false.
+  let beats = 0;
+  const kept = (await client.callTool({ name: 'session_wait', arguments: { sessionId: helper.id, until: 'ended', timeout: 0.3 } }, undefined, {
+    onprogress: () => {
+      beats += 1;
+    },
+  })) as CallToolResult & { structuredContent?: Record<string, unknown> };
+  assert.equal(kept.structuredContent?.reached, false);
+  assert.ok(beats >= 3, `expected keep-alives, got ${beats}`);
+
+  // Without one: a long wait comes back after silentWaitMaxMs instead of outliving the client's patience.
+  const t0 = Date.now();
+  const early = await call(client, 'session_wait', { sessionId: helper.id, until: 'ended', timeout: 30 });
+  assert.equal(early.structuredContent?.reached, false);
+  assert.ok(Date.now() - t0 < 5000, 'returned early');
 });

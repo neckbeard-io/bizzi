@@ -8,6 +8,11 @@ import type { BizziNode } from '@bizzi/core';
 import { DEFAULT_READ_TOKENS, DEFAULT_WAIT_MS, MAX_READ_TOKENS, MAX_WAIT_MS, WAIT_UNTIL, type WaitUntil } from '@bizzi/core';
 import { AGENT_KINDS, BizziError, type AgentKind, type SessionInfo } from '@bizzi/protocol';
 
+/** Longest session_wait without a progress token: under the 300 s a silent MCP call may last in Claude Code. */
+export const SILENT_WAIT_MAX_MS = 240_000;
+/** Keep-alive interval for session_wait when the client sent a progress token. */
+export const PROGRESS_EVERY_MS = 30_000;
+
 export const MCP_SERVER_NAME = 'bizzi-agents';
 export const MCP_SERVER_VERSION = '0.0.1';
 
@@ -62,7 +67,16 @@ const agentSchema = z.enum(AGENT_KINDS as [AgentKind, ...AgentKind[]]);
 const sessionIdSchema = z.string().min(1).describe('A helper id returned by session_start.');
 
 /** The MCP server for one calling session. Stateless: build one per HTTP request. */
-export function createAgentsMcpServer(node: BizziNode, callerId: string): McpServer {
+export interface AgentsMcpOptions {
+  /** session_wait keep-alive interval when the client sent a progress token (default PROGRESS_EVERY_MS). */
+  progressEveryMs?: number;
+  /** Longest session_wait without a progress token (default SILENT_WAIT_MAX_MS). */
+  silentWaitMaxMs?: number;
+}
+
+export function createAgentsMcpServer(node: BizziNode, callerId: string, opts: AgentsMcpOptions = {}): McpServer {
+  const progressEveryMs = opts.progressEveryMs ?? PROGRESS_EVERY_MS;
+  const silentWaitMaxMs = opts.silentWaitMaxMs ?? SILENT_WAIT_MAX_MS;
   const orch = node.orchestration;
   const server = new McpServer(
     { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
@@ -181,7 +195,8 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
         '(finished, or waiting on the user); "waiting" = it needs the user (approval, question, budget); "ended". ' +
         'When you may answer its approvals (parentAnswersApprovals), "done" also returns for a new one you may answer, ' +
         'and `pending` lists them for session_answer. ' +
-        `On timeout (default ${DEFAULT_WAIT_MS / 1000}s) reached is false; call again.`,
+        `On timeout (default ${DEFAULT_WAIT_MS / 1000}s) reached is false; call again. Long waits send progress ` +
+        `keep-alives, or return after ${SILENT_WAIT_MAX_MS / 1000}s when your client can't receive them.`,
       inputSchema: {
         sessionId: sessionIdSchema,
         until: z.enum(WAIT_UNTIL as [WaitUntil, ...WaitUntil[]]).optional().describe('Default "done".'),
@@ -190,8 +205,27 @@ export function createAgentsMcpServer(node: BizziNode, callerId: string): McpSer
     },
     async (args, extra) => {
       try {
-        const ms = args.timeout !== undefined ? Math.round(args.timeout * 1000) : DEFAULT_WAIT_MS;
-        const r = await orch.wait(callerId, args.sessionId, args.until ?? 'done', ms, extra.signal);
+        let ms = args.timeout !== undefined ? Math.round(args.timeout * 1000) : DEFAULT_WAIT_MS;
+        // MCP clients abort a call that stays silent too long (Claude Code: 300 s). With a progress token we
+        // send a keep-alive every PROGRESS_EVERY_MS; without one, a long wait returns early (reached: false).
+        const token = extra._meta?.progressToken;
+        if (token === undefined) ms = Math.min(ms, silentWaitMaxMs);
+        let beats = 0;
+        const timer =
+          token === undefined
+            ? undefined
+            : setInterval(() => {
+                beats += 1;
+                extra
+                  .sendNotification({ method: 'notifications/progress', params: { progressToken: token, progress: beats, message: 'still waiting' } })
+                  .catch(() => {});
+              }, progressEveryMs);
+        let r;
+        try {
+          r = await orch.wait(callerId, args.sessionId, args.until ?? 'done', ms, extra.signal);
+        } finally {
+          if (timer) clearInterval(timer);
+        }
         const lines = [`${r.state}${r.reached ? '' : ' (not yet)'}: ${r.reason}`];
         for (const p of r.pending ?? []) {
           lines.push(`- ${p.type} ${p.id}: ${p.title} — you may ${p.parentMay.join(' or ')}${p.note ? ` (${p.note})` : ''}`);

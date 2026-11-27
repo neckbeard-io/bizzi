@@ -663,17 +663,21 @@ export class Orchestrator {
     });
     if (clamp.note) notes.push(clamp.note);
 
-    let workspace = base;
-    if (req.worktree !== undefined) {
-      if (typeof req.worktree !== 'string' || !req.worktree.trim()) throw new BizziError('bad_request', 'worktree must be a branch name');
-      workspace = await this.#d.workspaces.createWorktree({ workspaceId: workspace.id, branch: req.worktree.trim() });
+    if (req.worktree !== undefined && (typeof req.worktree !== 'string' || !req.worktree.trim())) {
+      throw new BizziError('bad_request', 'worktree must be a branch name');
     }
 
-    // Concurrency (spec §12.2): live helpers per parent and per machine.
+    // Concurrency (spec §12.2): live helpers per parent and per machine. Checked before the worktree is
+    // made, so a refused start leaves no worktree or workspace behind.
     const limit = this.#limitReached(parent.id, settings);
     if (limit && settings.onLimit === 'fail') throw new BizziError('conflict', `${limit}; stop a helper first`);
     const queued = Boolean(limit);
     if (limit) notes.push(`queued: ${limit}`);
+
+    let workspace = base;
+    if (req.worktree !== undefined) {
+      workspace = await this.#d.workspaces.createWorktree({ workspaceId: workspace.id, branch: req.worktree.trim() });
+    }
 
     const params: Parameters<Sessions['create']>[0] = { workspaceId: workspace.id, agent: req.agent, mode };
     if (req.model) params.model = req.model;

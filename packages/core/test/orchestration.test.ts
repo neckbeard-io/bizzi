@@ -187,6 +187,10 @@ test('guardrails: depth limit, per-parent and per-machine concurrency (fail and 
   assert.equal((await node.call('orchestration.settings.get', { workspaceId: workspace.id })).settings.maxDepth, DEFAULT_ORCHESTRATION_SETTINGS.maxDepth);
   const a = await orch.startHelper(root.id, { agent: 'claude', prompt: 'a' });
   await rejects(orch.startHelper(root.id, { agent: 'claude', prompt: 'b' }), 'conflict', /1 live helper\(s\) \(max 1\)/);
+  // A refused start makes no worktree (the limit is checked first).
+  const before = node.workspaces.list().length;
+  await rejects(orch.startHelper(root.id, { agent: 'claude', prompt: 'b', worktree: 'feat/refused' }), 'conflict', /1 live helper\(s\) \(max 1\)/);
+  assert.equal(node.workspaces.list().length, before);
 
   // Queue: starts once a slot frees.
   await node.call('orchestration.settings.set', { workspaceId: workspace.id, settings: { onLimit: 'queue' } });
