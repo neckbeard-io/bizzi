@@ -13,6 +13,7 @@ import {
   selectMachineWorkspaces,
   selectWorkspaceBreakdown,
   selectWorkspaceRow,
+  selectWorktreeUse,
   shallowEqual,
   workspaceRowEqual,
   workspaceTreeEqual,
@@ -20,7 +21,7 @@ import {
 import type { ContextView, SessionBreakdownLine, WorkspaceRowModel } from '@bizzi/client';
 import type { MachineInfo, SessionInfo } from '@bizzi/protocol';
 import { openAddWorkspace } from '../../app/addWorkspace.ts';
-import { contextMenuHandler } from '../../app/contextMenu.ts';
+import { contextMenuHandler, menuButtonHandler } from '../../app/contextMenu.ts';
 import { useBizzi, useStore } from '../../app/context.tsx';
 import { isMac, startDefaultSession } from '../../app/hotkeys.ts';
 import { reopenSessionFlow } from '../../app/sessionActions.ts';
@@ -35,19 +36,23 @@ import { HOTKEYS, hotkeyLabel } from '../../lib/hotkeys.ts';
 import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
 import { AGENT_LABEL, MARK_LABEL, MARK_SYMBOL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
-import { groupWorkspaces, readCollapsed } from '../../lib/sidebarTree.ts';
+import { MAX_NEST_INDENT, groupWorkspaces, layoutSessionTree, readCollapsed } from '../../lib/sidebarTree.ts';
 import type { WorkspaceGroup } from '../../lib/sidebarTree.ts';
 import { loadJson, saveJson } from '../../lib/storage.ts';
 import { machineMenu, sessionMenu, workspaceMenu } from '../menus.ts';
+import { removeWorkspaceFlow } from '../workspaces/WorkspaceDialogs.tsx';
 
 type Variant = 'desktop' | 'phone';
 
 const COLLAPSED_KEY = 'bizzi.sidebar.collapsed';
 const FOLDED_KEY = 'bizzi.sidebar.folded';
+const HELPERS_FOLDED_KEY = 'bizzi.sidebar.helpersFolded';
 
 /**
- * A file tree (spec §11.1): machines, their workspaces, and under each workspace its open sessions (helpers
- * under their parent), a folded "Ended (n)" group of closed sessions, and then its worktrees, with guide lines. Each session row shows its state, name and a
+ * A file tree (spec §11.1): machines, their workspaces, and under each workspace its open sessions, a folded
+ * "Ended (n)" group of closed sessions, and then, under a "Worktrees" heading, the worktrees with sessions you
+ * started there, with guide lines. Helpers sit under the session that started them, wherever they run (a
+ * worktree shows as a branch chip on the helper's row), and fold away under it. Each session row shows its state, name and a
  * context bar. Machines and workspaces fold and remember it on this device; a folded workspace summarizes
  * its sessions as marks, an urgent line and a hover breakdown. Each machine header opens the machine's page.
  *
@@ -79,6 +84,18 @@ export function MachineTree(props: {
       return next;
     });
   }, []);
+  // Parents whose helpers are folded away, per device (everything starts unfolded).
+  const [helpersFolded, setHelpersFolded] = useState<Record<string, boolean>>(() => readCollapsed(loadJson(HELPERS_FOLDED_KEY)));
+  const foldHelpers = useCallback((id: string) => {
+    setHelpersFolded((c) => {
+      const next = { ...c };
+      if (next[id]) delete next[id];
+      else next[id] = true;
+      saveJson(HELPERS_FOLDED_KEY, next);
+      return next;
+    });
+  }, []);
+  const nest = useMemo(() => ({ folded: helpersFolded, onFold: foldHelpers }), [helpersFolded, foldHelpers]);
   if (machines.length === 0) return <div className="px-2 text-xs text-muted">No machines yet</div>;
   return (
     <div className={cx('flex flex-col gap-1', props.className)}>
@@ -93,6 +110,7 @@ export function MachineTree(props: {
           activeSessionId={props.activeSessionId ?? null}
           folded={folded}
           onFold={fold}
+          nest={nest}
           active={props.activeMachineId === m.id}
         />
       ))}
@@ -109,6 +127,7 @@ function MachineSection(props: {
   activeSessionId: string | null;
   folded: Record<string, boolean>;
   onFold: (id: string) => void;
+  nest: HelperFolds;
   active: boolean;
 }): ReactNode {
   const { machine: m, variant, collapsed } = props;
@@ -219,6 +238,7 @@ function MachineSection(props: {
               activeSessionId={props.activeSessionId}
               folded={props.folded}
               onFold={props.onFold}
+              nest={props.nest}
             />
           ))}
           {rows.length === 0 ? <div data-fit-ignore className="py-1 pl-4 text-[11px] text-muted">No workspaces</div> : null}
@@ -236,15 +256,21 @@ function WorkspaceNode(props: {
   activeSessionId: string | null;
   folded: Record<string, boolean>;
   onFold: (id: string) => void;
+  nest: HelperFolds;
 }): ReactNode {
-  const { group, variant, online, folded, onFold } = props;
+  const { group, variant, online, folded, onFold, nest } = props;
   const w = group.workspace;
   const store = useStore();
   const row = useBizzi((s) => selectWorkspaceRow(s, w.id), workspaceRowEqual);
-  // Each session sits under its own workspace only: a helper running in a worktree isn't repeated under
-  // its parent's workspace (the hover breakdown still nests it there).
-  const lines = useBizzi((s) => selectWorkspaceBreakdown(s, w.id).filter((l) => s.sessions[l.sessionId]?.workspaceId === w.id), breakdownEqual);
+  // Sessions started here, each followed by its helpers wherever they run (a helper in a worktree sits under
+  // its parent, not under the worktree).
+  const lines = useBizzi((s) => selectWorkspaceBreakdown(s, w.id), breakdownEqual);
   const ended = useBizzi((s) => selectEndedSessions(s, w.id), shallowEqual);
+  // Worktrees get a node only for sessions started there; ones only helpers use are shown on the helpers' rows,
+  // and unused ones (leftovers) are summed up in one muted line.
+  const uses = useBizzi((s) => group.worktrees.map((t) => selectWorktreeUse(s, t.id)), shallowEqual);
+  const shownWorktrees = group.worktrees.filter((t, i) => uses[i] === 'sessions' || t.id === props.activeWorkspaceId);
+  const idleWorktrees = group.worktrees.filter((t, i) => uses[i] === 'empty' && t.id !== props.activeWorkspaceId);
   const git = useBizzi((s) => s.gitStatus[w.id] ?? null);
   const iconsFit = useMediaQuery('(min-width: 1024px)');
   const phone = variant === 'phone';
@@ -252,7 +278,7 @@ function WorkspaceNode(props: {
   const [sheet, setSheet] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ref = useRef<HTMLDivElement>(null);
-  const hasChildren = lines.length > 0 || ended.length > 0 || group.worktrees.length > 0;
+  const hasChildren = lines.length > 0 || ended.length > 0 || shownWorktrees.length > 0 || idleWorktrees.length > 0;
   const open = hasChildren && !folded[w.id];
   const longPress = useLongPress(() => {
     if (!open) setSheet(true);
@@ -379,13 +405,42 @@ function WorkspaceNode(props: {
         <div className={cx('flex flex-col border-l border-sidebar-border', phone ? 'ml-3.5 pl-1' : 'ml-[9px] pl-0.5')}>
           {lines.length > 0 ? (
             <div data-fit-ignore className="flex flex-col">
-              {lines.map((l) => (
-                <SessionLeaf key={l.sessionId} line={l} phone={phone} online={online} active={props.activeSessionId === l.sessionId} />
-              ))}
+              {layoutSessionTree(lines, nest.folded, props.activeSessionId).map((item) =>
+                item.kind === 'session' ? (
+                  <SessionLeaf
+                    key={item.line.sessionId}
+                    line={item.line}
+                    indent={item.indent}
+                    expandable={item.expandable}
+                    folded={item.folded}
+                    onFold={nest.onFold}
+                    phone={phone}
+                    online={online}
+                    active={props.activeSessionId === item.line.sessionId}
+                  />
+                ) : (
+                  <a
+                    key={`ended:${item.parentId}`}
+                    href={routeHref({ name: 'session', sessionId: item.parentId, tab: 'chat' })}
+                    className={cx('flex items-center rounded-md pr-2 text-[11px] text-muted hover:text-fg', phone ? 'min-h-9 active:bg-panel-2' : 'h-5 hover:bg-sidebar-accent/70')}
+                    style={{ paddingLeft: nestPadding(item.indent) + CARET_SLOT + (phone ? 24 : 20) }}
+                    title="Helpers of this session that have ended: open it to see them"
+                  >
+                    {item.n} helper{item.n === 1 ? '' : 's'} ended
+                  </a>
+                ),
+              )}
             </div>
           ) : null}
           {ended.length > 0 ? <EndedGroup sessions={ended} phone={phone} online={online} activeSessionId={props.activeSessionId} /> : null}
-          {group.worktrees.map((t) => (
+          {shownWorktrees.length > 0 || idleWorktrees.length > 0 ? (
+            // A heading of its own, so worktrees don't read as children of the session row above them.
+            <div data-fit-ignore className={cx('mt-2 flex items-center gap-1 pl-1.5 text-[10px] font-semibold tracking-wider text-muted uppercase', phone ? 'h-7' : 'h-5')}>
+              <Icon name="branch" size={10} />
+              Worktrees
+            </div>
+          ) : null}
+          {shownWorktrees.map((t) => (
             <WorkspaceNode
               key={t.id}
               group={{ workspace: t, worktrees: [] }}
@@ -395,8 +450,32 @@ function WorkspaceNode(props: {
               activeSessionId={props.activeSessionId}
               folded={folded}
               onFold={onFold}
+              nest={nest}
             />
           ))}
+          {idleWorktrees.length > 0 ? (
+            <button
+              type="button"
+              data-fit-ignore
+              className={cx('flex items-center gap-1 rounded-md pr-2 pl-1.5 text-left text-[11px] text-muted hover:text-fg', phone ? 'min-h-11 active:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
+              title={`Worktrees with no sessions: ${idleWorktrees.map((t) => t.branch ?? t.name).join(', ')}. Click to remove them.`}
+              onClick={menuButtonHandler(
+                () =>
+                  idleWorktrees.map((t) => ({
+                    label: `Remove ${t.branch ?? t.name}…`,
+                    icon: 'trash' as const,
+                    danger: true,
+                    disabled: !online,
+                    onSelect: async () => {
+                      await removeWorkspaceFlow(store, t);
+                    },
+                  })),
+                'Unused worktrees',
+              )}
+            >
+              {idleWorktrees.length} unused worktree{idleWorktrees.length === 1 ? '' : 's'}
+            </button>
+          ) : null}
         </div>
       ) : null}
       {hover ? <BreakdownPopover workspaceId={w.id} rect={hover} /> : null}
@@ -409,36 +488,92 @@ function WorkspaceNode(props: {
   );
 }
 
-/** One live session: its state, name and context bar; why it waits or failed, or what runs in the background, on a second line. */
-function SessionLeaf(props: { line: SessionBreakdownLine; phone: boolean; online: boolean; active: boolean }): ReactNode {
+/** Width of the caret column in front of every session row (empty unless the row has helpers). */
+const CARET_SLOT = 14;
+
+/** Left padding of a session row at `indent` (helpers one step in per level, capped). */
+function nestPadding(indent: number): number {
+  return 2 + Math.min(indent, MAX_NEST_INDENT) * 12;
+}
+
+interface HelperFolds {
+  folded: Readonly<Record<string, boolean>>;
+  onFold: (sessionId: string) => void;
+}
+
+/**
+ * One live session: a caret when it has live helpers (they fold away under it, and their count shows), its
+ * state, name, branch chip (a helper working in another worktree) and context bar; why it waits or failed, or
+ * what runs in the background, on a second line.
+ */
+function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expandable: boolean; folded: boolean; onFold: (id: string) => void; phone: boolean; online: boolean; active: boolean }): ReactNode {
   const { line: l, phone } = props;
   const store = useStore();
+  const elsewhere = l.elsewhere;
+  const dirty = useBizzi((s) => (elsewhere ? (s.gitStatus[elsewhere.workspaceId]?.dirty ?? false) : false));
+  // The helper's worktree has no node of its own to load its git status (for the dirty marker).
+  useEffect(() => {
+    if (!props.online || !elsewhere) return;
+    const load = (): void => void store.loadGitStatus(elsewhere.workspaceId).catch(() => {});
+    load();
+    const t = setInterval(load, 60_000);
+    return () => clearInterval(t);
+  }, [store, props.online, elsewhere?.workspaceId]);
   const ctx = contextView(l.contextUsage);
   const reason = l.reason && (l.state === 'waiting' || l.state === 'failed' || l.state === 'background') ? l.reason : null;
-  const title = `${AGENT_LABEL[l.agent]} · ${l.title} · ${MARK_LABEL[l.state]}${ctx.known ? ` · context ${ctx.label}` : ''}${reason ? `\n${reason}` : ''}`;
+  const helpers = l.helpers ?? 0;
+  const helpersLabel = `${helpers} live helper${helpers === 1 ? '' : 's'}${l.endedHelpers ? `, ${l.endedHelpers} ended` : ''}`;
+  const title = `${AGENT_LABEL[l.agent]} · ${l.title} · ${MARK_LABEL[l.state]}${elsewhere ? ` · worktree ${elsewhere.label}` : ''}${ctx.known ? ` · context ${ctx.label}` : ''}${helpers ? ` · ${helpersLabel}` : ''}${reason ? `\n${reason}` : ''}`;
   return (
-    <a
-      href={routeHref({ name: 'session', sessionId: l.sessionId, tab: 'chat' })}
+    <div
       onContextMenu={contextMenuHandler(() => {
         const s = store.getState().sessions[l.sessionId];
         return s ? sessionMenu(store, s, props.online) : [];
       }, l.title)}
       className={cx(
-        'block rounded-md pr-2',
+        'flex items-start rounded-md',
         props.active ? (phone ? 'bg-panel-2 font-medium text-fg' : 'bg-sidebar-accent font-medium text-sidebar-accent-foreground') : phone ? 'text-fg/85 active:bg-panel-2' : 'text-fg/85 hover:bg-sidebar-accent/70',
       )}
-      style={{ paddingLeft: 6 + l.depth * 12 }}
-      title={title}
-      aria-current={props.active ? 'page' : undefined}
+      style={{ paddingLeft: nestPadding(props.indent) }}
     >
-      <span className={cx('flex items-center gap-1.5', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]')}>
-        <AgentMark agent={l.agent} state={l.state} size={phone ? 18 : 14} title={`${AGENT_LABEL[l.agent]} · ${MARK_LABEL[l.state]}`} />
-        {l.mode === 'terminal' ? <Icon name="terminal" size={12} className="shrink-0 text-muted" /> : null}
-        <span className="min-w-0 flex-1 truncate">{l.title}</span>
-        {ctx.known ? <ContextBar view={ctx} /> : null}
-      </span>
-      {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
-    </a>
+      {props.expandable ? (
+        <button
+          type="button"
+          onClick={() => props.onFold(l.sessionId)}
+          className={cx('flex shrink-0 items-center justify-center rounded text-muted hover:text-fg', phone ? 'h-11' : 'h-7')}
+          style={{ width: CARET_SLOT }}
+          aria-expanded={!props.folded}
+          aria-label={`${props.folded ? 'Show' : 'Hide'} the helpers of ${l.title} (${helpersLabel})`}
+          title={`${props.folded ? 'Show' : 'Hide'} ${helpersLabel}`}
+        >
+          <Icon name={props.folded ? 'chevronRight' : 'chevronDown'} size={11} />
+        </button>
+      ) : (
+        <span className="shrink-0" style={{ width: CARET_SLOT }} />
+      )}
+      <a href={routeHref({ name: 'session', sessionId: l.sessionId, tab: 'chat' })} className="block min-w-0 flex-1 pr-2" title={title} aria-current={props.active ? 'page' : undefined}>
+        <span className={cx('flex items-center gap-1.5', phone ? 'min-h-11 text-sm' : 'h-7 text-[13px]')}>
+          <AgentMark agent={l.agent} state={l.state} size={phone ? 18 : 14} title={`${AGENT_LABEL[l.agent]} · ${MARK_LABEL[l.state]}`} />
+          {l.mode === 'terminal' ? <Icon name="terminal" size={12} className="shrink-0 text-muted" /> : null}
+          <span className={cx('flex-1 truncate', elsewhere ? 'min-w-[7rem]' : 'min-w-0')}>{l.title}</span>
+          {elsewhere ? (
+            // Gives way to the title first: the branch truncates down to its icon.
+            <span className="flex max-w-[30%] min-w-0 shrink-[8] items-center gap-0.5 font-mono text-[10px] font-normal text-muted" title={`Works in the worktree ${elsewhere.label}${dirty ? ' (uncommitted changes)' : ''}`}>
+              <Icon name="branch" size={10} className="shrink-0" />
+              <span className="truncate">{elsewhere.label}</span>
+              {dirty ? <span className="shrink-0">*</span> : null}
+            </span>
+          ) : null}
+          {helpers > 0 ? (
+            <span className="shrink-0 rounded-full bg-sidebar-border px-1 text-[10px] leading-4 font-normal text-muted tabular-nums" title={helpersLabel}>
+              {helpers}
+            </span>
+          ) : null}
+          {ctx.known ? <ContextBar view={ctx} /> : null}
+        </span>
+        {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
+      </a>
+    </div>
   );
 }
 
@@ -569,7 +704,7 @@ function Breakdown(props: { workspaceId: string; phone?: boolean }): ReactNode {
   return (
     <ul className="flex flex-col gap-1.5">
       {lines.map((l) => (
-        <li key={l.sessionId} style={{ paddingLeft: l.depth * 14 }}>
+        <li key={l.sessionId} style={{ paddingLeft: Math.min(l.depth, MAX_NEST_INDENT) * 14 }}>
           {props.phone ? (
             <a href={routeHref({ name: 'session', sessionId: l.sessionId, tab: 'chat' })} className="flex min-h-11 items-center gap-2" onClick={() => navigate({ name: 'session', sessionId: l.sessionId, tab: 'chat' })}>
               <BreakdownLine line={l} />

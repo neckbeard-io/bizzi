@@ -380,7 +380,7 @@ Theming: themes are semantic UI tokens, a terminal palette and layout tokens, pe
 
 ### 11.1 Sidebar: machines, workspaces, agent indicators
 
-A file tree: machines first, workspaces (usually a repo) under each, and under each workspace its open sessions, then a folded **Ended (n)** line listing its closed sessions (newest first; open one to read it, its ↻ button or right-click › Reopen session lets it take messages again), then its worktrees, with guide lines and a chevron to fold each level. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
+A file tree: machines first, workspaces (usually a repo) under each, and under each workspace its open sessions, then a folded **Ended (n)** line listing its closed sessions (newest first; open one to read it, its ↻ button or right-click › Reopen session lets it take messages again), then, under a small **Worktrees** heading, the worktrees that have sessions you started there, with guide lines and a chevron to fold each level. A worktree only helpers work in gets no node (its branch shows on the helpers' rows), and unused worktrees fold into one muted "n unused worktrees" line whose menu removes them. Two references to steer between: Herdr rolls every agent in a space into one dot, which can't tell one agent from six; a cmux workspace card shows the last message, every status line, every directory and branch, and a PR link, which is too busy to scan. Target: a quiet workspace is one line; a row grows only when it has something worth reading.
 
 ```
 ▾ This computer              6 · 1 waiting
@@ -395,7 +395,7 @@ A file tree: machines first, workspaces (usually a repo) under each, and under e
 ▸ vps (offline)              2 (cached)
 ```
 
-**Session rows (open workspace):** one per open session (helpers indented under their parent): the agent mark in its state, the name (a terminal icon for terminal sessions), and a context bar read like the session header's (fill = share of the usable window, amber from 80%, red near compaction; the number is the share of the whole window), from `SessionInfo.context`, which the node keeps from the latest `context.updated` so sessions nobody has open show it too. A waiting or failed session has its reason on a second line. The row opens the session and is highlighted while it's open; right-click gives the session menu. Session rows don't count toward the auto width.
+**Session rows (open workspace):** one per open session. Helpers sit directly under the session that started them, one indent per level (capped at three), wherever they run: a helper in another worktree carries a muted `⑂ branch` chip (with `*` when it has uncommitted changes) instead of being listed under that worktree. A helper only nests under a parent that is live and on the same machine; otherwise it is a top-level row of its own workspace. A parent with live helpers has a caret that folds them away (remembered per device; the open session unfolds its parents) and their count; an open nest ends with a muted "n helpers ended" line linking to the parent, since ended helpers aren't rows. Each row has the agent mark in its state, the name (a terminal icon for terminal sessions), and a context bar read like the session header's (fill = share of the usable window, amber from 80%, red near compaction; the number is the share of the whole window), from `SessionInfo.context`, which the node keeps from the latest `context.updated` so sessions nobody has open show it too. A waiting or failed session has its reason on a second line. The row opens the session and is highlighted while it's open; right-click gives the session menu. Session rows don't count toward the auto width.
 
 **Row 1 (always):** chevron, workspace icon, name, branch (`*` when dirty); when folded, the agent marks right-aligned. On hover (desktop) a **+** starts a session there with the default profile, like ⌘T. Folded state is stored per device; everything starts open.
 
@@ -525,7 +525,7 @@ Node-local MCP tools, injected next to the knowledge MCP server:
 
 **Boundary: the machine.** Without `machine`, `workspace` must be on the parent's node, so the node serves these tools without the hub and they work offline. Helpers on other machines go through the hub (§12.4).
 
-The helper records `spawned_by`. A `child` helper stops when its parent stops or ends; a `detached` one outlives it. Helpers appear nested under their parent in the session list and count inside the parent's mark in the sidebar (§11.1).
+The helper records `spawned_by`. A `child` helper stops when its parent stops or ends; a `detached` one outlives it. Helpers appear nested under their parent in the session list and the sidebar, even when they work in another worktree, and count inside the parent's mark (§11.1).
 
 ### 12.2 Guardrails
 

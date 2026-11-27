@@ -126,3 +126,23 @@ test('mock prefs.*: merged, validated, prefs.updated on the global channel', asy
   const last = events.filter((e) => e.type === 'prefs.updated').at(-1);
   assert.deepEqual(last?.type === 'prefs.updated' ? last.data.prefs : null, { themeId: 'nord', density: 'compact' });
 });
+
+test('session tree layout: helpers fold under their parent, the open one unfolds it, open nests end with "n ended"', async () => {
+  const { layoutSessionTree, MAX_NEST_INDENT } = await import('../src/lib/sidebarTree.ts');
+  const line = (sessionId: string, depth: number, extra: Record<string, unknown> = {}) =>
+    ({ sessionId, depth, agent: 'claude', mode: 'structured', title: sessionId, state: 'idle', updatedAt: '' , ...extra }) as Parameters<typeof layoutSessionTree>[0][number];
+  const lines = [
+    line('lead', 0, { helpers: 3, endedHelpers: 2 }),
+    line('h1', 1, { parentId: 'lead', helpers: 1 }),
+    line('h1a', 2, { parentId: 'h1', helpers: 1 }),
+    line('h1a1', 3, { parentId: 'h1a', helpers: 1 }),
+    line('h1a1x', 4, { parentId: 'h1a1' }),
+    line('other', 0),
+  ];
+  const shape = (items: ReturnType<typeof layoutSessionTree>) => items.map((i) => (i.kind === 'session' ? `${i.line.sessionId}@${i.indent}${i.expandable ? (i.folded ? '+' : '-') : ''}` : `ended:${i.parentId}:${i.n}@${i.indent}`));
+  assert.equal(MAX_NEST_INDENT, 3);
+  assert.deepEqual(shape(layoutSessionTree(lines, {}, null)), ['lead@0-', 'h1@1-', 'h1a@2-', 'h1a1@3-', 'h1a1x@3', 'ended:lead:2@1', 'other@0']);
+  assert.deepEqual(shape(layoutSessionTree(lines, { lead: true }, null)), ['lead@0+', 'other@0'], 'folded: no helpers and no ended line');
+  assert.deepEqual(shape(layoutSessionTree(lines, { lead: true, h1: true }, 'h1a')), ['lead@0-', 'h1@1-', 'h1a@2-', 'h1a1@3-', 'h1a1x@3', 'ended:lead:2@1', 'other@0'], 'the open session unfolds its parents');
+  assert.deepEqual(shape(layoutSessionTree(lines, { h1a: true }, null)), ['lead@0-', 'h1@1-', 'h1a@2+', 'ended:lead:2@1', 'other@0']);
+});
