@@ -92,16 +92,32 @@ test('menu routes pass the preload check; anything else does not', () => {
   }
 });
 
-test('⌘N and ⌘T are shown but left to the page (the UI hotkeys); menu commands pass the preload check', () => {
-  const { a } = actions();
+test('⌘N, ⌘T and ⌘W are shown but left to the page (the UI hotkeys); menu commands pass the preload check', () => {
+  const { a, calls } = actions();
   for (const platform of ['darwin', 'linux'] as const) {
     const menu = appMenu(platform, a);
-    for (const [label, accel] of [['New Workspace…', 'CmdOrCtrl+N'], ['New Session', 'CmdOrCtrl+T']] as const) {
+    for (const [label, accel] of [['New Workspace…', 'CmdOrCtrl+N'], ['New Session', 'CmdOrCtrl+T'], ['Close Session', 'CmdOrCtrl+W']] as const) {
       const it = byLabel(menu, label);
       assert.equal(it.accelerator, accel);
       assert.equal(it.registerAccelerator, false, `${label} must not swallow the key`);
     }
   }
+  click(byLabel(appMenu('darwin', a), 'Close Session'));
+  assert.deepEqual(calls, ['cmd close-session']);
   for (const c of MENU_COMMANDS) assert.ok(isMenuCommand(c), c);
   for (const bad of ['rm -rf', 'new-prompt', 42, null]) assert.equal(isMenuCommand(bad), false, String(bad));
+});
+
+test('nothing else in the menu takes ⌘W: Close Window is ⇧⌘W, the Window menu has no Close', () => {
+  const { a } = actions();
+  for (const platform of ['darwin', 'linux', 'win32'] as const) {
+    const all = items(appMenu(platform, a));
+    assert.deepEqual(
+      all.filter((m) => m.role === 'close').map((m) => m.accelerator),
+      ['CmdOrCtrl+Shift+W'],
+      platform,
+    );
+    const win = all.find((m) => m.role === 'windowMenu');
+    assert.ok(Array.isArray(win?.submenu), `${platform}: explicit Window menu`);
+  }
 });

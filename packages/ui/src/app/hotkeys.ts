@@ -13,6 +13,7 @@ import { loadJson, saveJson } from '../lib/storage.ts';
 import { openAddWorkspace } from './addWorkspace.ts';
 import { showToast } from './contextMenu.ts';
 import { navigate } from './hooks.ts';
+import { deleteSessionFlow } from './sessionActions.ts';
 
 const KEY = 'bizzi.hotkeys';
 
@@ -119,14 +120,44 @@ export function newSessionHere(store: BizziStore, route: Route): void {
   void startDefaultSession(store, workspaceId);
 }
 
+/** The desktop app (its preload sets `window.bizzi`); in a browser tab the browser owns ⌘W. */
+function inDesktop(): boolean {
+  return typeof window !== 'undefined' && window.bizzi !== undefined;
+}
+
+let closing = false;
+
+/** ⌘W: delete the open session after you confirm; on any other page of the desktop app, close the window. */
+export async function closeSessionHere(store: BizziStore, route: Route): Promise<void> {
+  if (route.name !== 'session') {
+    if (inDesktop()) window.close();
+    return;
+  }
+  const session = store.getState().sessions[route.sessionId];
+  if (!session || closing) return;
+  if (!selectMachineOnline(store.getState(), session.machineId)) {
+    showToast(`${machineName(store, session.machineId)} is offline`, 'err');
+    return;
+  }
+  closing = true;
+  try {
+    await deleteSessionFlow(store, session);
+  } catch (err) {
+    showToast(`Could not delete the session: ${err instanceof Error ? err.message : String(err)}`, 'err');
+  } finally {
+    closing = false;
+  }
+}
+
 function run(id: HotkeyId, store: BizziStore, route: Route): void {
   if (id === 'newWorkspace') newWorkspaceHere(store, route);
-  else newSessionHere(store, route);
+  else if (id === 'newSession') newSessionHere(store, route);
+  else void closeSessionHere(store, route);
 }
 
 /**
  * The shell's listener: hotkeys switched on in Settings › Hotkeys, and desktop menu commands (always).
- * Capture phase, so editors and terminals that handle keys themselves don't swallow ⌘N / ⌘T first.
+ * Capture phase, so editors and terminals that handle keys themselves don't swallow ⌘N / ⌘T / ⌘W first.
  */
 export function useGlobalHotkeys(store: BizziStore, route: Route): void {
   const routeRef = useRef(route);
@@ -137,6 +168,8 @@ export function useGlobalHotkeys(store: BizziStore, route: Route): void {
       const target = e.target instanceof Element ? e.target : null;
       const id = matchHotkey(e, { mac, prefs: hotkeyStore.get(), inTerminal: target?.closest('.xterm') !== null && target !== null });
       if (!id) return;
+      // ⌘W off a session page in a browser tab: the browser's (close tab), not ours.
+      if (id === 'closeSession' && routeRef.current.name !== 'session' && !inDesktop()) return;
       // A dialog is open: leave it alone rather than stack another one on top.
       if (document.querySelector('[role="dialog"][aria-modal="true"]')) return;
       e.preventDefault();

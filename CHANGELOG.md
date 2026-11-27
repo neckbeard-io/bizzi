@@ -12,12 +12,14 @@ Entries are added with the change, not reconstructed at release time; the rules 
 - `/clear` (also `/new`, `/reset`) starts a fresh conversation in the same session with any agent, so the agent forgets everything so far while the session's history stays visible.
 - Long pasted text collapses into a `[Pasted text 1 · 40 lines]` placeholder you can expand or remove before sending, and shows collapsed in the conversation.
 - Hotkeys: ⌘N (Ctrl+N on Windows and Linux) adds a workspace on the machine you're on, and ⌘T (Ctrl+T) starts a session with the default profile in the open workspace. Switch each one on or off in Settings › Hotkeys.
+- ⌘W (Ctrl+W on Windows and Linux) deletes the open session after asking; on other pages of the desktop app it closes the window, and Close Window moved to ⌘⇧W / Ctrl+Shift+W.
 - agy's plan usage in the bottom bar and usage panel: the 5-hour and weekly limits for its Gemini pool and its Claude and GPT pool, checked without spending any quota.
 - Sessions you don't name get a title from your first message instead of staying "Untitled session". Choose a title model (`utilityModel` in `api-providers.json`, or `BIZZI_AUTO_TITLE_MODEL`) to have it summarize the task in a few words instead. Your own names, and titles the agent picks, always win.
 
 ### Changed
 - The sidebar is a file tree: each workspace lists its open sessions (and then its worktrees) with guide lines, and each session shows its state, name and how full its context window is. Fold a workspace to get the old one-line summary back.
 - In the desktop app's File menu, ⌘N / Ctrl+N is now New Workspace and New Prompt moved to ⌘⇧N / Ctrl+Shift+N.
+- A session's delete button is red, and the separate End button is gone from its header; End session is still in the session's ⋯ menu.
 - The bottom bar's usage meters stack the 5-hour limit over the weekly limit as two bars, always in that order, instead of one bar that switched to whichever window was fuller.
 - Quitting, updating or reinstalling the desktop app no longer stops running sessions: the core keeps running and the relaunched app reconnects to it. The core restarts only when an update actually changes it. To stop everything, use **Quit and Stop Sessions** in the menu bar.
 - Sessions only end when you close them. If an agent exits or crashes, the session stays open and your next message picks the conversation back up. A terminal session restarts its process when you press a key.
