@@ -47,11 +47,25 @@ bizzi's UI (`packages/ui/src/index.css`) has tokens Chorus doesn't: status color
 
 1. Rename bizzi's tokens to Chorus's names where they're the same idea (`bg` → `background`, `panel` → `card`, `fg` → `foreground`, `accent` → `primary`, …), so themes from Chorus and Terax drop in unchanged.
 2. Add bizzi-only optional tokens: `ok`, `warn`, `err`, `info`, `code`, `diffAdd`, `diffAddForeground`, `diffDel`, `diffDelForeground`, `diffHunk`, `primarySoft` (tinted primary fill), `primaryText` (accent-colored text: links, accent badges, selected labels), plus `stateWaiting`, `stateWorking`, `stateDone`, `stateFailed`, `stateIdle`.
-3. **Derive what a theme leaves out.** Status and diff colors come from the theme's ANSI palette (red, yellow, green, blue), which every theme with a terminal palette has. Failing that, they come from bizzi's defaults. State colors derive from the status colors (waiting = warn, failed = err, done = info, working = primary, idle = muted foreground). `primaryText` is the primary nudged toward the foreground until it reads at 4.5:1 on the page, the card, the sidebar and `primarySoft`; it equals the primary whenever the primary already passes. A primary can be a fine fill and still too faint as text on its own soft tint: Dracula's `#bd93f9` was 3.5:1 there.
+3. **Derive what a theme leaves out.** Status and diff colors come from the theme's ANSI palette (red, yellow, green, blue), which every theme with a terminal palette has. Failing that, they come from bizzi's defaults. State colors are **not** derived: a theme that doesn't set them gets bizzi's set. Deriving them from the status colors and the primary gave themes look-alike states for colorblind users (a pink primary as "working" next to a blue "done"). `primaryText` is the primary nudged toward the foreground until it reads at 4.5:1 on the page, the card, the sidebar and `primarySoft`; it equals the primary whenever the primary already passes. A primary can be a fine fill and still too faint as text on its own soft tint: Dracula's `#bd93f9` was 3.5:1 there.
 
 **Identity colors** (spec §11.1, built 2026-11-25) aren't theme tokens. `resolveTheme` derives `labels` for every theme from `DEFAULT_LABELS` (one set of eight inks per polarity), nudging each one toward the foreground until it reaches 3:1 on `sidebar`, `card` and `background`. They're written as `--label-<name>`. A theme file can't set them, so a theme can't make two machines look alike.
 
-**Color carries state** (spec §11.1), so state colors must stay readable and distinct in every theme: at least 3:1 against `sidebar` and `card`, and the five clearly distinguishable from each other. When a derived set fails, bizzi's defaults for those tokens are used instead.
+**Color carries state** (spec §11.1), alongside the state symbol's shape, so state colors must stay readable and distinct in every theme: at least 3:1 against `sidebar` and `card`, and the five clearly distinguishable from each other. When a theme's own state colors fail, bizzi's defaults for those tokens are used instead.
+
+bizzi's state colors are vivid and picked to stay apart under color blindness. After simulating full protanopia, deuteranopia and tritanopia (Machado 2009, `simulateCvd` in `color.ts`), every pair is still at least ΔE 18 apart; a test holds the defaults to that.
+
+| State | Dark | Light |
+|---|---|---|
+| waiting | `#ffcc00` amber | `#c27c00` |
+| working (and background) | `#3d8bff` electric blue | `#0a66ff` |
+| done, not yet seen | `#7dffd4` mint | `#0a7d3e` |
+| failed | `#ff3333` hot red | `#ee1144` |
+| idle | `#6c7488` slate | `#868c9c` |
+
+Text on a solid waiting fill (the "Needs you" pill, the `!` in the waiting triangle) is `--state-waiting-foreground`: black or white, whichever reads better on the resolved waiting color.
+
+**Agent colors** (the glyph tile of a session mark) work like identity colors: not theme tokens, one set per polarity in `DEFAULT_AGENT_COLORS`, nudged to 3:1 on `sidebar`, `card` and `background`, written as `--agent-<kind>`. The glyph carries the agent too, so no one has to rely on the hue.
 
 ## 4. Built-in themes
 

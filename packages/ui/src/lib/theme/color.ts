@@ -125,3 +125,37 @@ export function deltaE(a: string, b: string): number {
   const [l2, a2, b2] = toLab(b);
   return Math.hypot(l1 - l2, a1 - a2, b1 - b2);
 }
+
+// --- color vision deficiency (Machado, Oliveira & Fernandes 2009, severity 1.0, linear RGB) -----
+
+export type ColorVision = 'protanopia' | 'deuteranopia' | 'tritanopia';
+
+const CVD: Record<ColorVision, readonly (readonly [number, number, number])[]> = {
+  protanopia: [
+    [0.152286, 1.052583, -0.204868],
+    [0.114503, 0.786281, 0.099216],
+    [-0.003882, -0.048116, 1.051998],
+  ],
+  deuteranopia: [
+    [0.367322, 0.860646, -0.227968],
+    [0.280085, 0.672501, 0.047413],
+    [-0.01182, 0.04294, 0.968881],
+  ],
+  tritanopia: [
+    [1.255528, -0.076749, -0.178779],
+    [-0.078411, 0.930809, 0.147602],
+    [0.004733, 0.691367, 0.3039],
+  ],
+};
+
+/** How `value` looks to someone with full `vision` deficiency (for checking that a palette survives it). */
+export function simulateCvd(value: string, vision: ColorVision): string {
+  const c = flatten(value, '#ffffff');
+  const lin = [channel(c.r), channel(c.g), channel(c.b)] as const;
+  const enc = (v: number) => {
+    const x = Math.min(1, Math.max(0, v));
+    return (x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055) * 255;
+  };
+  const [r, g, b] = CVD[vision].map((row) => enc(row[0] * lin[0] + row[1] * lin[1] + row[2] * lin[2])) as [number, number, number];
+  return toHex({ r, g, b, a: 1 });
+}

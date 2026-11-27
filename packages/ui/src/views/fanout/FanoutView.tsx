@@ -9,7 +9,7 @@ import { navigate, useAction, useIsWide } from '../../app/hooks.ts';
 import { useMachineOnline } from '../../app/machine.ts';
 import { DiffBlock } from '../../components/DiffView.tsx';
 import { Icon } from '../../components/icons.tsx';
-import { AgentMark, Meter } from '../../components/marks.tsx';
+import { AgentMark, Meter, StateSymbol } from '../../components/marks.tsx';
 import { Page, PageHeader } from '../../components/layout.tsx';
 import { Badge, Button, Card, Empty, ErrorText, Spinner, Tabs, cx } from '../../components/ui.tsx';
 import { formatCost } from '../../lib/format.ts';
@@ -80,7 +80,7 @@ export function FanoutView(props: { group: string }): ReactNode {
             className="mb-3"
             value={current?.session.id ?? ''}
             onChange={setTab}
-            items={group.runs.map((r, i) => ({ value: r.session.id, label: `${i + 1} ${AGENT_LABEL[r.session.agent]}`, badge: r.state !== 'ended' ? <span className={cx('text-[10px]', MARK_TEXT[r.state])}>●</span> : null }))}
+            items={group.runs.map((r, i) => ({ value: r.session.id, label: `${i + 1} ${AGENT_LABEL[r.session.agent]}`, badge: r.state !== 'ended' ? <StateSymbol state={r.state} size={10} /> : null }))}
           />
           {current ? <RunCard run={current} /> : null}
         </>

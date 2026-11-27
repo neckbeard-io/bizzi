@@ -1,8 +1,8 @@
 // Theme + mode → every token filled in (theming.md §2, §3 step 3, §8). Pure: the DOM side is apply.ts.
-import { contrast, deltaE, ensureContrast, isDark, mix } from './color.ts';
-import { LABEL_COLORS } from '@bizzi/protocol';
-import type { LabelColor } from '@bizzi/protocol';
-import { DEFAULT_ANSI, DEFAULT_COLORS, DEFAULT_LABELS } from './defaults.ts';
+import { contrast, deltaE, ensureContrast, isDark, mix, textOn } from './color.ts';
+import { AGENT_KINDS, LABEL_COLORS } from '@bizzi/protocol';
+import type { AgentKind, LabelColor } from '@bizzi/protocol';
+import { DEFAULT_AGENT_COLORS, DEFAULT_ANSI, DEFAULT_COLORS, DEFAULT_LABELS } from './defaults.ts';
 import { deriveFromTones } from './fiveTone.ts';
 import { CHORUS_COLOR_KEYS, STATE_KEYS } from './types.ts';
 import type { Ansi16, ColorKey, Density, ResolvedColors, ResolvedTerminal, ResolvedTheme, StateKey, Theme, ThemeColors, ThemeMode, ThemeVariant } from './types.ts';
@@ -64,7 +64,7 @@ export function checkStateColors(states: Record<StateKey, string>, surfaces: { s
   ];
 }
 
-/** Which state keeps its derived color when two collide: earlier wins (waiting and failed carry the most meaning). */
+/** Which state keeps the theme's own color when two collide: earlier wins (waiting and failed carry the most meaning). */
 const STATE_PRIORITY: readonly StateKey[] = ['stateWaiting', 'stateFailed', 'stateWorking', 'stateIdle', 'stateDone'];
 
 /**
@@ -175,20 +175,15 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   if (!c.primaryText) for (const s of [card, bg, colors.sidebar, colors.primarySoft]) primaryText = ensureContrast(primaryText, s, 4.5, fg);
   colors.primaryText = primaryText;
 
-  // State colors (§3): own → derived from status → bizzi defaults → defaults nudged to contrast.
+  // State colors (§3): the theme's own → bizzi's defaults → defaults nudged to contrast. They aren't derived
+  // from the theme's primary or status colors: bizzi's set is picked to stay apart under color blindness, and a
+  // theme's hues aren't (a pink primary as "working" next to a blue "done" reads as one color to many people).
   const surfaces = { sidebar: colors.sidebar, card };
   const own: Partial<Record<StateKey, string>> = {};
   for (const k of STATE_KEYS) if (c[k]) own[k] = c[k];
-  const derived: Record<StateKey, string> = {
-    stateWaiting: colors.warn,
-    stateFailed: colors.err,
-    stateDone: colors.info,
-    stateWorking: primary,
-    stateIdle: colors.mutedForeground,
-  };
   const defaults = pickStates({}, D);
-  let states = settleStates(pickStates(own, derived), defaults, surfaces);
-  if (states.replaced.length > 0) notes.push(`state colors: bizzi defaults for ${states.replaced.map((k) => STATE_LABEL[k]).join(', ')} (derived ones failed contrast or distinctness)`);
+  let states = settleStates(pickStates(own, defaults), defaults, surfaces);
+  if (states.replaced.some((k) => own[k])) notes.push(`state colors: bizzi defaults for ${states.replaced.filter((k) => own[k]).map((k) => STATE_LABEL[k]).join(', ')} (the theme's own failed contrast or distinctness)`);
   if (checkStateColors(states.set, surfaces).length > 0) {
     // Even bizzi's defaults don't fit this sidebar/card: nudge them toward the foreground, which moves
     // away from both surfaces (they sit on the background's side).
@@ -200,6 +195,7 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   Object.assign(colors, states.set);
 
   const labels = resolveLabels(dark, [colors.sidebar, card, bg], fg);
+  const agents = resolveAgentColors(dark, [colors.sidebar, card, bg], fg);
 
   // Terminal (§8): the theme's palette, else derived from its UI colors.
   const termBg = t.background ?? bg;
@@ -223,20 +219,29 @@ export function resolveTheme(theme: Theme, mode: ThemeMode): ResolvedTheme {
   };
 
   const layout = { ...theme.layout, ...variant.layout };
-  return { id: theme.id, name: theme.name, variant: key, dark, colors, terminal, labels, layout, notes };
+  return { id: theme.id, name: theme.name, variant: key, dark, colors, terminal, labels, agents, layout, notes };
 }
 
-/** bizzi's identity palette for this polarity, each nudged toward the foreground until it reads on every surface. */
-export function resolveLabels(dark: boolean, surfaces: readonly string[], fg: string): Record<LabelColor, string> {
-  const base = DEFAULT_LABELS[dark ? 'dark' : 'light'];
-  const out = {} as Record<LabelColor, string>;
-  for (const name of LABEL_COLORS) {
+/** Each ink nudged toward the foreground until it clears LABEL_MIN_CONTRAST on every surface. */
+function readableInks<K extends string>(names: readonly K[], base: Record<K, string>, surfaces: readonly string[], fg: string): Record<K, string> {
+  const out = {} as Record<K, string>;
+  for (const name of names) {
     let c = base[name];
     // Twice round: a step that fixes one surface can't undo another (they sit on the same side of fg).
     for (let i = 0; i < 2; i++) for (const s of surfaces) c = ensureContrast(c, s, LABEL_MIN_CONTRAST, fg);
     out[name] = c;
   }
   return out;
+}
+
+/** bizzi's identity palette for this polarity, each nudged toward the foreground until it reads on every surface. */
+export function resolveLabels(dark: boolean, surfaces: readonly string[], fg: string): Record<LabelColor, string> {
+  return readableInks(LABEL_COLORS, DEFAULT_LABELS[dark ? 'dark' : 'light'], surfaces, fg);
+}
+
+/** Agent identity colors for this polarity, nudged the same way. */
+export function resolveAgentColors(dark: boolean, surfaces: readonly string[], fg: string): Record<AgentKind, string> {
+  return readableInks(AGENT_KINDS, DEFAULT_AGENT_COLORS[dark ? 'dark' : 'light'], surfaces, fg);
 }
 
 /** Phones keep at least comfortable density for 44 px hit targets (§7, spec §11.1). */
@@ -261,6 +266,9 @@ export function themeCssVars(r: ResolvedTheme): Record<string, string> {
   out['--terminal-cursor-accent'] = t.cursorAccent;
   out['--terminal-selection'] = t.selection;
   for (const [name, v] of Object.entries(r.labels)) out[`--label-${name}`] = v;
+  for (const [name, v] of Object.entries(r.agents)) out[`--agent-${name}`] = v;
+  // Text on a solid waiting fill (the "Needs you" badge, the ! in the waiting symbol).
+  out['--state-waiting-foreground'] = textOn(r.colors.stateWaiting, '#000000', '#ffffff');
   const l = r.layout;
   if (l.fontHeading) out['--font-heading'] = l.fontHeading;
   if (l.composerRadius) out['--composer-radius'] = l.composerRadius;

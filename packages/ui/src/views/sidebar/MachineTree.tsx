@@ -29,13 +29,13 @@ import { navigate, useLongPress, useMediaQuery } from '../../app/hooks.ts';
 import { Icon } from '../../components/icons.tsx';
 import { WorkspaceTile } from '../../components/labels.tsx';
 import { PresenceDot } from '../../components/MachineSwitcher.tsx';
-import { AgentMark, MarkCount, MarkDot } from '../../components/marks.tsx';
+import { AgentMark, MarkCount, MarkDot, NeedsYouBadge, StateSymbol, agentMarkWidth } from '../../components/marks.tsx';
 import { Modal, cx } from '../../components/ui.tsx';
 import { formatRelative, keepAwakeSummary } from '../../lib/format.ts';
 import { HOTKEYS, hotkeyLabel } from '../../lib/hotkeys.ts';
 import { LABEL_COLOR_NAME, labelVar, machineTagsLabel } from '../../lib/labels.ts';
 import { routeHref } from '../../lib/router.ts';
-import { AGENT_LABEL, MARK_LABEL, MARK_SYMBOL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
+import { AGENT_LABEL, MARK_LABEL, MARK_TEXT, aheadBehind, pendingUpdatesLabel, visibleMarks } from '../../lib/states.ts';
 import { MAX_NEST_INDENT, groupWorkspaces, layoutSessionTree, readCollapsed } from '../../lib/sidebarTree.ts';
 import type { WorkspaceGroup } from '../../lib/sidebarTree.ts';
 import { loadJson, saveJson } from '../../lib/storage.ts';
@@ -391,9 +391,7 @@ function WorkspaceNode(props: {
           className={cx('flex items-center gap-1.5 truncate rounded-md pr-2 pl-10 text-xs text-muted hover:text-fg', phone ? 'min-h-11 hover:bg-panel-2' : 'h-6 hover:bg-sidebar-accent/70')}
           title={`${AGENT_LABEL[row.urgent.agent]}: ${row.urgent.text}`}
         >
-          <span className={cx('shrink-0', MARK_TEXT[row.urgent.state])} aria-label={MARK_LABEL[row.urgent.state]}>
-            {MARK_SYMBOL[row.urgent.state]}
-          </span>
+          <StateSymbol state={row.urgent.state} size={12} />
           <span className="min-w-0 truncate">
             {AGENT_LABEL[row.urgent.agent]}: {row.urgent.text}
           </span>
@@ -571,7 +569,12 @@ function SessionLeaf(props: { line: SessionBreakdownLine; indent: number; expand
           ) : null}
           {ctx.known ? <ContextBar view={ctx} /> : null}
         </span>
-        {reason ? <span className={cx('-mt-1 block truncate pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: phone ? 24 : 20 }}>{reason}</span> : null}
+        {reason || l.state === 'waiting' ? (
+          <span className={cx('-mt-1 flex min-w-0 items-center gap-1.5 pb-1 text-[11px]', l.state === 'background' ? 'text-muted' : MARK_TEXT[l.state])} style={{ paddingLeft: agentMarkWidth(phone ? 18 : 14) + 6 }}>
+            {l.state === 'waiting' ? <NeedsYouBadge /> : null}
+            {reason ? <span className="min-w-0 truncate">{reason}</span> : null}
+          </span>
+        ) : null}
       </a>
     </div>
   );
@@ -678,8 +681,8 @@ function Marks(props: { row: WorkspaceRowModel; variant: Variant; dots: boolean 
   }
   const { shown, more } = visibleMarks(row.marks, props.variant === 'phone' ? 3 : 4);
   return (
-    <span className={cx('flex shrink-0 items-center', props.dots ? 'gap-1' : 'gap-1.5')}>
-      {shown.map((m) => (props.dots ? <MarkDot key={m.sessionId} state={m.state} /> : <AgentMark key={m.sessionId} agent={m.agent} state={m.state} helpers={m.helpers} size={props.variant === 'phone' ? 20 : 16} />))}
+    <span className={cx('flex shrink-0 items-center', props.dots ? 'gap-1' : 'gap-2.5')}>
+      {shown.map((m) => (props.dots ? <MarkDot key={m.sessionId} state={m.state} /> : <AgentMark key={m.sessionId} agent={m.agent} state={m.state} helpers={m.helpers} size={props.variant === 'phone' ? 20 : 16} compact />))}
       {more > 0 ? <span className="text-[11px] text-muted tabular-nums">+{more}</span> : null}
     </span>
   );
